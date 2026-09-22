@@ -11,6 +11,7 @@ service cloud.firestore {
     function isSuperAdmin() {
       return request.auth != null &&
              (request.auth.uid == 'jzQgCHzaObeUbeYklTLtQQh03G53' ||
+              request.auth.uid == 'LfWAXxvz3ihDd30hLdv5vBgYq6w2' ||
               (request.auth.token != null && 'email' in request.auth.token && request.auth.token.email == 'belloimam431@gmail.com'));
     }
 
