@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import Groq from "groq-sdk";
 
+export const maxDuration = 300; // Allow up to 5 minutes for large files
+
+
 export async function POST(req: NextRequest) {
   try {
     if (!process.env.GROQ_API_KEY) {

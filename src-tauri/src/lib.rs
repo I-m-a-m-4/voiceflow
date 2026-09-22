@@ -32,6 +32,27 @@ fn validate_subscription(access_level: String, trial_expires_at: i64) -> bool {
     trial_expires_at > now
 }
 
+#[tauri::command]
+fn set_detectable(window: tauri::Window, detectable: bool) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_NONE};
+        
+        let hwnd = window.hwnd().map_err(|e| e.to_string())?;
+        // Convert the pointer/handle properly. In Tauri 2, hwnd is typically `HWND(isize)` or `*mut c_void`.
+        // We cast it to pointer then to isize to safely handle it.
+        let hwnd_ptr = hwnd as *mut _ as isize;
+        
+        unsafe {
+            let affinity = if detectable { WDA_NONE } else { WDA_EXCLUDEFROMCAPTURE };
+            let _ = SetWindowDisplayAffinity(HWND(hwnd_ptr as _), affinity);
+        }
+    }
+    
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   #[cfg(target_os = "android")]
@@ -48,6 +69,7 @@ pub fn run() {
         calculate_secure_loyalty, 
         calculate_royalty, 
         validate_subscription,
+        set_detectable,
         win_grid::list_desktop_windows,
         win_grid::read_desktop_grid
     ])
@@ -66,13 +88,31 @@ pub fn run() {
         tauri_plugin_global_shortcut::Builder::new()
             .with_handler(|app, shortcut, event| {
                 if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-                    if let Some(window) = app.get_webview_window("widget") {
-                        if window.is_visible().unwrap_or(false) {
-                            let _ = window.hide();
-                        } else {
-                            let _ = window.show();
-                            let _ = window.set_focus();
+                    use tauri_plugin_global_shortcut::Shortcut;
+                    use std::str::FromStr;
+                    
+                    let toggle = Shortcut::from_str("CommandOrControl+`").unwrap();
+                    let ask = Shortcut::from_str("CommandOrControl+Enter").unwrap();
+                    let clear = Shortcut::from_str("CommandOrControl+R").unwrap();
+                    let session = Shortcut::from_str("CommandOrControl+Shift+\\").unwrap();
+
+                    if shortcut == &toggle {
+                        if let Some(window) = app.get_webview_window("main") {
+                            if window.is_visible().unwrap_or(false) {
+                                let _ = window.hide();
+                            } else {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
                         }
+                    } else if shortcut == &ask {
+                        app.emit("shortcut-ask", {}).unwrap_or(());
+                    } else if shortcut == &clear {
+                        app.emit("shortcut-clear", {}).unwrap_or(());
+                    } else if shortcut == &session {
+                        app.emit("shortcut-session", {}).unwrap_or(());
+                    } else {
+                        app.emit("shortcut-other", shortcut.to_string()).unwrap_or(());
                     }
                 }
             })
@@ -164,12 +204,28 @@ pub fn run() {
         {
             use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
             use std::str::FromStr;
-            if let Ok(shortcut) = Shortcut::from_str("CommandOrControl+Shift+Space") {
-                let _ = app.app_handle().plugin(tauri_plugin_global_shortcut::Builder::new().build());
-                if let Err(e) = app.app_handle().global_shortcut().register(shortcut) {
-                    println!("Zeneva: WARNING - Failed to register global shortcut: {:?}", e);
-                } else {
-                    println!("Zeneva: Global shortcut registered successfully.");
+            
+            let shortcuts = vec![
+                "CommandOrControl+`",
+                "CommandOrControl+Enter",
+                "CommandOrControl+R",
+                "CommandOrControl+Shift+\\",
+                "CommandOrControl+Up",
+                "CommandOrControl+Down",
+                "CommandOrControl+Left",
+                "CommandOrControl+Right",
+                "CommandOrControl+Shift+Up",
+                "CommandOrControl+Shift+Down"
+            ];
+            
+            let _ = app.app_handle().plugin(tauri_plugin_global_shortcut::Builder::new().build());
+            for s in shortcuts {
+                if let Ok(shortcut) = Shortcut::from_str(s) {
+                    if let Err(e) = app.app_handle().global_shortcut().register(shortcut) {
+                        println!("Zeneva: WARNING - Failed to register {}: {:?}", s, e);
+                    } else {
+                        println!("Zeneva: Global shortcut {} registered.", s);
+                    }
                 }
             }
         }

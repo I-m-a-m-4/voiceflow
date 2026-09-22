@@ -14,6 +14,11 @@ const appVersion = JSON.parse(
 ).version as string;
 
 const nextConfig: NextConfig = {
+  experimental: {
+    serverActions: {
+      bodySizeLimit: '50mb',
+    },
+  },
   env: {
     NEXT_PUBLIC_APP_VERSION: appVersion,
   },
