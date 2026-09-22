@@ -1,0 +1,21 @@
+{
+    "name": "Voiceflow",
+    "short_name": "Voiceflow",
+    "description": "The all-in-one business management solution.",
+    "start_url": "/dashboard",
+    "display": "standalone",
+    "background_color": "#241e1b",
+    "theme_color": "#241e1b",
+    "icons": [
+        {
+            "src": "/icon-pwa.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "/icon-pwa.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        }
+    ]
+}
