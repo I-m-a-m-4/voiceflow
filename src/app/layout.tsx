@@ -60,25 +60,20 @@ export const metadata: Metadata = {
   // param, add hreflang then — claiming it now would point every language at
   // the same English HTML.
   title: {
-    default: 'Voiceflow - Advanced Inventory Management & Global POS Operating System',
+    default: 'Voiceflow - Undetectable AI Notetaker & Live Meeting Assistant',
     template: '%s | Voiceflow'
   },
-  description: 'Voiceflow is a borderless retail operating system unifying inventory, offline-capable POS, analytics, and USD/NGN payments into a powerful platform for modern retailers and mini-marts.',
+  description: 'Voiceflow takes perfect meeting notes, transcribes live audio, and provides undetectable real-time AI assistance during calls.',
   keywords: [
-    'inventory management software', 
-    'retail pos system', 
-    'cloud pos nigeria', 
-    'multi-currency billing', 
-    'usd payment gateway for retail', 
-    'pharmacy inventory software', 
-    'boutique management system', 
-    'business analytics dashboard', 
-    'global retail OS',
-    'pos for mini-marts',
-    'offline capable point of sale',
-    'inventory system with no subscription options',
-    'voiceflow vs quickbooks pos',
-    'pos for open markets'
+    'ai meeting notetaker', 
+    'undetectable ai meeting assistant', 
+    'real time meeting answers', 
+    'stealth meeting assistant', 
+    'zoom ai notetaker', 
+    'google meet transcription', 
+    'teams meeting assistant', 
+    'ai live transcript', 
+    'stealth screen ai'
   ],
   applicationName: 'Voiceflow',
   authors: [{ name: 'Voiceflow Team' }],
@@ -103,8 +98,8 @@ export const metadata: Metadata = {
     title: 'Voiceflow',
   },
   openGraph: {
-    title: 'Voiceflow - Advanced Inventory Management & Global POS',
-    description: 'Track every product, capture every sale, and scale globally. Voiceflow unifies inventory, analytics, and multi-currency payments for the modern retailer.',
+    title: 'Voiceflow - Undetectable AI Notetaker & Live Meeting Co-Pilot',
+    description: 'Capture every meeting detail and get instant, undetectable live answers during Zoom, Teams, and Google Meet calls.',
     url: siteUrl,
     siteName: 'Voiceflow',
     images: [
@@ -113,7 +108,7 @@ export const metadata: Metadata = {
         width: 1200,
         height: 630,
         type: 'image/png',
-        alt: 'Voiceflow Retail Operating System',
+        alt: 'Voiceflow AI Meeting Notetaker',
       },
     ],
     locale: 'en_US',
@@ -243,6 +238,7 @@ export default function RootLayout({
         <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
         <meta name="theme-color" content="#0f0f0f" media="(prefers-color-scheme: dark)" />
         <Script src="https://code.iconify.design/iconify-icon/2.1.0/iconify-icon.min.js" strategy="afterInteractive" />
+        <Script src="https://checkout.flutterwave.com/v3.js" strategy="afterInteractive" />
         
         {/* Google Analytics */}
         {process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID && (

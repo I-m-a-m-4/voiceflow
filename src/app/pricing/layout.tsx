@@ -1,14 +1,14 @@
 import { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Pricing Plans | Voiceflow Retail OS',
-  description: 'Explore transparent pricing for Voiceflow. From our Starter plan to Enterprise-grade infrastructure, find the perfect retail operating system to scale your business globally.',
+  title: 'Pricing Plans | Voiceflow AI Notetaker',
+  description: 'Explore transparent pricing for Voiceflow AI Notetaker & Stealth Co-Pilot. From Free Starter to Pro & Team plans.',
   alternates: {
     canonical: '/pricing'
   },
   openGraph: {
-    title: 'Voiceflow Pricing - Flexible Plans for Growth-Minded Retailers',
-    description: 'Start for free or scale globally with our Pro and Enterprise tiers. No hidden fees, just high-performance retail software for inventory and POS management.',
+    title: 'Voiceflow Pricing - Flexible Plans for AI Meeting Intelligence',
+    description: 'Start for free or upgrade to Pro for unlimited meeting transcriptions, real-time stealth Q&A, and screen analysis.',
   }
 };
 

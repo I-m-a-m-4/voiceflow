@@ -56,18 +56,11 @@ export default function MeetingsFeed() {
         >
           Action Items
         </button>
-        <div className="ml-auto flex items-center gap-2">
-          <button onClick={() => fetchMeetings(false)} className="p-2 text-muted-foreground hover:text-foreground rounded-full hover:bg-muted transition-colors" title="Refresh">
-             <RefreshCw size={16} className={isLoading ? 'animate-spin text-voiceflow-orange' : ''} />
-          </button>
-          <button className="p-2 text-muted-foreground hover:text-foreground rounded-full hover:bg-muted">
-            <Settings2 size={18} />
-          </button>
-        </div>
+        {/* Icons removed per user request */}
       </div>
 
       {/* Main Content Area */}
-      <div className="p-8 max-w-4xl mx-auto w-full pb-32">
+      <div className="p-8 w-full pb-32">
         <div className="flex items-center justify-between mb-8">
           <h1 className="text-2xl font-bold text-foreground">Recent Transcripts</h1>
           <button className="flex items-center gap-1 text-sm font-bold text-foreground hover:bg-muted px-3 py-1.5 rounded border border-border">
@@ -81,10 +74,10 @@ export default function MeetingsFeed() {
             <p>Loading your meetings...</p>
           </div>
         ) : meetings.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-muted-foreground border-2 border-dashed border-border rounded-2xl bg-muted/30">
-            <FileText className="w-12 h-12 text-muted-foreground/50 mb-4" />
-            <h3 className="text-lg font-bold text-foreground mb-1">No meetings yet</h3>
-            <p className="text-sm">Click "Start Recording" in the right panel to capture your first meeting.</p>
+          <div className="flex flex-col items-center justify-center min-h-[50vh] text-muted-foreground border-2 border-dashed border-border rounded-2xl bg-muted/30 p-12">
+            <FileText className="w-20 h-20 text-muted-foreground/50 mb-6" />
+            <h3 className="text-2xl font-bold text-foreground mb-2">No meetings yet</h3>
+            <p className="text-base text-muted-foreground">Click "Start Recording" in the right panel to capture your first meeting.</p>
           </div>
         ) : (
           <div className="space-y-6">

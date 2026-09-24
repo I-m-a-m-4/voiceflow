@@ -177,7 +177,13 @@ export default function HomeClient() {
             </div>
 
             {/* Hero Interactive Desktop App Window Mockup */}
-            <div className="relative mt-12 w-full max-w-5xl rounded-3xl border border-white/20 bg-zinc-950/90 shadow-[0_25px_70px_rgba(0,0,0,0.8)] backdrop-blur-3xl overflow-hidden text-left">
+            <div 
+              className="relative mt-12 w-full max-w-5xl rounded-3xl border border-white/20 bg-zinc-950/90 shadow-[0_25px_70px_rgba(0,0,0,0.8)] backdrop-blur-3xl overflow-hidden text-left"
+              style={{ 
+                WebkitMaskImage: 'linear-gradient(to right, transparent, black 15%, black 85%, transparent)',
+                maskImage: 'linear-gradient(to right, transparent, black 15%, black 85%, transparent)' 
+              }}
+            >
               {/* Native Window Titlebar */}
               <div className="flex items-center justify-between px-5 py-3.5 bg-zinc-900/90 border-b border-white/10 text-xs text-zinc-400">
                 <div className="flex items-center gap-3">

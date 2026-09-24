@@ -27,7 +27,7 @@ export default function AuthenticatedLayout({
       <AppSidebar />
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <AppHeader />
-        <main className="flex-1 overflow-hidden relative">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden relative">
           {children}
         </main>
       </div>

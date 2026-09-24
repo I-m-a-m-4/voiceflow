@@ -27,21 +27,37 @@ export async function POST(req: NextRequest) {
       systemPrompt = "You are an AI assistant specialized in structuring meeting transcripts. Your task is to extract:\n1. Executive Summary (3-5 bullets)\n2. Action Items (with owners if specified)\n3. Key Decisions.\nFormat the output in clean Markdown.";
     }
 
-    const completion = await groq.chat.completions.create({
-      messages: [
-        {
-          role: "system",
-          content: systemPrompt,
-        },
-        {
-          role: "user",
-          content: text,
-        },
-      ],
-      model: "llama-3.1-70b-versatile",
-      temperature: 0.2,
-      max_tokens: 2048,
-    });
+    const modelsToTry = ["llama3-70b-8192", "llama-3.1-8b-instant", "llama3-8b-8192", "mixtral-8x7b-32768"];
+    let completion = null;
+    let lastError = null;
+
+    for (const model of modelsToTry) {
+      try {
+        completion = await groq.chat.completions.create({
+          messages: [
+            {
+              role: "system",
+              content: systemPrompt,
+            },
+            {
+              role: "user",
+              content: text,
+            },
+          ],
+          model: model,
+          temperature: 0.2,
+          max_tokens: 2048,
+        });
+        if (completion) break;
+      } catch (err: any) {
+        console.warn(`Model ${model} failed, trying fallback:`, err.message);
+        lastError = err;
+      }
+    }
+
+    if (!completion) {
+      throw lastError || new Error("All Groq summarization models failed");
+    }
 
     const outputText = completion.choices[0]?.message?.content || "";
 

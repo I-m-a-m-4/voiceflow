@@ -34,22 +34,9 @@ fn validate_subscription(access_level: String, trial_expires_at: i64) -> bool {
 
 #[tauri::command]
 fn set_detectable(window: tauri::Window, detectable: bool) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    {
-        use windows::Win32::Foundation::HWND;
-        use windows::Win32::UI::WindowsAndMessaging::{SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_NONE};
-        
-        let hwnd = window.hwnd().map_err(|e| e.to_string())?;
-        // Convert the pointer/handle properly. In Tauri 2, hwnd is typically `HWND(isize)` or `*mut c_void`.
-        // We cast it to pointer then to isize to safely handle it.
-        let hwnd_ptr = hwnd as *mut _ as isize;
-        
-        unsafe {
-            let affinity = if detectable { WDA_NONE } else { WDA_EXCLUDEFROMCAPTURE };
-            let _ = SetWindowDisplayAffinity(HWND(hwnd_ptr as _), affinity);
-        }
-    }
-    
+    // In the frontend, 'detectable' = true means Stealth Mode is ON.
+    // Therefore, if true, we want to protect the content (WDA_EXCLUDEFROMCAPTURE / NSWindowSharingNone).
+    window.set_content_protected(detectable).map_err(|e| e.to_string())?;
     Ok(())
 }
 

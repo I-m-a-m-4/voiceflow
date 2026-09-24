@@ -18,6 +18,7 @@ const nextConfig: NextConfig = {
     serverActions: {
       bodySizeLimit: '50mb',
     },
+    serverMinification: false,
   },
   env: {
     NEXT_PUBLIC_APP_VERSION: appVersion,
@@ -66,9 +67,7 @@ const nextConfig: NextConfig = {
       })),
     ];
   },
-  experimental: {
-    serverMinification: false,
-  },
+
   typescript: {
     ignoreBuildErrors: true,
   },

@@ -14,9 +14,9 @@ export function useAudioRecorder() {
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const displayStreamRef = useRef<MediaStream | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  
-  // VAD refs
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -26,6 +26,7 @@ export function useAudioRecorder() {
     try {
       // 1. Get Microphone Audio
       const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micStreamRef.current = micStream;
       let finalStream = micStream;
 
       // 2. Combine with System Audio (if Granola mode)
@@ -35,6 +36,7 @@ export function useAudioRecorder() {
             video: true, // required to get display media, we'll ignore it
             audio: true,
           });
+          displayStreamRef.current = displayStream;
           
           const audioContext = new AudioContext();
           const dest = audioContext.createMediaStreamDestination();
@@ -50,9 +52,8 @@ export function useAudioRecorder() {
           
           finalStream = dest.stream;
 
-          // Keep display stream around to stop it later
+          // Keep display stream around to stop video tracks immediately
           displayStream.getVideoTracks().forEach(track => {
-             // stop video track immediately since we only want audio
              track.stop();
           });
         } catch (e) {
@@ -144,15 +145,38 @@ export function useAudioRecorder() {
     // Cleanup VAD
     if (vadLoopRef.current) cancelAnimationFrame(vadLoopRef.current);
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-    if (audioCtxRef.current) audioCtxRef.current.close();
+    if (audioCtxRef.current) {
+      audioCtxRef.current.close().catch(() => {});
+      audioCtxRef.current = null;
+    }
     
-    // Stop all tracks
+    // Stop all microphone tracks
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach(track => track.stop());
+      micStreamRef.current = null;
+    }
+
+    // Stop all system audio display stream tracks
+    if (displayStreamRef.current) {
+      displayStreamRef.current.getTracks().forEach(track => track.stop());
+      displayStreamRef.current = null;
+    }
+
+    // Stop all combined tracks
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
     }
+
     setIsRecording(false);
     setIsPausedBySilence(false);
   }, []);
+
+  useEffect(() => {
+    return () => {
+      stopRecording();
+    };
+  }, [stopRecording]);
 
   const processAudio = async (blob: Blob, type: "dictation" | "meeting") => {
     setIsProcessing(true);

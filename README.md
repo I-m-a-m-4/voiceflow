@@ -1,99 +1,61 @@
-# 🌌 VOICEFLOW | Industrial Retail Operating System (POS & ERP)
+# 🌌 VOICEFLOW | Undetectable AI Meeting Notetaker & Real-Time Co-Pilot
 
 ![Voiceflow Platform](https://voiceflow.space/logo.png)
 
-Welcome to **Voiceflow**, a borderless, industrial-grade retail operating system built for high-performance retail operations, multi-store POS, predictive inventory analytics, and local-first reliability. Voiceflow is designed to unify your physical brick-and-mortar storefronts and digital inventory into a single, cohesive, sub-10ms operational engine.
+Welcome to **Voiceflow**, an undetectable, real-time **AI Meeting Notetaker & Stealth Assistant** built for executive calls, technical interviews, and team syncs. Voiceflow runs live during your meetings (Zoom, Google Meet, Teams) to capture transcripts, summarize key takeaways, and provide real-time AI assistance via screen & audio analysis.
 
 ---
 
 ## 🚀 Key Platforms & Deployment Targets
 
-1. **Desktop Workstation (Windows/macOS)**
-   * Built with **Tauri 2.0** and **Next.js 15** for native, ultra-lightweight performance.
-   * Directly interfaces with physical hardware (thermal receipt printers, barcode scanners, cash drawers).
-   * Sub-10ms UI responsiveness, managing 10k+ SKUs completely offline.
+1. **Desktop Workstation & Overlay (Windows/macOS)**
+   * Built with **Tauri 2.0** and **Next.js 15** for native, ultra-lightweight performance and low-latency desktop windowing.
+   * Runs a floating stealth widget overlay (`MeetingWidget`) that sits seamlessly on top of active call windows.
 
-2. **Tactical Mobile Manager (Android)**
-   * Multi-platform Progressive Web App (PWA) compiled natively or deployed as a PWA using `@ducanh2912/next-pwa`.
-   * Enables on-the-floor inventory auditing, direct sales scanning via camera, and real-time push alerts.
-
-3. **Cloud Web Portal & Admin Console**
-   * Access global analytics, multi-tenant reports, and administrative management panels from any modern browser.
+2. **Web Portal & Dashboard**
+   * Access saved meeting transcripts, structured AI summaries, action item trackers, and custom knowledge bases from any browser.
 
 ---
 
 ## 🛠️ Technical Stack & Architecture
 
-> **Full architecture write-up: [`docs/technology.md`](docs/technology.md)** —
-> what every piece is for, why it was chosen, and the operational details that
-> have cost real debugging time. The summary below is the shape of it.
-
-Voiceflow is built on a modern, robust, resilient stack designed for secure multi-tenant execution and lightning-fast speed:
+Voiceflow is built on a modern, robust, resilient stack:
 
 ```mermaid
 graph TD
     A[Voiceflow Client Interface] --> B[Next.js 15 + React 19]
     B --> C{Platform Context}
-    C -->|Desktop App| D[Tauri 2.0 Core]
-    C -->|PWA / Web Portal| E[Web Browser Engine]
+    C -->|Desktop App| D[Tauri 2.0 Core Overlay]
+    C -->|Web Portal| E[Web Browser Engine]
     
-    D --> F[Tauri SQL Plugin - Local SQLite]
+    D --> F[Screen Capture & Audio Pipeline]
     D --> G[Tauri Stronghold - Secure Key Vault]
-    D --> H[Local Peripherals - Printers/Scanners]
     
-    E --> I[Service Workers - Offline PWA Cache]
-    
-    B --> J[Zen AI Engine - Genkit + Google GenAI]
-    B --> K[Firebase SDK v11 - Firestore Real-time Sync]
-    K --> L[(Cloud Firestore Database)]
+    B --> H[Zen AI Engine - Genkit + Google GenAI]
+    B --> I[Firebase SDK v11 - Firestore Sync]
+    I --> J[(Cloud Firestore - Meetings Database)]
 ```
 
-### 1. Front-end Framework & Desktop Shell
-* **Next.js 15.5.9** (using App Router, Turbopack, and **React 19**) for state-of-the-art server/client components and fast rendering.
-* **Tauri 2.0** (Rust-backed desktop framework) for native compilation. It provides highly secure and lightweight native OS windows, running with a fraction of the memory footprint of Electron.
-* **Framer Motion** for premium, fluid transitions and subtle micro-animations that improve tactile UX.
+### 1. Front-end Framework & Desktop Overlay
+* **Next.js 15.5.9** (App Router, Turbopack, **React 19**) for high-performance UI rendering.
+* **Tauri 2.0** (Rust-backed desktop framework) for transparent window overlays, low-footprint desktop execution, and system hotkeys.
+* **Framer Motion** for smooth widget transitions and subtle micro-animations.
 
-### 2. Local-First Engine & Storage
-* **Tauri SQL Plugin (`@tauri-apps/plugin-sql`)**: Local **SQLite** database mirror. Voiceflow is fully functional offline; sales and inventory updates are performed instantly against the local cache and queued for sync to Firestore.
-* **Firebase SDK v11.9.1**: Connects client states to **Cloud Firestore** for multi-tenant, cloud-synced storage when internet connectivity is active. Firestore is the source of truth; the local SQLite database is a mirror of it, not a second store.
-* **Firebase Admin SDK v13.6.1**: Provides multi-tenant data validation, user authorization, and secure back-end operations.
-* **Upstash Redis (Admin Caching Engine)**: The global platform admin dashboard is powered by a custom Next.js API Route utilizing `@upstash/redis`. Instead of the browser pulling 10,000+ receipts and users on every load, a dedicated Serverless Function aggregates all global GMV, MRR, ARR, and sales velocity data via the Firebase Admin SDK. This massive data object is then serialized and cached in Upstash Redis.
-  * **Result**: Admin payload size drops from megabytes to kilobytes.
-  * **Speed**: Admin Dashboard and Achievements screens load globally in under 200ms without triggering massive Firestore read quotas.
-  * **Invalidation**: The cache operates on a TTL, and admins can trigger a forced cache invalidation using the platform interface to instantly sync real-time data.
+### 2. Live Audio Listening & Stealth Q&A
+* **Real-time Screen & Transcript Analysis (`/api/ask-screen`)**: Captures screen contexts and pairs them with incoming transcript snippets to answer live prompts (*"What should I say next?"*, *"Fact check this"*).
+* **Automated Meeting Notetaker**: Detects active call sessions and transcribes audio directly into structured summaries and action items.
 
-### 3. Zen AI Engine (Predictive Analytics)
-* **Genkit v1.20.0** combined with **Google GenAI** (`@genkit-ai/google-genai`) for the deterministic analysis side, and the **Vercel AI SDK** (`ai` v7 + `@ai-sdk/react` v4) for the streaming chat at `/ai-insights`.
-* **41 tools** in `src/app/api/chat/tools.ts` give the chat typed access to the business's own data.
-* **Core Capabilities**: Analyzes product sales velocity, highlights "trapped cash" in slow-moving inventory, identifies potential duplicates or pricing discrepancies, and provides deterministic replenishment suggestions.
-* **Two hard boundaries**: Zen AI **never writes on the server** (a `propose*` tool returns a card; the write happens client-side after the owner approves) and **never stores prompt text** (usage analytics record an intent label plus an allow-listed keyword, never the prompt). See [`docs/zen-ai.md`](docs/zen-ai.md).
-
-### 4. Peripherals, Printing & Imaging
-* **`html5-qrcode`**: Leverages device camera feeds for high-fidelity, real-time barcode scanning.
-* **`react-barcode`** & **`qrcode.react`**: Programmatic generation of physical barcodes and dynamic payment/receipt QR codes.
-* **`html2canvas`** & **`jspdf`**: Client-side rendering of beautiful receipts, which can be instantly compiled into PDFs and sent to thermal or system printers.
-
-### 5. Security & Cryptography
-* **`@tauri-apps/plugin-stronghold`**: Rust-implemented secure, encrypted key-value vault to protect enterprise API credentials, offline session keys, and database secrets.
-* **`crypto-js`** & **`otpauth`**: Cryptographically secure OTP (One-Time Password) generation, multi-factor authentication, and locally encrypted transaction states.
-
-### 6. Communications & Notifications
-* **Resend & Nodemailer**: Enterprise email dispatching for digital receipts, audit logs, and critical operational reports.
-* **Tauri Notification Plugin (`@tauri-apps/plugin-notification`)**: Native system notification integrations for desktop platforms.
-
-### 7. Marketing Recorder
-* The admin area's **Marketing Studio** drives a headless-Chrome recorder (`scripts/record/`) that logs into the real app and records real flows — POS, inventory, Zen AI — with a custom cursor, click effects, camera punch-ins, a phone chassis for mobile takes, and synthesized or supplied audio.
-* Built on **raw Chrome DevTools Protocol** over Node's global `WebSocket` (no Playwright), with ffmpeg as the only external dependency. Videos are real footage of the app, not animations.
-* See [`scripts/record/README.md`](scripts/record/README.md).
+### 3. Storage & AI Capabilities
+* **Firebase Cloud Firestore**: Multi-tenant database for storing user meeting records (`meetings` and `meeting_checkins`).
+* **Genkit v1.20.0 + Google GenAI**: Powers real-time AI model calls and structured meeting analytics.
 
 ---
 
 ## 🛡️ Core Capabilities & Modules
 
-* **Multi-Tenant Inventory Management**: Complete product catalogs bound securely by `businessId`. Supports product variants (grouped by same product name with separate SKU/price matrices) and seamless CSV bulk importing/exporting with `papaparse`.
-* **Guided POS Workflow**: Intuitive cash-register workflow supporting fluid cart item increments, coupon or discount processing, customer profile associations, and instant receipt generation.
-* **Real-time Inventory Troubleshooter**: Algorithmic scanner checking for missing pricing, lack of categorized products, or redundant stock.
-* **Role-Based Access Control (RBAC)**: Fine-grained user access management restricting screens and workflows based on roles (`admin`, `manager`, `vendor_operator`).
+* **AI Meeting Notetaker**: Automated meeting listening, live transcription, meeting summaries, and action item extraction.
+* **Stealth Co-Pilot Widget**: Undetectable overlay widget over Zoom, Meet, or Teams for discreet Q&A and prompt recommendations during calls.
+* **Real-time Answers & Intelligence**: Centralized dashboard to view meeting histories and search through transcripts.
 
 ---
 

@@ -1,6 +1,6 @@
 # Voiceflow
 
-Tauri + Next.js retail POS/ERP. Desktop (Windows/macOS), Android, iOS.
+Tauri + Next.js Undetectable AI Meeting Notetaker & Real-Time Co-Pilot. Desktop (Windows/macOS), Web, Mobile.
 
 `docs/technology.md` is the map of the whole stack — what each piece is for and
 why it is there. `docs/blueprint.md` is the product and design-language view

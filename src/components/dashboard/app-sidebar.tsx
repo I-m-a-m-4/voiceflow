@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Settings, Bell } from 'lucide-react';
+import { Home, Settings, Bell, FileText, MessageSquare, Ghost } from 'lucide-react';
 import { useAuth } from '@/firebase';
 import { BillingModal } from './billing-modal';
 import { SettingsModal } from './settings-modal';
@@ -16,7 +16,16 @@ export default function AppSidebar() {
   
   const navItems = [
     { label: 'My Meetings', icon: Home, href: '/dashboard' },
+    { label: 'AI Meeting Notetaker', icon: FileText, href: '/dashboard/notetaker' },
+    { label: 'Live Answers', icon: MessageSquare, href: '/dashboard/answers' },
+    { label: 'Stealth Mode', icon: Ghost, href: '/dashboard/stealth' },
   ];
+
+  React.useEffect(() => {
+    const handleOpenBilling = () => setIsBillingModalOpen(true);
+    window.addEventListener('open-billing-modal', handleOpenBilling);
+    return () => window.removeEventListener('open-billing-modal', handleOpenBilling);
+  }, []);
 
   return (
     <>
@@ -48,7 +57,9 @@ export default function AppSidebar() {
         {/* Main Navigation */}
         <nav className="px-2 mt-4 space-y-0.5">
           {navItems.map((item) => {
-            const isActive = pathname === item.href || (item.href === '/dashboard' && pathname.startsWith('/dashboard'));
+            const isActive = item.href === '/dashboard' 
+              ? pathname === '/dashboard' 
+              : pathname.startsWith(item.href);
             return (
               <Link
                 key={item.label}
@@ -103,6 +114,7 @@ export default function AppSidebar() {
       <SettingsModal
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
+        onOpenBilling={() => setIsBillingModalOpen(true)}
       />
     </>
   );

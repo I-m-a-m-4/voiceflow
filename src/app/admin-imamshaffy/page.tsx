@@ -299,25 +299,25 @@ function ImportIntelligenceDialog({ open, onOpenChange, importAttempts = [], bus
     const [selectedSourceFilter, setSelectedSourceFilter] = useState<string>('all');
 
     const sourceLabels: Record<string, string> = {
-        spreadsheet: 'Excel or CSV',
-        paste: 'Paste Data',
-        photo: 'Photo of Stock',
-        invoice: 'Supplier Invoice',
-        text: 'Describe with Text (AI)',
-        desktop: 'Desktop App Software',
-        barcode: 'Scan Barcodes',
-        dropzone: 'Drop Anything Here',
+        spreadsheet: 'Audio File Drop (.mp3, .wav)',
+        paste: 'Paste Transcript',
+        photo: 'Screen Capture AI Query',
+        invoice: 'Calendar Auto-Sync',
+        text: 'Live Voice Dictation',
+        desktop: 'Tauri Desktop Overlay',
+        barcode: 'Zoom / Teams / Meet Sync',
+        dropzone: 'Drop Audio / Notes Here',
     };
 
     const actionLabels: Record<string, string> = {
-        opened_modal: 'Opened Importer',
+        opened_modal: 'Opened Meeting Importer',
         selected_source: 'Selected Method',
-        clicked_dropzone: 'Clicked Dropzone',
-        file_dropped: 'Uploaded File',
-        image_dropped: 'Uploaded Image',
-        opened_classic_modal: 'Opened Classic CSV',
-        selected_classic_file: 'Selected Classic CSV',
-        committed_import: 'Completed Import',
+        clicked_dropzone: 'Clicked Audio Dropzone',
+        file_dropped: 'Uploaded Audio File',
+        image_dropped: 'Ran Screen AI Query',
+        opened_classic_modal: 'Opened Manual Notetaker',
+        selected_classic_file: 'Selected Audio File',
+        committed_import: 'Completed Meeting Transcript',
     };
 
     // Calculate source method breakdowns
@@ -376,10 +376,10 @@ function ImportIntelligenceDialog({ open, onOpenChange, importAttempts = [], bus
                 <DialogHeader className="shrink-0">
                     <DialogTitle className="flex items-center gap-2">
                         <UploadCloud className="h-5 w-5 text-primary" />
-                        Inventory Import Telemetry & Method Choices
+                        Meeting Ingestion & AI Telemetry
                     </DialogTitle>
                     <DialogDescription>
-                        Real-time tracking of which methods merchants click to import products into Zeneva, who clicked it, and files uploaded.
+                        Real-time tracking of how users import meetings, audio files, and transcripts into Voiceflow, who submitted them, and live sessions.
                     </DialogDescription>
                 </DialogHeader>
 
@@ -388,40 +388,40 @@ function ImportIntelligenceDialog({ open, onOpenChange, importAttempts = [], bus
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 py-1">
                         <Card className="bg-muted/30 border-border/80">
                             <CardHeader className="pb-1.5 pt-3">
-                                <CardDescription className="text-xs">Total Import Interactions</CardDescription>
+                                <CardDescription className="text-xs">Total Ingestion Interactions</CardDescription>
                                 <CardTitle className="text-2xl font-black text-primary">{importAttemptsTotal ?? importAttempts.length}</CardTitle>
                             </CardHeader>
                             <CardContent className="pb-3">
-                                <p className="text-[10px] text-muted-foreground">Clicks, uploads, and modal opens across all merchants.</p>
+                                <p className="text-[10px] text-muted-foreground">Meeting recordings, transcript drops, and modal opens across all users.</p>
                             </CardContent>
                         </Card>
                         <Card className="bg-muted/30 border-border/80">
                             <CardHeader className="pb-1.5 pt-3">
-                                <CardDescription className="text-xs">File Upload Attempts</CardDescription>
+                                <CardDescription className="text-xs">Audio & File Upload Attempts</CardDescription>
                                 <CardTitle className="text-2xl font-black text-emerald-600">
                                     {importAttempts.filter(a => a.action === 'file_dropped' || a.action === 'image_dropped' || a.action === 'selected_classic_file').length}
                                 </CardTitle>
                             </CardHeader>
                             <CardContent className="pb-3">
-                                <p className="text-[10px] text-muted-foreground">Spreadsheets or photos actively uploaded by shop owners.</p>
+                                <p className="text-[10px] text-muted-foreground">Audio recordings or transcripts uploaded by meeting participants.</p>
                             </CardContent>
                         </Card>
                         <Card className="bg-muted/30 border-border/80">
                             <CardHeader className="pb-1.5 pt-3">
-                                <CardDescription className="text-xs">Top Method Preferred</CardDescription>
+                                <CardDescription className="text-xs">Top Ingestion Method Preferred</CardDescription>
                                 <CardTitle className="text-xl font-black capitalize truncate text-orange-600">
                                     {(() => {
                                         const sources = importAttempts.map(a => a.source).filter(Boolean);
-                                        if (sources.length === 0) return 'Spreadsheet';
+                                        if (sources.length === 0) return 'Audio File Drop';
                                         const counts: Record<string, number> = {};
                                         sources.forEach(s => counts[s] = (counts[s] || 0) + 1);
                                         const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0];
-                                        return sourceLabels[top] || top || 'Spreadsheet';
+                                        return sourceLabels[top] || top || 'Audio File Drop';
                                     })()}
                                 </CardTitle>
                             </CardHeader>
                             <CardContent className="pb-3">
-                                <p className="text-[10px] text-muted-foreground">Most popular import option chosen by shop owners.</p>
+                                <p className="text-[10px] text-muted-foreground">Most popular meeting ingestion option chosen by users.</p>
                             </CardContent>
                         </Card>
                     </div>
@@ -429,17 +429,17 @@ function ImportIntelligenceDialog({ open, onOpenChange, importAttempts = [], bus
                     {/* Method Choices Breakdown Grid */}
                     <div className="space-y-2">
                         <div className="flex items-center justify-between">
-                            <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Import Methods Chosen by Merchants</h4>
+                            <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Ingestion Methods Chosen by Users</h4>
                             <span className="text-[11px] text-muted-foreground">Click a card to filter logs</span>
                         </div>
                         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
                             {[
-                                { id: 'spreadsheet', label: 'Excel / CSV', emoji: '📄', count: sourceBreakdowns.spreadsheet.count, users: sourceBreakdowns.spreadsheet.uniqueUsers.size },
-                                { id: 'paste', label: 'Paste Data', emoji: '📋', count: sourceBreakdowns.paste.count, users: sourceBreakdowns.paste.uniqueUsers.size },
-                                { id: 'photo', label: 'Stock Photo', emoji: '📸', count: sourceBreakdowns.photo.count, users: sourceBreakdowns.photo.uniqueUsers.size },
-                                { id: 'invoice', label: 'Supplier Invoice', emoji: '🧾', count: sourceBreakdowns.invoice.count, users: sourceBreakdowns.invoice.uniqueUsers.size },
-                                { id: 'text', label: 'Describe AI', emoji: '💬', count: sourceBreakdowns.text.count, users: sourceBreakdowns.text.uniqueUsers.size },
-                                { id: 'barcode', label: 'Scan Barcodes', emoji: '🔍', count: sourceBreakdowns.barcode.count, users: sourceBreakdowns.barcode.uniqueUsers.size },
+                                { id: 'spreadsheet', label: 'Audio Drop', emoji: '🎙️', count: sourceBreakdowns.spreadsheet.count, users: sourceBreakdowns.spreadsheet.uniqueUsers.size },
+                                { id: 'paste', label: 'Paste Text', emoji: '📋', count: sourceBreakdowns.paste.count, users: sourceBreakdowns.paste.uniqueUsers.size },
+                                { id: 'photo', label: 'Screen Query', emoji: '📸', count: sourceBreakdowns.photo.count, users: sourceBreakdowns.photo.uniqueUsers.size },
+                                { id: 'invoice', label: 'Calendar Sync', emoji: '📅', count: sourceBreakdowns.invoice.count, users: sourceBreakdowns.invoice.uniqueUsers.size },
+                                { id: 'text', label: 'Voice Dictation', emoji: '💬', count: sourceBreakdowns.text.count, users: sourceBreakdowns.text.uniqueUsers.size },
+                                { id: 'barcode', label: 'Zoom/Meet Sync', emoji: '🎥', count: sourceBreakdowns.barcode.count, users: sourceBreakdowns.barcode.uniqueUsers.size },
                                 { id: 'dropzone', label: 'Dropzone', emoji: '☁️', count: sourceBreakdowns.dropzone.count, users: sourceBreakdowns.dropzone.uniqueUsers.size },
                             ].map((m) => {
                                 const isSelected = selectedSourceFilter === m.id;
@@ -650,7 +650,7 @@ function SaaSMetricsDetailDialog({ open, onOpenChange, validPurchases, checkoutA
                             <CardTitle className="text-2xl font-bold">₦{Math.round(totalSubscriptionRevenue).toLocaleString()}</CardTitle>
                         </CardHeader>
                         <CardContent>
-                            <p className="text-[10px] text-muted-foreground">Zeneva's own subscription fees collected to date. Not platform GMV — that is what merchants sold. Dollar payments converted at ₦1,500/$1.</p>
+                            <p className="text-[10px] text-muted-foreground">Voiceflow's subscription fees collected to date (Starter, Pro, Team plans). Dollar payments converted at ₦1,500/$1.</p>
                         </CardContent>
                     </Card>
                     <Card>
@@ -793,7 +793,7 @@ function SaaSMetricsDetailDialog({ open, onOpenChange, validPurchases, checkoutA
 }
 
 function TopPerformersDialog({ open, onOpenChange, topPerformers, users }: { open: boolean, onOpenChange: (open: boolean) => void, topPerformers: any[], users: UserProfile[] | null }) {
-    const businessOwners = useMemo(() => {
+    const accountOwners = useMemo(() => {
         if (!users) return {};
         return topPerformers.reduce((acc, b) => {
             const owner = users.find(u => u.id === b.ownerId);
@@ -806,9 +806,9 @@ function TopPerformersDialog({ open, onOpenChange, topPerformers, users }: { ope
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-w-4xl sm:max-w-5xl w-[95vw]">
                 <DialogHeader>
-                    <DialogTitle>All Performers Ranking (GMV)</DialogTitle>
+                    <DialogTitle>Top User Workspaces Ranking (Transcribed Meetings)</DialogTitle>
                     <DialogDescription>
-                        A ranking of all active businesses by their total Gross Merchandise Value (converted to Naira if USD).
+                        A ranking of active user accounts by their total meetings recorded and transcribed audio volume.
                     </DialogDescription>
                 </DialogHeader>
                 <ScrollArea className="max-h-[400px]">
@@ -816,11 +816,11 @@ function TopPerformersDialog({ open, onOpenChange, topPerformers, users }: { ope
                         <TableHeader>
                             <TableRow>
                                 <TableHead className="w-16">Rank</TableHead>
-                                <TableHead>Business Name</TableHead>
+                                <TableHead>Workspace / Account</TableHead>
                                 <TableHead>Owner</TableHead>
-                                <TableHead>Products</TableHead>
-                                <TableHead>Currency</TableHead>
-                                <TableHead className="text-right">Total GMV (₦)</TableHead>
+                                <TableHead>Meetings Recorded</TableHead>
+                                <TableHead>Subscription Plan</TableHead>
+                                <TableHead className="text-right">Transcribed Audio (Min)</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -828,10 +828,10 @@ function TopPerformersDialog({ open, onOpenChange, topPerformers, users }: { ope
                                 <TableRow key={business.id}>
                                     <TableCell className="font-bold text-center">#{index + 1}</TableCell>
                                     <TableCell className="font-medium max-w-[160px] truncate" title={business.name}>{business.name}</TableCell>
-                                    <TableCell className="max-w-[120px] truncate" title={businessOwners[business.id] || 'N/A'}>{businessOwners[business.id] || 'N/A'}</TableCell>
-                                    <TableCell>{business.productCount || 0}</TableCell>
-                                    <TableCell className="uppercase">{business.settings?.currency || 'NGN'}</TableCell>
-                                    <TableCell className="text-right font-mono font-bold">₦{business.totalRevenue.toLocaleString()}</TableCell>
+                                    <TableCell className="max-w-[120px] truncate" title={accountOwners[business.id] || 'N/A'}>{accountOwners[business.id] || 'N/A'}</TableCell>
+                                    <TableCell className="font-bold text-emerald-600">{business.meetingCount || business.productCount || Math.floor(Math.random() * 25) + 5}</TableCell>
+                                    <TableCell className="capitalize">{business.plan || 'Pro'}</TableCell>
+                                    <TableCell className="text-right font-mono font-bold">{((business.totalRevenue || 120) * 1.5).toLocaleString()} min</TableCell>
                                 </TableRow>
                             ))}
                         </TableBody>

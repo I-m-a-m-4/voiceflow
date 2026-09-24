@@ -190,8 +190,8 @@ export default function FeatureGate({
         </div>
 
         <div className="flex items-center justify-between gap-4">
-            <Button asChild size="sm" className="text-[11px] h-8 px-3.5 bg-orange-600 hover:bg-orange-700 text-white font-medium">
-                <Link href="/billing">Get {requiredPlan === 'business' ? 'Business' : 'Pro'}</Link>
+            <Button onClick={() => window.dispatchEvent(new CustomEvent('open-billing-modal'))} size="sm" className="text-[11px] h-8 px-3.5 bg-orange-600 hover:bg-orange-700 text-white font-medium">
+                Get {requiredPlan === 'business' ? 'Business' : 'Pro'}
             </Button>
             <div className="text-[11px] text-muted-foreground font-medium">
                 Starting at <span className="font-semibold text-foreground">{currency === 'NGN' ? (requiredPlan === 'business' ? '₦30,000' : '₦10,000') : (requiredPlan === 'business' ? '$30' : '$10')}/mo</span>.
@@ -214,8 +214,8 @@ export default function FeatureGate({
         </div>
 
         <div className="flex items-center justify-between gap-3 pt-0.5">
-            <Button asChild size="sm" className="text-[10px] h-7 px-3 bg-orange-600 hover:bg-orange-700 text-white font-medium">
-                <Link href="/billing">Upgrade</Link>
+            <Button onClick={() => window.dispatchEvent(new CustomEvent('open-billing-modal'))} size="sm" className="text-[10px] h-7 px-3 bg-orange-600 hover:bg-orange-700 text-white font-medium">
+                Upgrade
             </Button>
             <div className="text-[10px] text-muted-foreground">
                 {currency === 'NGN' ? (requiredPlan === 'business' ? '₦30,000' : '₦10,000') : (requiredPlan === 'business' ? '$30' : '$10')}/mo
@@ -278,6 +278,11 @@ export function FeatureGateUpgradeCard({
 
   const pointsToDisplay = featurePoints || defaultFeaturePoints;
 
+  const handleUpgrade = () => {
+    if (onUpgradeClick) onUpgradeClick();
+    window.dispatchEvent(new CustomEvent('open-billing-modal'));
+  };
+
   return (
     <div className="bg-background border border-dashed border-orange-500/40 bg-gradient-to-b from-orange-500/10 via-background to-background backdrop-blur-md overflow-hidden rounded-xl max-w-lg w-full p-8 text-center relative">
         {/* Premium Highlighted Icon with sparkles */}
@@ -310,8 +315,8 @@ export function FeatureGateUpgradeCard({
         </div>
 
         <div className="space-y-3 pt-2">
-            <Button asChild onClick={onUpgradeClick} className="w-full h-12 bg-orange-400 hover:bg-orange-500 text-white hover:text-white font-extrabold rounded-full shadow-md hover:scale-[1.01] active:scale-95 transition-all duration-300">
-                <Link href="/billing">Get {requiredPlan === 'business' ? 'Business' : 'Pro'} Plan</Link>
+            <Button onClick={handleUpgrade} className="w-full h-12 bg-orange-400 hover:bg-orange-500 text-white hover:text-white font-extrabold rounded-full shadow-md hover:scale-[1.01] active:scale-95 transition-all duration-300">
+                Get {requiredPlan === 'business' ? 'Business' : 'Pro'} Plan
             </Button>
             <div className="text-xs text-muted-foreground font-semibold">
                 Starting at <span className="font-extrabold text-foreground">{currency === 'NGN' ? (requiredPlan === 'business' ? '₦30,000' : '₦10,000') : (requiredPlan === 'business' ? '$30' : '$10')}/mo</span>.

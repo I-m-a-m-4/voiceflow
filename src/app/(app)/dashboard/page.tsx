@@ -6,7 +6,7 @@ import RightPanel from "@/components/dashboard/right-panel";
 
 export default function VoiceFlowApp() {
   return (
-    <div className="flex flex-col lg:flex-row h-full w-full overflow-hidden">
+    <div className="flex flex-col lg:flex-row min-h-full w-full">
       <MeetingsFeed />
       <RightPanel />
     </div>

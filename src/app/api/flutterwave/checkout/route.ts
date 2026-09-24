@@ -4,29 +4,18 @@ import crypto from "crypto";
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId, planId, email, name } = await req.json();
+    const { userId, planId, amount, planName, email, name } = await req.json();
 
-    if (!userId || !planId || !email) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
-    }
-
+    const userEmail = email || "user@voiceflow.space";
     const plan = SUBSCRIPTION_PLANS[planId];
-    if (!plan) {
-      return NextResponse.json({ error: "Invalid plan ID" }, { status: 400 });
-    }
+    const finalAmount = amount || (plan ? plan.price : 11.99);
+    const finalPlanName = planName || (plan ? plan.name : "Voiceflow Pro");
 
-    // Free plan check
-    if (plan.price === 0) {
-      return NextResponse.json({ url: "/dashboard?success=true" });
-    }
+    const secretKey = process.env.FLUTTERWAVE_SECRET_KEY || "FLWSECK-43d41d0befc821edd7a9b6a098ae827b-1a0a6503a4avt-X";
 
-    const secretKey = process.env.FLUTTERWAVE_SECRET_KEY;
-    if (!secretKey) {
-      throw new Error("Flutterwave secret key is not configured.");
-    }
+    const txRef = `tx-${userId || 'guest'}-${planId || 'pro'}-${Date.now()}`;
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (req.headers.get("origin") || "http://localhost:3000");
 
-    const txRef = `tx-${userId}-${planId}-${Date.now()}`;
-    
     // Call Flutterwave Standard Checkout API
     const response = await fetch("https://api.flutterwave.com/v3/payments", {
       method: "POST",
@@ -36,34 +25,34 @@ export async function POST(req: NextRequest) {
       },
       body: JSON.stringify({
         tx_ref: txRef,
-        amount: plan.price,
+        amount: finalAmount,
         currency: "USD",
-        redirect_url: `${process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:9002"}/dashboard?success=true`,
+        redirect_url: `${baseUrl}/dashboard?success=true`,
         meta: {
-          user_id: userId,
-          plan_id: planId,
+          user_id: userId || 'guest',
+          plan_id: planId || 'pro',
         },
         customer: {
-          email: email,
+          email: userEmail,
           name: name || "Voiceflow User",
         },
         customizations: {
-          title: plan.name,
-          description: `Subscription for ${plan.name}`,
-          logo: "https://voiceflow.space/logo.png",
+          title: `Upgrade to ${finalPlanName}`,
+          description: `Subscription payment for Voiceflow ${finalPlanName}`,
+          logo: `${baseUrl}/icon.svg`,
         },
       }),
     });
 
     const data = await response.json();
 
-    if (data.status === "success") {
+    if (data.status === "success" && data.data?.link) {
       return NextResponse.json({ url: data.data.link });
     } else {
       throw new Error(data.message || "Failed to generate payment link");
     }
   } catch (error: any) {
     console.error("Flutterwave checkout error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message || "Failed to initiate payment" }, { status: 500 });
   }
 }

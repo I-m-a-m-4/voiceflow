@@ -138,16 +138,7 @@ export const useFlutterwave = () => {
       return;
     }
 
-    const publicKey = process.env.NEXT_PUBLIC_FLUTTERWAVE_PUBLIC_KEY;
-    if (!publicKey) {
-      toast({
-        variant: 'destructive',
-        title: 'Configuration Error',
-        description: 'Payment system is not properly configured.',
-      });
-      setIsLoading(false);
-      return;
-    }
+    const publicKey = process.env.NEXT_PUBLIC_FLUTTERWAVE_PUBLIC_KEY || 'FLWPUBK-33162c3bb2bb347a6606f3e44645f1c9-X';
 
     const txRef = `VF-${Date.now()}-${Math.random().toString(36).slice(2, 9).toUpperCase()}`;
 

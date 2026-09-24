@@ -51,6 +51,23 @@ export function TauriLayoutWrapper({ children }: { children: React.ReactNode }) 
         const windows = await getAllWindows();
         windows.forEach((w: any) => w.setContentProtected(enabled).catch(console.error));
       }).catch(console.error);
+
+      // Listen for Global Shortcuts from Tauri Rust Backend
+      import('@tauri-apps/api/event').then(({ listen }) => {
+        listen('shortcut-visibility', () => {
+           console.log('Voiceflow Visibility Toggled via Shortcut');
+           // Placeholder: Add global state dispatcher here
+        });
+        listen('shortcut-ask', () => {
+           console.log('Voiceflow Ask Prompt Triggered via Shortcut');
+        });
+        listen('shortcut-clear', () => {
+           console.log('Voiceflow Clear Conversation Triggered via Shortcut');
+        });
+        listen('shortcut-session', () => {
+           console.log('Voiceflow Session Toggle Triggered via Shortcut');
+        });
+      }).catch(console.error);
     }
   }, [isTauri, (business?.settings as any)?.screenShareProtectionEnabled]);
 

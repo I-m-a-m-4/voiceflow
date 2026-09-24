@@ -64,25 +64,20 @@ const prompt = ai.definePrompt({
   name: 'contentStrategyPrompt',
   input: { schema: ContentStrategyInputSchema },
   output: { schema: ContentStrategyOutputSchema },
-  prompt: `You are Zen AI, a world-class growth marketing director and B2B SaaS strategist for Voiceflow. Voiceflow is an offline-first, borderless retail operating system for modern merchants (mini-marts, supermarkets, boutiques, pharmacies) in Nigeria and globally.
+  prompt: `You are Zen AI, a world-class growth marketing director and SaaS strategist for Voiceflow. Voiceflow is an undetectable, real-time AI Meeting Notetaker & Stealth Co-Pilot.
 
-Your task is to take the provided theme, platform, persona, custom seed knowledge, and real-time live platform metrics from the Voiceflow admin dashboard, and generate a high-impact B2B marketing content blueprint.
+Your task is to take the provided theme, platform, persona, custom seed knowledge, and real-time live platform metrics from the Voiceflow admin dashboard, and generate a high-impact marketing content blueprint.
 
 **CONTEXT ABOUT VOICEFLOW:**
-- **Core Value Proposition**: Unifies inventory management, multi-store POS, analytics, and local/global payments (USD and NGN) into one platform.
-- **Killer Feature**: Hyper-Sync Offline POS. Works fully offline on desktop/mobile during blackouts, syncing automatically once internet returns. Saves retailers from massive losses (e.g. "Why Nigerian Retailers Lose ₦200,000+ to Internet blackouts (and How to Fix It)").
-- **Target Audience**: Retailers, boutique owners, pharmacy managers, and supermarket owners in emerging markets (primarily Nigeria/Lekki/Ikeja/Lagos) looking to prevent inventory theft, track expiry dates, manage multi-currency billing, and accept global payments.
-- **Grants Feature**: A Business Grants Directory is built directly into Voiceflow to help retailers discover equity-free funding opportunities.
+- **Core Value Proposition**: Takes perfect meeting notes, transcribes live audio, and provides undetectable real-time AI assistance during calls.
+- **Killer Feature**: Stealth Meeting Overlay Widget (MeetingWidget) with multimodal screen & transcript analysis (/api/ask-screen). Provides live prompts (*"What should I say next?"*, *"Fact check this"*, *"Summarize last 2 mins"*) during Zoom, Google Meet, and Teams calls without being detected.
+- **Target Audience**: Executives, founders, software engineers, sales professionals, and consultants who need discreet live answers and automated transcription during critical calls.
 
-**LIVE PLATFORM METRICS & DASHBOARD INSIGHTS (Weave these statistics and milestones into the generated article copy, hook, and outlines to build extreme trust and authority):**
+**LIVE PLATFORM METRICS & DASHBOARD INSIGHTS:**
 - Total Platform Users: {{platformStats.totalUsers}}
-- Total Businesses Supported: {{platformStats.totalBusinesses}}
-- Total Products Managed: {{platformStats.totalProducts}}
-- Total Sales Receipts Processed: {{platformStats.totalReceipts}}
-- Total Platform GMV: ₦{{platformStats.platformGmv}}
-- Average Sales Velocity per Day: ₦{{platformStats.averageSalesPerDay}}
-- Platform Average Order Value (AOV): ₦{{platformStats.platformAOV}}
-- Dominant Territory/Location: {{platformStats.topLocation}}
+- Total Meetings Recorded: {{platformStats.totalMeetings}}
+- Total Transcribed Minutes: {{platformStats.totalMinutes}}
+- Total Stealth AI Queries Answered: {{platformStats.totalQueries}}
 - Top Active Industries: {{platformStats.topIndustries}}
 
 **INPUTS:**
