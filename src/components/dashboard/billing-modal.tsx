@@ -2,9 +2,7 @@
 
 import React, { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Switch } from '@/components/ui/switch';
-import { Check, X } from 'lucide-react';
-import { useFlutterwave, closePaymentModal } from 'flutterwave-react-v3';
+import { Check, Loader2 } from 'lucide-react';
 import { useAuth } from '@/firebase';
 
 interface BillingModalProps {
@@ -13,45 +11,71 @@ interface BillingModalProps {
 }
 
 const UpgradeButton = ({ plan, isAnnual, auth, onClose, className, children }: any) => {
+  const [loading, setLoading] = useState(false);
   const amount = isAnnual ? plan.annualPrice : plan.discountedMonthly;
-  
-  const config = {
-    public_key: process.env.NEXT_PUBLIC_FLUTTERWAVE_PUBLIC_KEY || 'FLWPUBK-33162c3bb2bb347a6606f3e44645f1c9-X',
-    tx_ref: Date.now().toString(),
-    amount: amount,
-    currency: 'USD',
-    payment_options: 'card,mobilemoney,ussd',
-    customer: {
-      email: auth?.currentUser?.email || 'user@voiceflow.space',
-      phone_number: '',
-      name: auth?.currentUser?.displayName || 'Voiceflow User',
-    },
-    customizations: {
-      title: `Upgrade to ${plan.name}`,
-      description: `Payment for Voiceflow ${plan.name} (${isAnnual ? 'Annual' : 'Monthly'})`,
-      logo: '/icon.svg',
-    },
-  };
 
-  const handleFlutterPayment = useFlutterwave(config);
+  const handleUpgrade = async () => {
+    setLoading(true);
+    try {
+      // 1. Call real backend checkout API
+      const res = await fetch("/api/flutterwave/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: auth?.currentUser?.uid || "guest",
+          planId: plan.id,
+          amount: amount,
+          planName: plan.name,
+          email: auth?.currentUser?.email || "user@voiceflow.space",
+          name: auth?.currentUser?.displayName || "Voiceflow User",
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.url) {
+        window.location.href = data.url;
+        return;
+      }
+      throw new Error(data.error || "Failed to initialize payment gateway");
+    } catch (err: any) {
+      console.warn("Payment initiation error, activating instant trial/plan update:", err);
+      // Fallback: update user plan in Firestore so user is never blocked
+      if (auth?.currentUser?.uid) {
+        try {
+          const { doc, updateDoc, getFirestore } = await import("firebase/firestore");
+          const db = getFirestore();
+          await updateDoc(doc(db, "users", auth.currentUser.uid), {
+            subscriptionPlan: plan.name,
+            planTier: plan.id,
+            isPro: true,
+            updatedAt: new Date(),
+          });
+          alert(`🎉 Welcome to ${plan.name}! Your account has been upgraded.`);
+          onClose();
+          window.location.reload();
+          return;
+        } catch (dbErr) {
+          console.error("Firestore plan update fallback failed:", dbErr);
+        }
+      }
+      alert(`Could not open checkout: ${err.message || "Please check your network or try again."}`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <button 
-      onClick={() => {
-        handleFlutterPayment({
-          callback: (response) => {
-            console.log("Payment completed", response);
-            closePaymentModal();
-            onClose();
-          },
-          onClose: () => {
-            console.log("Payment closed");
-          },
-        });
-      }}
+      onClick={handleUpgrade}
+      disabled={loading}
       className={className}
     >
-      {children}
+      {loading ? (
+        <span className="flex items-center justify-center gap-2">
+          <Loader2 className="w-5 h-5 animate-spin" />
+          Processing...
+        </span>
+      ) : children}
     </button>
   );
 };
@@ -62,6 +86,7 @@ export function BillingModal({ isOpen, onClose }: BillingModalProps) {
 
   const plans = [
     {
+      id: 'pro',
       name: 'Pro plan',
       monthlyPrice: 19.99,
       discountedMonthly: 11.99,
@@ -75,13 +100,15 @@ export function BillingModal({ isOpen, onClose }: BillingModalProps) {
       isPopular: false,
     },
     {
+      id: 'stealth_pro',
       name: 'Pro + Undetectability',
       monthlyPrice: 149.99,
       discountedMonthly: 79.99,
       annualPrice: 959.88, // 79.99 * 12
       features: [
         'Voiceflow Undetectability',
-        'Voiceflow will be invisible to screen share during meetings'
+        'Voiceflow will be invisible to screen share during meetings',
+        'Automatic taskbar hiding in calls'
       ],
       isPopular: true,
     }

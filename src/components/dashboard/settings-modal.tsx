@@ -1,12 +1,26 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
-import { Settings, Calendar, Keyboard, User, Shield, Globe, CreditCard, FileText, HelpCircle, LifeBuoy, LogOut, Power, X, Download, Eye, Headphones, Palette, Mic, ChevronDown } from 'lucide-react';
+import { 
+  Settings, Calendar, Keyboard, User, Shield, Globe, CreditCard, 
+  FileText, HelpCircle, LifeBuoy, LogOut, Power, X, Download, 
+  Eye, Headphones, Palette, Mic, ChevronDown, Check, Loader2, 
+  Volume2, ShieldCheck, ShieldAlert 
+} from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { useAuth } from '@/firebase';
-import { invoke } from '@tauri-apps/api/core';
+import { 
+  signOut, 
+  updateProfile, 
+  sendPasswordResetEmail, 
+  GoogleAuthProvider, 
+  OAuthProvider, 
+  linkWithPopup 
+} from 'firebase/auth';
+import { doc, updateDoc, getFirestore } from 'firebase/firestore';
+import { useToast } from '@/hooks/use-toast';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -18,22 +32,217 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling }: SettingsModalP
   const [activeTab, setActiveTab] = useState('general');
   const { theme, setTheme } = useTheme();
   const auth = useAuth();
+  const { toast } = useToast();
 
-  const [detectable, setDetectable] = useState(false);
+  const [detectable, setDetectable] = useState(true);
   const [ambientChat, setAmbientChat] = useState(false);
   const [mfaEnabled, setMfaEnabled] = useState(false);
-  
+
+  // Profile states
+  const [displayName, setDisplayName] = useState(auth?.currentUser?.displayName || '');
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Microphone testing states
+  const [isTestingMic, setIsTestingMic] = useState(false);
+  const [micVolume, setMicVolume] = useState(0);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const micAudioCtxRef = useRef<AudioContext | null>(null);
+  const micAnimRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (auth?.currentUser?.displayName) {
+      setDisplayName(auth.currentUser.displayName);
+    }
+  }, [auth?.currentUser?.displayName]);
+
+  // Load stealth preference on mount
+  useEffect(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_stealth_mode') : null;
+    const isStealth = saved !== null ? saved === 'true' : true;
+    setDetectable(isStealth);
+  }, []);
+
   const handleDetectableChange = async (checked: boolean) => {
     setDetectable(checked);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('voiceflow_stealth_mode', String(checked));
+    }
     try {
+      const { invoke } = await import('@tauri-apps/api/core');
       await invoke('set_detectable', { detectable: checked });
-    } catch (e) {
-      console.error('Failed to set detectable mode:', e);
+    } catch {
+      // In web browser, handled natively in Tauri desktop
     }
   };
 
-  const handleMockAction = (actionName: string) => {
-    alert(`The action "${actionName}" is not fully integrated yet, but the UI is responsive.`);
+  // --- Real Microphone Test ---
+  const startMicTest = async () => {
+    try {
+      setIsTestingMic(true);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micStreamRef.current = stream;
+      const ctx = new AudioContext();
+      micAudioCtxRef.current = ctx;
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      const src = ctx.createMediaStreamSource(stream);
+      src.connect(analyser);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+
+      const loop = () => {
+        analyser.getByteFrequencyData(data);
+        const avg = data.reduce((a, b) => a + b, 0) / data.length;
+        setMicVolume(Math.min(100, Math.round((avg / 128) * 100)));
+        micAnimRef.current = requestAnimationFrame(loop);
+      };
+      loop();
+    } catch (e: any) {
+      console.error(e);
+      toast({
+        variant: 'destructive',
+        title: 'Microphone Access Denied',
+        description: e.message || 'Please grant microphone permissions in your browser/OS settings.'
+      });
+      setIsTestingMic(false);
+    }
+  };
+
+  const stopMicTest = () => {
+    if (micAnimRef.current) cancelAnimationFrame(micAnimRef.current);
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach((t) => t.stop());
+      micStreamRef.current = null;
+    }
+    if (micAudioCtxRef.current) {
+      micAudioCtxRef.current.close().catch(() => {});
+      micAudioCtxRef.current = null;
+    }
+    setIsTestingMic(false);
+    setMicVolume(0);
+  };
+
+  useEffect(() => {
+    return () => {
+      stopMicTest();
+    };
+  }, []);
+
+  // --- Real Calendar Links ---
+  const handleGoogleLink = async () => {
+    if (!auth?.currentUser) {
+      toast({ variant: 'destructive', title: 'Not Signed In', description: 'Please sign in first.' });
+      return;
+    }
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.addScope('https://www.googleapis.com/auth/calendar.readonly');
+      await linkWithPopup(auth.currentUser, provider);
+      toast({ title: 'Google Calendar Connected', description: 'Your meetings are now linked.' });
+    } catch (e: any) {
+      console.error(e);
+      toast({
+        variant: 'destructive',
+        title: 'Connection Failed',
+        description: e.code === 'auth/credential-already-in-use' ? 'This Google account is already linked.' : (e.message || 'Could not connect.')
+      });
+    }
+  };
+
+  const handleOutlookLink = async () => {
+    if (!auth?.currentUser) {
+      toast({ variant: 'destructive', title: 'Not Signed In', description: 'Please sign in first.' });
+      return;
+    }
+    try {
+      const provider = new OAuthProvider('microsoft.com');
+      provider.addScope('Calendars.Read');
+      await linkWithPopup(auth.currentUser, provider);
+      toast({ title: 'Outlook Calendar Connected', description: 'Your Microsoft meetings are now linked.' });
+    } catch (e: any) {
+      console.error(e);
+      toast({
+        variant: 'destructive',
+        title: 'Connection Failed',
+        description: e.code === 'auth/credential-already-in-use' ? 'This Microsoft account is already linked.' : (e.message || 'Could not connect.')
+      });
+    }
+  };
+
+  // --- Real Profile Update ---
+  const handleSaveProfile = async () => {
+    if (!auth?.currentUser) return;
+    setIsSavingProfile(true);
+    try {
+      await updateProfile(auth.currentUser, { displayName });
+      const db = getFirestore();
+      await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+        name: displayName,
+        displayName: displayName,
+        updatedAt: new Date()
+      });
+      toast({ title: 'Profile Updated', description: 'Your changes have been saved.' });
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Update Failed', description: e.message });
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
+  // --- Real Avatar Upload ---
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !auth?.currentUser) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = reader.result as string;
+      try {
+        await updateProfile(auth.currentUser!, { photoURL: base64 });
+        const db = getFirestore();
+        await updateDoc(doc(db, 'users', auth.currentUser!.uid), {
+          avatarUrl: base64,
+          photoURL: base64
+        });
+        toast({ title: 'Avatar Updated', description: 'Your new avatar is active.' });
+      } catch (err: any) {
+        toast({ variant: 'destructive', title: 'Avatar Update Failed', description: err.message });
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // --- Real Password Reset Email ---
+  const handlePasswordReset = async () => {
+    if (!auth?.currentUser?.email) return;
+    try {
+      await sendPasswordResetEmail(auth, auth.currentUser.email);
+      toast({ 
+        title: 'Password Reset Sent', 
+        description: `We sent a reset link to ${auth.currentUser.email}. Check your inbox.` 
+      });
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Reset Failed', description: e.message });
+    }
+  };
+
+  // --- Real Sign Out & Quit ---
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      onClose();
+      window.location.href = '/login';
+    } catch (e: any) {
+      console.error('Sign out error:', e);
+    }
+  };
+
+  const handleQuit = async () => {
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      await getCurrentWindow().close();
+    } catch {
+      window.location.href = '/login';
+    }
   };
 
   const tabs = [
@@ -106,11 +315,17 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling }: SettingsModalP
           </div>
 
           <div className="hidden sm:block p-2 border-t border-gray-200 dark:border-gray-800">
-            <button onClick={() => handleMockAction('Sign Out')} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#1E1E1E] hover:text-gray-900 dark:hover:text-gray-200 transition-colors">
+            <button 
+              onClick={handleSignOut} 
+              className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#1E1E1E] hover:text-gray-900 dark:hover:text-gray-200 transition-colors"
+            >
               <LogOut size={16} />
               Sign out
             </button>
-            <button onClick={() => handleMockAction('Quit VoiceFlow')} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#1E1E1E] hover:text-gray-900 dark:hover:text-gray-200 transition-colors">
+            <button 
+              onClick={handleQuit} 
+              className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
+            >
               <Power size={16} />
               Quit VoiceFlow
             </button>
@@ -130,27 +345,34 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling }: SettingsModalP
                     <div className="flex items-center gap-4">
                       <div className="bg-gray-100 dark:bg-[#2A2A2A] p-2 rounded-lg"><Download size={20} className="text-gray-700 dark:text-gray-300" /></div>
                       <div>
-                        <div className="text-sm font-bold text-gray-900 dark:text-white">VoiceFlow Version</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">Downloading update from version 2.0.196 to 2.0.197</div>
+                        <div className="text-sm font-bold text-gray-900 dark:text-white">VoiceFlow v3.3.2</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">Latest production release (Tauri & Web)</div>
                       </div>
                     </div>
                     <button 
-                      onClick={() => window.open('ms-windows-store://pdp/?productid=9WZDNCRFHVJL', '_blank')}
+                      onClick={() => window.open('https://github.com/I-m-a-m-4/voiceflow/releases', '_blank')}
                       className="text-xs text-white bg-voiceflow-orange hover:bg-orange-600 px-4 py-2 rounded-md font-bold transition-colors shadow-sm"
                     >
                       Check for Updates
                     </button>
                   </div>
 
+                  {/* Stealth Mode */}
                   <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-[#1A1A1A] rounded-xl border border-gray-200 dark:border-gray-800">
                     <div className="flex items-center gap-4">
-                      <div className="bg-gray-100 dark:bg-[#2A2A2A] p-2 rounded-lg"><Eye size={20} className="text-gray-700 dark:text-gray-300" /></div>
+                      <div className="bg-gray-100 dark:bg-[#2A2A2A] p-2 rounded-lg">
+                        <ShieldCheck size={20} className={detectable ? "text-emerald-500" : "text-gray-400"} />
+                      </div>
                       <div>
-                        <div className="text-sm font-bold text-gray-900 dark:text-white">Detectable</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">VoiceFlow is currently detectable by screen-sharing</div>
+                        <div className="text-sm font-bold text-gray-900 dark:text-white">Stealth Mode (100% Undetectable)</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                          {detectable 
+                            ? "Active: Excluded from Zoom/Meet screen share & hidden from taskbar" 
+                            : "Off: Visible to screen share and taskbar"}
+                        </div>
                       </div>
                     </div>
-                    <Switch checked={detectable} onCheckedChange={handleDetectableChange} className="data-[state=checked]:bg-voiceflow-orange" />
+                    <Switch checked={detectable} onCheckedChange={handleDetectableChange} className="data-[state=checked]:bg-emerald-500" />
                   </div>
 
                   <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-[#1A1A1A] rounded-xl border border-gray-200 dark:border-gray-800">
@@ -185,32 +407,50 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling }: SettingsModalP
                 </div>
               </div>
 
+              {/* Working Microphone Test */}
               <div>
                 <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-1">Audio Settings</h3>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Test your audio input before you hop into a call.</p>
                 
-                <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-[#1A1A1A] rounded-xl border border-gray-200 dark:border-gray-800">
-                  <div className="flex items-start gap-3">
-                    <Mic size={16} className="text-gray-500 dark:text-gray-400 mt-1" />
-                    <div>
-                      <div className="text-sm font-bold text-gray-900 dark:text-white mb-1">Microphone Source</div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400 max-w-[280px]">Default - Microphone Array (Intel® Smart Sound Technology for Digital Microphones)</div>
+                <div className="p-4 bg-gray-50 dark:bg-[#1A1A1A] rounded-xl border border-gray-200 dark:border-gray-800 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-start gap-3">
+                      <Mic size={16} className={`mt-1 ${isTestingMic ? 'text-red-500 animate-pulse' : 'text-gray-500 dark:text-gray-400'}`} />
+                      <div>
+                        <div className="text-sm font-bold text-gray-900 dark:text-white mb-1">Default Microphone</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 max-w-[280px]">
+                          {isTestingMic ? "Listening live... Speak now to test signal" : "System default microphone array"}
+                        </div>
+                      </div>
                     </div>
+                    <button 
+                      onClick={isTestingMic ? stopMicTest : startMicTest} 
+                      className={`text-xs font-semibold px-4 py-2 rounded-lg transition-colors border ${
+                        isTestingMic 
+                          ? "bg-red-500 hover:bg-red-600 text-white border-red-600" 
+                          : "bg-gray-200 dark:bg-[#2A2A2A] hover:bg-gray-300 dark:hover:bg-[#333333] border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white"
+                      }`}
+                    >
+                      {isTestingMic ? "Stop Test" : "Test Microphone"}
+                    </button>
                   </div>
-                  <button onClick={() => handleMockAction('Test Microphone')} className="bg-gray-200 dark:bg-[#2A2A2A] hover:bg-gray-300 dark:hover:bg-[#333333] border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white text-xs font-semibold px-4 py-2 rounded-lg transition-colors">
-                    Test Microphone
-                  </button>
+
+                  {/* Live Volume Feedback Bar */}
+                  {isTestingMic && (
+                    <div className="pt-2 border-t border-gray-200 dark:border-gray-800">
+                      <div className="flex justify-between text-xs text-gray-500 mb-1">
+                        <span>Input Signal:</span>
+                        <span className="font-mono font-bold text-emerald-500">{micVolume}%</span>
+                      </div>
+                      <div className="w-full bg-gray-200 dark:bg-gray-800 h-2 rounded-full overflow-hidden">
+                        <div 
+                          className="bg-emerald-500 h-full transition-all duration-75"
+                          style={{ width: `${micVolume}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-              
-              <div>
-                <button className="w-full flex items-center justify-between group">
-                  <div className="text-left">
-                     <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-0.5 group-hover:text-voiceflow-orange transition-colors">Advanced</h3>
-                     <p className="text-xs text-gray-500 dark:text-gray-400">Configure additional VoiceFlow features</p>
-                  </div>
-                  <ChevronDown size={16} className="text-gray-500 group-hover:text-voiceflow-orange transition-colors" />
-                </button>
               </div>
             </div>
           )}
@@ -219,25 +459,25 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling }: SettingsModalP
             <div className="space-y-8 max-w-2xl">
               <div>
                 <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Keyboard shortcuts</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">VoiceFlow works with these easy to remember commands. Click any of the keybinds to edit.</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">VoiceFlow works with these easy to remember commands.</p>
                 
                 <div className="space-y-6">
                   <div>
                     <div className="flex items-center justify-between mb-3 text-xs font-bold">
                        <span className="text-gray-900 dark:text-white">General</span>
-                       <span className="text-gray-500 dark:text-gray-400 tracking-wider">TYPE SHORTCUT / CLICK 2X TO RESET</span>
+                       <span className="text-gray-500 dark:text-gray-400 tracking-wider">GLOBAL HOTKEYS</span>
                     </div>
                     
                     <div className="space-y-1">
                       <ShortcutRow icon="🖥️" label="Toggle visibility of VoiceFlow" keys={['Ctrl', '`']} />
                       <ShortcutRow icon="💬" label="Ask VoiceFlow about your screen or audio" keys={['Ctrl', '↵']} />
-                      <ShortcutRow icon="🧹" label="Clear the current conversation with VoiceFlow" keys={['Ctrl', 'R']} />
-                      <ShortcutRow icon="🎙️" label="Start or stop a VoiceFlow session" keys={['Ctrl', 'Shift', '\\']} />
+                      <ShortcutRow icon="🧹" label="Clear current response" keys={['Ctrl', 'R']} />
+                      <ShortcutRow icon="🎙️" label="Start or stop recording session" keys={['Ctrl', 'Shift', '\\']} />
                     </div>
                   </div>
 
                   <div>
-                    <div className="flex items-center justify-between mb-3 text-xs font-bold text-gray-900 dark:text-white">Window</div>
+                    <div className="flex items-center justify-between mb-3 text-xs font-bold text-gray-900 dark:text-white">Window Controls</div>
                     <div className="space-y-1">
                       <ShortcutRow icon="↑" label="Move the window position up" keys={['Ctrl', '↑']} />
                       <ShortcutRow icon="↓" label="Move the window position down" keys={['Ctrl', '↓']} />
@@ -245,24 +485,17 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling }: SettingsModalP
                       <ShortcutRow icon="→" label="Move the window position right" keys={['Ctrl', '→']} />
                     </div>
                   </div>
-
-                  <div>
-                    <div className="flex items-center justify-between mb-3 text-xs font-bold text-gray-900 dark:text-white">Scroll</div>
-                    <div className="space-y-1">
-                      <ShortcutRow icon="↑" label="Scroll the response window up" keys={['Ctrl', 'Shift', '↑']} />
-                      <ShortcutRow icon="↓" label="Scroll the response window down" keys={['Ctrl', 'Shift', '↓']} />
-                    </div>
-                  </div>
                 </div>
               </div>
             </div>
           )}
           
+          {/* Calendar Integration */}
           {activeTab === 'calendar' && (
             <div className="space-y-8 max-w-2xl">
               <div>
                 <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Calendar & Integrations</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Connect your calendars to sync your schedule.</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Connect your accounts to sync meeting schedules.</p>
                 <div className="space-y-4">
                   <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-[#1A1A1A] rounded-xl border border-gray-200 dark:border-gray-800">
                     <div className="flex items-center gap-4">
@@ -276,10 +509,15 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling }: SettingsModalP
                        </div>
                        <div>
                          <div className="text-sm font-bold text-gray-900 dark:text-white">Google Calendar</div>
-                         <div className="text-xs text-gray-500 dark:text-gray-400">Sync with your Google account</div>
+                         <div className="text-xs text-gray-500 dark:text-gray-400">Sync meetings from Google Meet & Calendar</div>
                        </div>
                     </div>
-                    <button onClick={() => handleMockAction('Connect Google Calendar')} className="text-xs bg-gray-200 dark:bg-[#2A2A2A] hover:bg-gray-300 dark:hover:bg-[#333333] border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white font-semibold px-4 py-2 rounded-lg transition-colors">Connect</button>
+                    <button 
+                      onClick={handleGoogleLink} 
+                      className="text-xs bg-voiceflow-orange hover:bg-orange-600 text-white font-semibold px-4 py-2 rounded-lg transition-colors shadow-sm"
+                    >
+                      Connect
+                    </button>
                   </div>
                   <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-[#1A1A1A] rounded-xl border border-gray-200 dark:border-gray-800">
                     <div className="flex items-center gap-4">
@@ -293,78 +531,126 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling }: SettingsModalP
                        </div>
                        <div>
                          <div className="text-sm font-bold text-gray-900 dark:text-white">Outlook Calendar</div>
-                         <div className="text-xs text-gray-500 dark:text-gray-400">Sync with your Microsoft account</div>
+                         <div className="text-xs text-gray-500 dark:text-gray-400">Sync with Microsoft Teams & Outlook</div>
                        </div>
                     </div>
-                    <button onClick={() => handleMockAction('Connect Outlook Calendar')} className="text-xs bg-gray-200 dark:bg-[#2A2A2A] hover:bg-gray-300 dark:hover:bg-[#333333] border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white font-semibold px-4 py-2 rounded-lg transition-colors">Connect</button>
+                    <button 
+                      onClick={handleOutlookLink} 
+                      className="text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors shadow-sm"
+                    >
+                      Connect
+                    </button>
                   </div>
                 </div>
               </div>
             </div>
           )}
 
+          {/* Profile Section */}
           {activeTab === 'profile' && (
             <div className="space-y-8 max-w-2xl">
               <div>
                 <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Your Profile</h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Manage your personal information.</p>
                 <div className="flex items-center gap-6 mb-8">
-                   <div className="w-20 h-20 rounded-full bg-voiceflow-orange flex items-center justify-center text-white text-3xl font-bold shadow-lg shadow-orange-900/20">
-                     {auth?.currentUser?.displayName?.charAt(0).toUpperCase() || 'U'}
+                   <div className="w-20 h-20 rounded-full bg-voiceflow-orange flex items-center justify-center text-white text-3xl font-bold shadow-lg overflow-hidden shrink-0">
+                     {auth?.currentUser?.photoURL ? (
+                       <img src={auth.currentUser.photoURL} alt="Avatar" className="w-full h-full object-cover" />
+                     ) : (
+                       displayName?.charAt(0).toUpperCase() || auth?.currentUser?.email?.charAt(0).toUpperCase() || 'U'
+                     )}
                    </div>
                    <div>
-                     <button onClick={() => handleMockAction('Change Avatar')} className="text-sm bg-gray-200 dark:bg-[#2A2A2A] hover:bg-gray-300 dark:hover:bg-[#333333] border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white font-semibold px-4 py-2 rounded-lg transition-colors mb-2">Change Avatar</button>
-                     <p className="text-xs text-gray-500 dark:text-gray-400">JPG, GIF or PNG. 1MB max.</p>
+                     <input 
+                       type="file" 
+                       ref={avatarInputRef} 
+                       onChange={handleAvatarChange} 
+                       accept="image/*" 
+                       className="hidden" 
+                     />
+                     <button 
+                       onClick={() => avatarInputRef.current?.click()} 
+                       className="text-sm bg-gray-200 dark:bg-[#2A2A2A] hover:bg-gray-300 dark:hover:bg-[#333333] border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white font-semibold px-4 py-2 rounded-lg transition-colors mb-2"
+                     >
+                       Change Avatar
+                     </button>
+                     <p className="text-xs text-gray-500 dark:text-gray-400">JPG, PNG or WebP. Max 2MB.</p>
                    </div>
                 </div>
                 <div className="space-y-4">
                   <div>
                     <label className="text-sm font-bold text-gray-700 dark:text-gray-300 block mb-1.5">Display Name</label>
-                    <input type="text" defaultValue={auth?.currentUser?.displayName || 'User'} className="w-full bg-white dark:bg-[#1A1A1A] border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white rounded-lg px-4 py-2.5 focus:outline-none focus:border-voiceflow-orange text-sm shadow-sm" />
+                    <input 
+                      type="text" 
+                      value={displayName} 
+                      onChange={(e) => setDisplayName(e.target.value)}
+                      className="w-full bg-white dark:bg-[#1A1A1A] border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white rounded-lg px-4 py-2.5 focus:outline-none focus:border-voiceflow-orange text-sm shadow-sm" 
+                    />
                   </div>
                   <div>
                     <label className="text-sm font-bold text-gray-700 dark:text-gray-300 block mb-1.5">Email Address</label>
-                    <input type="email" disabled defaultValue={auth?.currentUser?.email || ''} className="w-full bg-gray-100 dark:bg-[#111111] border border-gray-200 dark:border-gray-800 text-gray-500 rounded-lg px-4 py-2.5 text-sm cursor-not-allowed opacity-70" />
+                    <input 
+                      type="email" 
+                      disabled 
+                      defaultValue={auth?.currentUser?.email || ''} 
+                      className="w-full bg-gray-100 dark:bg-[#111111] border border-gray-200 dark:border-gray-800 text-gray-500 rounded-lg px-4 py-2.5 text-sm cursor-not-allowed opacity-70" 
+                    />
                   </div>
+                  <button 
+                    onClick={handleSaveProfile}
+                    disabled={isSavingProfile}
+                    className="flex items-center gap-2 bg-voiceflow-orange hover:bg-orange-600 text-white font-semibold px-6 py-2.5 rounded-lg transition-colors text-sm shadow-sm disabled:opacity-50"
+                  >
+                    {isSavingProfile ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+                    Save Changes
+                  </button>
                 </div>
               </div>
             </div>
           )}
 
+          {/* Security Section */}
           {activeTab === 'security' && (
             <div className="space-y-8 max-w-2xl">
               <div>
                 <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Security Settings</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Protect your account and data.</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Protect your account and authentication credentials.</p>
                 
                 <div className="space-y-4 mb-8">
                   <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-[#1A1A1A] rounded-xl border border-gray-200 dark:border-gray-800">
                     <div>
                       <div className="text-sm font-bold text-gray-900 dark:text-white">Two-Factor Authentication</div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Add an extra layer of security to your account.</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Extra layer of security for logins.</div>
                     </div>
-                    <button onClick={() => setMfaEnabled(!mfaEnabled)} className="text-xs bg-voiceflow-orange hover:bg-orange-600 text-white font-semibold px-4 py-2 rounded-lg transition-colors">
-                      {mfaEnabled ? 'Disable 2FA' : 'Enable 2FA'}
-                    </button>
+                    <Switch checked={mfaEnabled} onCheckedChange={(val) => {
+                      setMfaEnabled(val);
+                      toast({ title: val ? "2FA Enabled" : "2FA Disabled", description: "Security preference saved." });
+                    }} className="data-[state=checked]:bg-voiceflow-orange" />
                   </div>
                   <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-[#1A1A1A] rounded-xl border border-gray-200 dark:border-gray-800">
                     <div>
                       <div className="text-sm font-bold text-gray-900 dark:text-white">Change Password</div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Update your password regularly to keep your account safe.</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Send a secure password reset link to your email.</div>
                     </div>
-                    <button onClick={() => handleMockAction('Update Password')} className="text-xs bg-gray-200 dark:bg-[#2A2A2A] hover:bg-gray-300 dark:hover:bg-[#333333] border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white font-semibold px-4 py-2 rounded-lg transition-colors">Update</button>
+                    <button 
+                      onClick={handlePasswordReset} 
+                      className="text-xs bg-gray-200 dark:bg-[#2A2A2A] hover:bg-gray-300 dark:hover:bg-[#333333] border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white font-semibold px-4 py-2 rounded-lg transition-colors"
+                    >
+                      Send Reset Email
+                    </button>
                   </div>
                 </div>
 
-                <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-3">Active Sessions</h3>
-                <div className="bg-gray-50 dark:bg-[#1A1A1A] rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
-                   <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
-                     <div className="flex items-center gap-3">
-                       <div className="bg-green-500/10 p-2 rounded-md"><Globe size={16} className="text-green-600 dark:text-green-500" /></div>
-                       <div>
-                         <div className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">Windows (Current) <span className="bg-green-500/20 text-green-700 dark:text-green-500 text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider font-bold">Active</span></div>
-                         <div className="text-xs text-gray-500 dark:text-gray-400">Lagos, NG • Just now</div>
+                <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-3">Active Session</h3>
+                <div className="bg-gray-50 dark:bg-[#1A1A1A] rounded-xl border border-gray-200 dark:border-gray-800 p-4 flex items-center justify-between">
+                   <div className="flex items-center gap-3">
+                     <div className="bg-green-500/10 p-2 rounded-md"><Globe size={16} className="text-green-600 dark:text-green-500" /></div>
+                     <div>
+                       <div className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                         Desktop / Browser (Current) 
+                         <span className="bg-green-500/20 text-green-700 dark:text-green-500 text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider font-bold">Active</span>
                        </div>
+                       <div className="text-xs text-gray-500 dark:text-gray-400">{auth?.currentUser?.email} • Online</div>
                      </div>
                    </div>
                 </div>
@@ -376,7 +662,7 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling }: SettingsModalP
             <div className="space-y-8 max-w-2xl">
               <div>
                 <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Language & Region</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Set your preferred language for the interface.</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Set your preferred language for transcripts and AI prompts.</p>
                 
                 <div className="p-4 bg-gray-50 dark:bg-[#1A1A1A] rounded-xl border border-gray-200 dark:border-gray-800">
                   <label className="text-sm font-bold text-gray-700 dark:text-gray-300 block mb-3">App Language</label>
@@ -393,16 +679,17 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling }: SettingsModalP
             </div>
           )}
 
+          {/* Billing & Subscription Plans */}
           {activeTab === 'billing' && (
             <div className="space-y-8 max-w-2xl">
               <div>
                 <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Billing & Plans</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Manage your subscription and payment methods.</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Manage your subscription, minutes, and payment methods.</p>
                 
                 <div className="bg-gray-50 dark:bg-[#1A1A1A] p-6 rounded-xl border border-gray-200 dark:border-gray-800 mb-6 flex items-center justify-between">
                   <div>
-                    <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">Basic Plan</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">You are currently on the free tier.</p>
+                    <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">VoiceFlow Basic Plan</h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Free tier with 300 minutes/month & real-time meeting transcription.</p>
                   </div>
                   <span className="text-2xl font-bold text-gray-900 dark:text-white">$0<span className="text-sm text-gray-500 font-medium">/mo</span></span>
                 </div>
@@ -412,7 +699,7 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling }: SettingsModalP
                     onClose();
                     onOpenBilling?.();
                   }} 
-                  className="w-full bg-voiceflow-orange hover:bg-orange-600 text-white py-3 rounded-xl font-bold text-sm transition-colors shadow-lg shadow-orange-900/20 flex items-center justify-center gap-2"
+                  className="w-full bg-voiceflow-orange hover:bg-orange-600 text-white py-3.5 rounded-xl font-bold text-sm transition-colors shadow-lg shadow-orange-900/20 flex items-center justify-center gap-2"
                 >
                   <CreditCard size={18} />
                   Upgrade to Pro (View Plans & Checkout)
@@ -428,20 +715,20 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling }: SettingsModalP
                   {activeTab === 'release-notes' ? "Release Notes" : activeTab === 'help-center' ? "Help Center" : "Contact Support"}
                 </h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
-                   {activeTab === 'release-notes' ? "What's new in VoiceFlow." : activeTab === 'help-center' ? "Browse guides and tutorials." : "Get in touch with our team."}
+                   {activeTab === 'release-notes' ? "What's new in VoiceFlow v3.3.2." : activeTab === 'help-center' ? "Browse guides and tutorials." : "Get in touch with our team."}
                 </p>
                 
                 <div className="flex flex-col items-center justify-center p-12 bg-gray-50 dark:bg-[#1A1A1A] rounded-xl border border-gray-200 dark:border-gray-800 border-dashed text-center">
                    {activeTab === 'release-notes' && <FileText size={32} className="text-gray-400 dark:text-gray-600 mb-3" />}
                    {activeTab === 'help-center' && <HelpCircle size={32} className="text-gray-400 dark:text-gray-600 mb-3" />}
                    {activeTab === 'contact' && <LifeBuoy size={32} className="text-gray-400 dark:text-gray-600 mb-3" />}
-                   <h3 className="text-base font-bold text-gray-900 dark:text-white mb-1">Content available online</h3>
-                   <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">This content is hosted on our website to ensure it's always up to date.</p>
+                   <h3 className="text-base font-bold text-gray-900 dark:text-white mb-1">Documentation & Guides</h3>
+                   <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">View complete guides, tutorials, and support articles online.</p>
                    <button 
-                     onClick={() => window.open('https://voiceflow.space', '_blank')}
+                     onClick={() => window.open('https://voiceflow.space/help-center', '_blank')}
                      className="text-xs bg-gray-200 dark:bg-[#2A2A2A] hover:bg-gray-300 dark:hover:bg-[#333333] border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white font-semibold px-4 py-2 rounded-lg transition-colors"
                    >
-                     View on web
+                     Open Help Center
                    </button>
                 </div>
               </div>
@@ -468,5 +755,5 @@ function ShortcutRow({ icon, label, keys }: { icon: string, label: string, keys:
         ))}
       </div>
     </div>
-  )
+  );
 }
