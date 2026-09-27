@@ -357,7 +357,7 @@ If you read one section, read this one — it is the part with an action attache
 
 Items 1 to 3 cost nothing and address where the money actually goes. Item 4 opens a market that was previously closed to you.
 
-For the wider setup sequence see [getting started with Voiceflow](/blog/getting-started-with-voiceflow), and if capital rather than tooling is your constraint, the [business grants directory](/grants) lists verified schemes for Nigerian SMEs. Plan details are on the [pricing page](/pricing).
+For the wider setup sequence see [getting started with Voiceflow](/blog/getting-started-with-voiceflow). Plan details are on the [pricing page](/pricing).
 `
   },
   {
@@ -497,7 +497,7 @@ The most useful thing you can do after week two is stop configuring and start us
 
 Once you have a month of it, the [Zen AI Copilot](/blog/zen-ai-copilot-business-insights) has enough history to say something useful about which products are tying up capital. Before that, it is working from a sample too small to draw from — which is true of any analysis, automated or not.
 
-Beyond operations, if you are looking for capital to scale, Voiceflow maintains a [business grants directory](/grants) of verified, active schemes for Nigerian SMEs, and the [pricing page](/pricing) sets out what each plan includes.
+Beyond operations, the [pricing page](/pricing) sets out what each plan includes.
 `
   },
   {
@@ -649,7 +649,7 @@ Zen AI is a faster route to questions you could have answered yourself with a sp
 
 It is not a strategist, it does not know your market, and it should not be the only reason you make an expensive decision. Used as a first pass on your own numbers — with the approval step doing its job — it is one of the more useful things in the product.
 
-To go further, see the [storefront setup guide](/blog/guide-to-public-storefront), the [pricing plans](/pricing), or the verified [business grants directory](/grants) if the constraint you are hitting is capital rather than information.
+To go further, see the [storefront setup guide](/blog/guide-to-public-storefront) or the [pricing plans](/pricing).
 `
   },
   {
@@ -3035,7 +3035,7 @@ In order, over roughly six weeks:
 
 Referrals will still outperform all of this for a while, and that is fine. The reason to start anyway is that referrals scale with the customer count you already have, and organic is the one channel where the work you did last year keeps paying this year.
 
-For the product side of the same argument, see our [getting started guide](/blog/getting-started-with-voiceflow), the [pricing plans](/pricing), or the [business grants directory](/grants).
+For the product side of the same argument, see our [getting started guide](/blog/getting-started-with-voiceflow) and the [pricing plans](/pricing).
 `
   },
   {

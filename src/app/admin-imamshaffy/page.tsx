@@ -2711,6 +2711,8 @@ function AdminDashboardContent({
     const storefrontSharesTotal = useCollectionCount('storefront_shares');
     const receiptSharesTotal = useCollectionCount('receipt_shares');
     const onlineOrdersTotal = useCollectionCount('onlineOrders', true);
+    const meetingsTotal = useCollectionCount('meetings');
+    const checkInsTotal = useCollectionCount('meeting_checkins');
 
     const normalizeTimestamp = (ts: any) => {
         if (!ts) return { toDate: () => new Date() };
@@ -4197,31 +4199,31 @@ function AdminDashboardContent({
                         </button>
                         <button onClick={() => handleOpenDetailModal('totalBusinesses')} className="text-left w-full h-full transition-transform active:scale-95">
                             <StatCard 
-                                title="Total Businesses" 
+                                title="Total Workspaces" 
                                 value={analyticsData.totalBusinesses} 
                                 icon={Building} 
-                                description="Total business registrations"
+                                description="Total registered workspaces"
                             />
                         </button>
-                        <button onClick={() => handleOpenDetailModal('inventoryActive')} className="text-left w-full h-full transition-transform active:scale-95">
+                        <div className="text-left w-full h-full">
                             <StatCard 
-                                title="Inventory Active" 
-                                value={platformAnalytics.businessesWithProducts} 
-                                icon={Package} 
-                                description="Businesses with added stock"
+                                title="Total Meetings" 
+                                value={meetingsTotal !== null ? meetingsTotal : 0} 
+                                icon={FileText} 
+                                description="Total meeting transcripts & summaries"
                             />
-                        </button>
-                        <button onClick={() => handleOpenDetailModal('generatingSales')} className="text-left w-full h-full transition-transform active:scale-95">
+                        </div>
+                        <div className="text-left w-full h-full">
                             <StatCard 
-                                title="Generating Sales" 
-                                value={platformAnalytics.businessesWithSales} 
-                                icon={DollarSign} 
-                                description="Businesses with transactions"
+                                title="Live Call Check-Ins" 
+                                value={checkInsTotal !== null ? checkInsTotal : 0} 
+                                icon={Activity} 
+                                description="Real-time call check-ins & syncs"
                             />
-                        </button>
+                        </div>
                         <button onClick={() => setIsAgeMilestoneOpen(true)} className="text-left w-full h-full transition-transform active:scale-95">
                             <StatCard 
-                                title="Zeneva Age" 
+                                title="Platform Age" 
                                 value={analyticsData.daysActive > 365 
                                     ? `${(analyticsData.daysActive / 365).toFixed(1)} Years` 
                                     : `${analyticsData.daysActive} Days`} 

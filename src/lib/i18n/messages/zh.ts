@@ -1892,7 +1892,6 @@ const zh: Messages = {
     colCompany: '公司',
     linkMission: '我们的使命',
     linkCareers: '招聘',
-    linkGrants: '商家扶持',
     linkContact: '联系我们',
     linkPrivacyPolicy: '隐私政策',
     linkTerms: '服务条款',

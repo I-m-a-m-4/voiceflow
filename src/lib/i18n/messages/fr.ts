@@ -1992,7 +1992,6 @@ const fr: Messages = {
     colCompany: 'Entreprise',
     linkMission: 'Notre mission',
     linkCareers: 'Carrières',
-    linkGrants: 'Subventions',
     linkContact: 'Contact',
     linkPrivacyPolicy: 'Politique de confidentialité',
     linkTerms: 'Conditions d’utilisation',

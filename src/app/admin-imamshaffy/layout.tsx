@@ -5,7 +5,7 @@ import { useUser, useFirestore } from '@/firebase';
 import { terminalListenerErrorHandler } from '@/firebase/retry';
 import { useRouter, usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { Loader, LogOut, LayoutDashboard, Newspaper, Bell, MessageSquare, Crown, Sun, Moon, Bug, Users, Zap, Clapperboard, PieChart, MoreHorizontal, Mail, Smartphone, Database, Sparkles } from 'lucide-react';
+import { Loader, LogOut, LayoutDashboard, Newspaper, Bell, MessageSquare, Crown, Sun, Moon, Bug, Users, Zap, Clapperboard, MoreHorizontal, Mail, Smartphone, Database, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { getAuth, signOut } from 'firebase/auth';
 import { cn } from '@/lib/utils';
@@ -34,7 +34,6 @@ const ADMIN_EMAIL = 'belloimam431@gmail.com';
 const navLinks = [
   { href: '/admin-imamshaffy', label: 'Dashboard', icon: LayoutDashboard, primary: true },
   { href: '/admin-imamshaffy/users', label: 'Users', icon: Users, primary: true },
-  { href: '/admin-imamshaffy/investors', label: 'Cap Table', icon: PieChart },
   { href: '/admin-imamshaffy/achievements', label: 'Achievements', icon: Crown },
   { href: '/admin-imamshaffy/outreach', label: 'Email', icon: Mail },
   { href: '/admin-imamshaffy/blog', label: 'Blog', icon: Newspaper },

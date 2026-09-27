@@ -226,7 +226,7 @@ const MASTER_GAIN = 2.1;
 
 /**
  * Resolve `--music`. A directory is searched for a file named after the flow
- * (`pos.mp3`, `zen.m4a`) and falls back to the first track in it, so you can keep
+ * (`zen.m4a`) and falls back to the first track in it, so you can keep
  * a folder of beds and never pass a filename again.
  */
 export function resolveMusic(spec, flowId) {

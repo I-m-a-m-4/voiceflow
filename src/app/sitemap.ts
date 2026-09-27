@@ -26,7 +26,6 @@ const CORE_ROUTES: { path: string; priority: number; changeFrequency: MetadataRo
   { path: '/signup', priority: 0.8, changeFrequency: 'monthly' },
   { path: '/login', priority: 0.6, changeFrequency: 'monthly' },
   { path: '/contact', priority: 0.8, changeFrequency: 'monthly' },
-  { path: '/grants', priority: 0.7, changeFrequency: 'weekly' },
   { path: '/careers', priority: 0.6, changeFrequency: 'monthly' },
   { path: '/about/our-mission', priority: 0.6, changeFrequency: 'monthly' },
   { path: '/legal/privacy-policy', priority: 0.3, changeFrequency: 'yearly' },

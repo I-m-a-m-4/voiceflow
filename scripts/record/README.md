@@ -6,13 +6,13 @@ a presentation cursor with click ripples over the top, and writes an H.264 MP4
 with a music bed and interaction sound.
 
 The pixels in the video are the app's own pixels. Not a mockup, not a canvas
-re-drawing — if the POS page changes tomorrow, the video changes with it,
+re-drawing — if the app changes tomorrow, the video changes with it,
 because there is nothing here that describes what the app looks like.
 
 ```bash
 cp scripts/record/recorder.env.example .env.recorder   # then fill it in
 npm run dev                                             # in another terminal
-npm run record -- --flow pos
+npm run record -- --flow zen
 ```
 
 Output lands in `marketing-out/` (gitignored).
@@ -42,7 +42,7 @@ which also gives you `ffprobe`.
 ```
 npm run record -- [options]
 
-  --flow      pos | inventory | zen | trailer | all   (default: pos)
+  --flow      zen | all                            (default: zen)
   --device    desktop | mobile | both            (default: desktop)
   --theme     light | dark | both                (default: light)
   --url       app to record                      (default: $VOICEFLOW_RECORD_URL)
@@ -64,8 +64,8 @@ capture rate. Measured at 1920×1080 — q92 painted 19-31fps, q85 33, q70 37. B
 the requested fps some emitted frames are repeats, which is judder. 85 is the
 default because these frames are re-encoded to H.264 at crf 18 anyway.
 
-`--flow all --device both --theme both` is twelve takes in one run: three flows
-× desktop/mobile × light/dark.
+`--flow all --device both --theme both` is four takes in one run: zen ×
+desktop/mobile × light/dark.
 
 ### Devices
 
@@ -94,14 +94,13 @@ Ticks for clicks and keystrokes are on by default. A music bed is the one thing
 you supply:
 
 ```bash
-npm run record -- --flow pos --music D:/marketing/beds/upbeat.mp3
+npm run record -- --flow zen --music D:/marketing/beds/upbeat.mp3
 npm run record -- --flow all --music D:/marketing/beds        # folder
 ```
 
-A folder is searched for a track named after the flow — `pos.mp3`, `zen.mp3`,
-`inventory.mp3` — and falls back to the first file in it. So one folder can
-score every take in a twelve-take run, each flow with its own bed, no extra
-flags. Set `VOICEFLOW_RECORD_MUSIC` in `.env.recorder` to stop typing it at all.
+A folder is searched for a track named after the flow — `zen.mp3` — and falls
+back to the first file in it. So one folder can score every take in a run, no
+extra flags. Set `VOICEFLOW_RECORD_MUSIC` in `.env.recorder` to stop typing it at all.
 
 ```
   --music <path>        file, or folder to pick from
@@ -159,7 +158,7 @@ never re-encodes the picture. So you can swap the bed on a take from last week,
 or try three beds against the same cut, in a second or two each:
 
 ```bash
-npm run record:audio -- marketing-out/voiceflow-pos-desktop-light.mp4 \
+npm run record:audio -- marketing-out/voiceflow-zen-desktop-light.mp4 \
   --music D:/marketing/beds/calm.mp3
 ```
 
@@ -191,120 +190,26 @@ exactly. Constant-rate sampling deleted the problem rather than solving it.
 
 ---
 
-## The Microsoft Store trailer
-
-```bash
-npm run trailer                                    # records the take
-npm run trailer:assets -- marketing-out/voiceflow-trailer-desktop-light.mp4
-```
-
-Partner Center does not accept a video on its own. A trailer is **five files and a
-string**, and it rejects the set for any one of them:
-
-| file | requirement |
-|---|---|
-| `.mp4` | MOV or MP4, **exactly 1920x1080**, H.264 High, ≤ 2 GB |
-| `-thumb.png` | PNG, **exactly 1920x1080** |
-| `.vtt` | **WebVTT only**, < 50 MB |
-| `-audio-description.mp3` | **MP3 only**, < 500 MB |
-| `-hero.png` | 16:9 super hero art — optional, but without it trailers do not appear at the *top* of the listing |
-| title | ≤ 255 characters |
-
-`--store` encodes to their published MP4 spec rather than the default crf 18: 50
-Mbps, closed GOP of half the frame rate, exactly 2 consecutive B frames, CABAC,
-limited-range 4:2:0, AAC-LC 384 kbps stereo at 48 kHz. It is a *delivery* format —
-bigger and no better. The default take is the one to keep for everything else.
-
-`store.mjs` builds the other four files and then prints every published requirement
-with a tick or a cross against the actual file, so "will this pass" is a table
-rather than an upload attempt.
-
-**Two of the numbers cannot be met and are reported as recommendations.** The spec
-names 50 Mbps video and 384 kbps audio; both are *requested* at encode and neither
-is reached, because a UI trailer is three quarters held frames and no encoder can
-spend that many bits on skip frames or on silence. What is enforced is that the file
-was asked for the spec — profile, GOP, B-frames, codec, sample rate and channels are
-all exact — and Microsoft re-encodes every trailer to Smooth Streaming on ingest
-anyway.
-
-### Writing the audio description
-
-Closed captions need no writing: the caption track the flow already shows *is* the
-script, and `store.mjs` reads it out of the marks sidecar with the measured length of
-each spoken line, so a cue ends when its sentence stops rather than at a guess.
-
-An audio description is different content and is written by hand, in
-`describe.mjs`. Captions are the audio in text for someone who cannot hear it; a
-description is the picture in audio for someone who cannot see it. So "Tap to add" is
-a caption and "a grid of product cards fills the screen" is a description, and the
-one thing a description must never do is repeat the narration — it is playing at the
-same time.
-
-The times are seconds into the finished film, which means they have to fit in the
-silences:
-
-```bash
-npm run trailer:assets -- marketing-out/voiceflow-trailer-desktop-light.mp4 --scaffold
-```
-
-prints the caption track and every gap between spoken lines. `store.mjs` then
-re-checks each description against the take it is building for and **reports** a
-clash — naming the line it would have talked over — rather than shifting it. A
-description moved to where it fits is a description of the wrong shot, which for
-somebody relying on it is worse than a gap.
-
-### Three things that cost takes here
-
-**The achievement modal.** Every take runs in a throwaway Chrome profile, so
-`voiceflow_ach_seen_<businessId>` is always empty and `<AchievementCelebration />` —
-mounted in `(app)/layout.tsx`, so it can appear over any page — fires real milestones
-as fresh unlocks. It killed two takes: "₦1 Million in Sales" over the product grid,
-then later over the cart's own Next button, *after* the flow had dismissed it at
-startup. It is a race, so it is handled where the symptom appears:
-`Page.clearBlocker` now presses Escape when the thing covering a target is a
-`[role="dialog"]`. Safe to press blindly, because a flow working *inside* a dialog is
-not blocked by it.
-
-**A hold shorter than its own sentence.** A caption is also a voice-over line, placed
-at the instant the caption appeared — so two captions closer together than the first
-takes to *say* produce two voices at once. The `.vtt` clamp hides it; the audio does
-not. When you edit a caption, check the measured length with `--scaffold`.
-
-**Film length is wall-clock, so machine load is a creative constraint.** Frames are
-written at a constant rate, so the finished film is exactly as long as the flow took
-to run. The same flow measured **63.9s at 24 fps painted and 72.2s at 15 fps** — the
-difference was other things running on the machine. Shoot the trailer on a quiet
-machine, and against a production build (`next build` + `next start`), not the dev
-server: on dev a single navigation was measured at **13.4 seconds** of finished
-trailer because the route compiled on demand mid-flow.
-
----
-
 ## Writes are opt-in
 
-By default a take is **read-only**. The POS flow builds a cart, walks through
-customer and payment, and stops at the review screen without pressing *Complete
-Sale*. The inventory flow opens Quick Edit, types the new stock count, and
-presses *Cancel*.
+By default a take is **read-only**. The coded `zen` flow only ever reads — it
+asks a question and watches the answer stream in — and recipes should be
+written the same way, stopping before any final destructive click.
 
-`--commit` lets both go through. The captions change to match, so footage from a
-read-only take never claims a sale was rung up.
+`--commit` exists for flows that model a write: a flow that opts in performs it
+when the flag is passed, and the captions change to match, so footage from a
+read-only take never claims something was saved.
 
-This exists because the recorder holds a real login. A take pointed at the wrong
-account, at 1am, should not be able to move someone's stock count.
+This exists because the recorder holds a real login. A take pointed at the
+wrong account, at 1am, should not be able to change someone's data.
 
 ---
 
 ## Flows
 
-Coded in `flows.mjs`, one exported function each. They return the end card's
-text, so a flow owns its own closing frame.
-
-**`pos`** — Sales → three products into the cart → Next: Customer → Next:
-Payment → Cash → Review & Complete → (`--commit`) Complete Sale.
-
-**`inventory`** — Inventory → search → Inventory Health tab → Low Stock tile →
-row ⋯ menu → Quick Edit → new stock count → Save Changes (or Cancel).
+Coded in `flows.mjs`, one exported function each. New footage that does not
+need coded logic should be a `--recipe` JSON file instead — a recipe is
+registered as a flow and is otherwise indistinguishable from a coded one.
 
 **`zen`** — Zen AI → type a real question into the composer → send → hold while
 the tool-call status line and the answer stream in.
@@ -350,7 +255,7 @@ label is what the flow is actually about.
 ## Debugging a broken take
 
 ```bash
-npm run record -- --flow pos --headed --keep-frames
+npm run record -- --flow zen --headed --keep-frames
 ```
 
 `--headed` shows the browser so you can watch where it went wrong. `--keep-frames`
@@ -401,7 +306,7 @@ at `--url`, or the account has no business attached.
 ## How long a take takes
 
 ```bash
-npm run record -- --flow pos --timings
+npm run record -- --flow zen --timings
 ```
 
 ```

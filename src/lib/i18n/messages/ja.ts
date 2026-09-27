@@ -1923,7 +1923,6 @@ const ja: Messages = {
     colCompany: '会社情報',
     linkMission: '私たちの使命',
     linkCareers: '採用情報',
-    linkGrants: '事業者向け助成',
     linkContact: 'お問い合わせ',
     linkPrivacyPolicy: 'プライバシーポリシー',
     linkTerms: '利用規約',

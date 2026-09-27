@@ -2187,7 +2187,6 @@ const en = {
     colCompany: 'Company',
     linkMission: 'Our Mission',
     linkCareers: 'Careers',
-    linkGrants: 'Workspace Grants',
     linkContact: 'Contact',
     linkPrivacyPolicy: 'Privacy Policy',
     linkTerms: 'Terms of Service',

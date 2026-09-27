@@ -1919,7 +1919,6 @@ const ko: Messages = {
     colCompany: '회사',
     linkMission: '우리의 미션',
     linkCareers: '채용',
-    linkGrants: '사업자 지원금',
     linkContact: '문의하기',
     linkPrivacyPolicy: '개인정보 처리방침',
     linkTerms: '서비스 이용약관',

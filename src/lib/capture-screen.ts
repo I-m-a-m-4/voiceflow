@@ -6,7 +6,7 @@ export async function captureScreenBase64(): Promise<string> {
       }
     });
 
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const video = document.createElement('video');
       video.muted = true;
       video.playsInline = true;
@@ -14,7 +14,7 @@ export async function captureScreenBase64(): Promise<string> {
 
       video.onloadedmetadata = () => {
         video.play();
-        // Wait a tiny bit for the video to actually render a frame
+        // Wait a tiny bit for the video to render frame
         setTimeout(() => {
           const canvas = document.createElement('canvas');
           canvas.width = video.videoWidth;
@@ -23,27 +23,25 @@ export async function captureScreenBase64(): Promise<string> {
           
           if (ctx) {
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            // Compress heavily to save bandwidth/tokens (70% quality JPEG)
-            // Strip the data URL prefix here, or just keep it and strip on server
             const base64Image = canvas.toDataURL('image/jpeg', 0.7);
             
-            // Stop all tracks immediately
             stream.getTracks().forEach(track => track.stop());
             resolve(base64Image);
           } else {
             stream.getTracks().forEach(track => track.stop());
-            reject(new Error("Failed to get canvas context"));
+            resolve("");
           }
-        }, 300); // 300ms delay ensures frame is painted
+        }, 300);
       };
 
-      video.onerror = (e) => {
+      video.onerror = () => {
         stream.getTracks().forEach(track => track.stop());
-        reject(e);
+        resolve("");
       };
     });
   } catch (err) {
-    console.error("Screen capture failed", err);
-    throw err;
+    console.warn("Screen capture skipped or permission denied:", err);
+    return "";
   }
 }
+

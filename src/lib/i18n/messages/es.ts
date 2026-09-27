@@ -1978,7 +1978,6 @@ const es: Messages = {
     colCompany: 'Empresa',
     linkMission: 'Nuestra misión',
     linkCareers: 'Empleo',
-    linkGrants: 'Subvenciones',
     linkContact: 'Contacto',
     linkPrivacyPolicy: 'Política de privacidad',
     linkTerms: 'Términos del servicio',

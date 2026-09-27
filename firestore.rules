@@ -230,6 +230,28 @@ service cloud.firestore {
       allow read, delete: if isSuperAdmin();
     }
 
+    // Meeting notetaker data. A meeting belongs to the user who recorded it;
+    // only that user (or the platform owner) reads or deletes it. `type` is
+    // 'meeting' | 'dictation', both written by the same client path.
+    match /meetings/{meetingId} {
+      allow create: if isUserAuthenticated() &&
+                       isNotSuspended() &&
+                       request.resource.data.userId == request.auth.uid;
+      allow read: if isSuperAdmin() ||
+                     (isUserAuthenticated() && resource.data.userId == request.auth.uid);
+      allow update, delete: if isSuperAdmin() ||
+                     (isUserAuthenticated() && resource.data.userId == request.auth.uid);
+    }
+
+    match /meeting_checkins/{checkInId} {
+      allow create: if isUserAuthenticated() &&
+                       isNotSuspended() &&
+                       request.resource.data.userId == request.auth.uid;
+      allow read: if isSuperAdmin() ||
+                     (isUserAuthenticated() && resource.data.userId == request.auth.uid);
+      allow update, delete: if isSuperAdmin();
+    }
+
     // =================================================================
     // Multi-Tenant Collections
     // =================================================================

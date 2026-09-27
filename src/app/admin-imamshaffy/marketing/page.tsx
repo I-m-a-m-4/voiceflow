@@ -14,15 +14,13 @@ import { cn } from '@/lib/utils';
 import { DemoPlayer } from '@/components/admin/demo-player';
 import { RecorderPanel } from '@/components/admin/recorder-panel';
 import { THEMES, type Demo, type Theme } from '@/lib/marketing/anim';
-import { posDemo } from '@/lib/marketing/demo-pos';
 import { zenDemo } from '@/lib/marketing/demo-zen';
-import { inventoryDemo } from '@/lib/marketing/demo-inventory';
 import {
   PRESETS, QUALITY, canRecord, recordDemo, stillFrame, download, durationLabel,
   type Preset,
 } from '@/lib/marketing/record';
 
-const DEMOS: Demo[] = [posDemo, inventoryDemo, zenDemo];
+const DEMOS: Demo[] = [zenDemo];
 
 export default function MarketingStudioPage() {
   const { toast } = useToast();
@@ -70,7 +68,7 @@ export default function MarketingStudioPage() {
         onProgress: setProgress,
         signal: controller.signal,
       });
-      download(blob, `zeneva-${demo.id}-${preset.id}-${themeId}.webm`);
+      download(blob, `voiceflow-${demo.id}-${preset.id}-${themeId}.webm`);
       toast({
         title: 'Video ready',
         description: `${demo.title} · ${preset.label} · ${themeId} · ${(blob.size / 1e6).toFixed(1)} MB`,
@@ -96,7 +94,7 @@ export default function MarketingStudioPage() {
     setSavingStill(true);
     try {
       const blob = await stillFrame(demo, frame, preset, theme);
-      download(blob, `zeneva-${demo.id}-${themeId}-frame-${frame}.png`);
+      download(blob, `voiceflow-${demo.id}-${themeId}-frame-${frame}.png`);
       toast({ title: 'Frame saved', description: `Frame ${frame} as PNG.` });
     } catch (err) {
       console.error('Still export failed:', err);

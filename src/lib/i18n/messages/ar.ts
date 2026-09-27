@@ -1946,7 +1946,6 @@ const ar: Messages = {
     colCompany: 'الشركة',
     linkMission: 'رسالتنا',
     linkCareers: 'الوظائف',
-    linkGrants: 'منح الأعمال',
     linkContact: 'تواصل معنا',
     linkPrivacyPolicy: 'سياسة الخصوصية',
     linkTerms: 'شروط الخدمة',

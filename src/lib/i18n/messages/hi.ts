@@ -1947,7 +1947,6 @@ const hi: Messages = {
     colCompany: 'कंपनी',
     linkMission: 'हमारा उद्देश्य',
     linkCareers: 'करियर',
-    linkGrants: 'व्यापार अनुदान',
     linkContact: 'संपर्क',
     linkPrivacyPolicy: 'गोपनीयता नीति',
     linkTerms: 'सेवा की शर्तें',

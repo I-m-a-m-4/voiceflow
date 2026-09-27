@@ -6,9 +6,9 @@
  * real mouse and keyboard events, draws a presentation cursor over the top, and
  * writes an H.264 MP4.
  *
- *   npm run record -- --flow pos
+ *   npm run record -- --flow zen
  *   npm run record -- --flow zen --theme dark
- *   npm run record -- --flow inventory --device mobile
+ *   npm run record -- --recipe my-page.json --device mobile
  *   npm run record -- --flow all --device both
  *
  * Nothing in `src/` is touched, no dependency is added, and no `data-testid`
@@ -88,7 +88,7 @@ const DEVICES = {
 
 function parseArgs(argv) {
   const out = {
-    flow: 'pos', flowSet: false, device: 'desktop', theme: 'light',
+    flow: 'zen', flowSet: false, device: 'desktop', theme: 'light',
     url: process.env.VOICEFLOW_RECORD_URL || 'http://localhost:9007',
     outDir: path.join(ROOT, 'marketing-out'),
     /*
@@ -209,12 +209,12 @@ Voiceflow marketing recorder
 
   npm run record -- [options]
 
-  --flow      pos | inventory | zen | trailer | all   (default: pos)
+  --flow      zen | all                            (default: zen)
   --device    desktop | mobile | both            (default: desktop)
   --theme     light | dark | both                (default: light)
 
   Those three also take a comma-separated list, so you can ask for exactly the
-  takes you want:  --flow pos,zen --theme light,dark  is four videos.
+  takes you want:  --flow zen --theme light,dark  is two videos.
 
   --recipe    a JSON file describing any page to record, so a new video does not
               need a new script. The recipe's own "id" becomes a flow name, and
@@ -232,7 +232,7 @@ Voiceflow marketing recorder
   --cards     a JSON file rewriting the opening and closing screen of any flow,
               so new ad copy is not a code change:
 
-                { "pos": { "open": { "title": "Black Friday.",
+                { "zen": { "open": { "title": "Black Friday.",
                                      "subtitle": "Queue's gone." },
                            "end":  { "cta": "Get Voiceflow free" } } }
 
@@ -270,7 +270,7 @@ Voiceflow marketing recorder
 
 Audio:
   --music <path>        music bed — a file, or a folder to pick from. A folder is
-                        searched for <flow>.mp3 first (pos.mp3, zen.mp3), so one
+                        searched for <flow>.mp3 first (zen.mp3), so one
                         folder can score every take with no further flags.
   --music-volume 0-1    bed level under the ticks       (default: 0.28)
   --no-bed              drop the ambient bed, keep the ticks
@@ -327,7 +327,7 @@ Microsoft Store delivery:
   a track you have the rights to, since these videos are going out as marketing.
 
   Already recorded something? Re-score it without re-shooting:
-    node scripts/record/add-audio.mjs marketing-out/voiceflow-pos-desktop-light.mp4 \
+    node scripts/record/add-audio.mjs marketing-out/voiceflow-zen-desktop-light.mp4 \
       --music assets/beds/upbeat.mp3
 
 Credentials (never passed as flags, never printed):
@@ -1190,8 +1190,8 @@ async function main() {
     const parsed = loadRecipe(opts.recipe);
     // `--recipe` on its own means "record this" — asking for `--flow <id>` as
     // well would be a second place to spell the same name, and getting it wrong
-    // would silently shoot the POS flow instead. An explicit `--flow` still
-    // wins, so `--recipe x.json --flow pos,dashboard` records both.
+    // would silently shoot the coded Zen flow instead. An explicit `--flow` still
+    // wins, so `--recipe x.json --flow zen,dashboard` records both.
     if (!opts.flowSet) opts.flow = parsed.id;
     log(`recipe: ${parsed.title} → ${parsed.route} (${parsed.steps.length} step(s), id "${parsed.id}")`);
   }

@@ -1974,7 +1974,6 @@ const it: Messages = {
     colCompany: 'Azienda',
     linkMission: 'La nostra missione',
     linkCareers: 'Lavora con noi',
-    linkGrants: 'Contributi alle imprese',
     linkContact: 'Contatti',
     linkPrivacyPolicy: 'Informativa sulla privacy',
     linkTerms: 'Termini di servizio',

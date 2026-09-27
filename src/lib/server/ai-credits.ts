@@ -154,20 +154,11 @@ function recentCalls(data: any, nowMs: number): number[] {
  *
  * The Genkit flows in `src/ai/flows/*` do not surface a usage object, so they are
  * priced by hand — the one place a table is unavoidable. Every one of them was
- * **completely unmetered** before this, which is where most of the cost leak was:
- * `visualCount` bills a multimodal call on the platform key for a caller-supplied
- * photo of arbitrary size.
- *
- * An image is worth far more than a text turn, so `visualCount` is weighted
- * accordingly. These are floors, not measurements — if a flow is ever moved onto the
+ * **completely unmetered** before this, which is where most of the cost leak was.
+ * These are floors, not measurements — if a flow is ever moved onto the
  * AI SDK and reports usage, delete its entry and settle on real tokens instead.
  */
 export const FLOW_CREDITS = {
-  /** Multimodal: an image plus a product list. The pattern AI product upload follows. */
-  visualCount: 8,
-  productTroubleshoot: 2,
-  businessAnalysis: 4,
-  getCustomerInsights: 3,
   voiceflowSupportChat: 1,
 } as const;
 

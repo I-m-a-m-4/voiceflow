@@ -111,7 +111,7 @@ export default function HomeClient() {
           </div>
 
           <div className="flex items-center gap-3">
-            <a href="http://localhost:9002/dashboard" className="hidden md:flex items-center gap-2 px-5 py-2.5 rounded-full bg-white text-slate-900 font-semibold hover:bg-orange-50 transition-colors shadow-sm">
+            <a href="/login" className="hidden md:flex items-center gap-2 px-5 py-2.5 rounded-full bg-white text-slate-900 font-semibold hover:bg-orange-50 transition-colors shadow-sm">
               Sign In
             </a>
             <button
@@ -136,7 +136,7 @@ export default function HomeClient() {
           <a href="#faq" onClick={() => setMobileMenuOpen(false)} className="text-xl font-medium border-b border-zinc-800 pb-3">
             FAQ
           </a>
-          <a href="http://localhost:9002/dashboard" onClick={() => setMobileMenuOpen(false)} className="mt-4 w-full py-3 text-center bg-orange-500 hover:bg-orange-600 transition-colors font-semibold rounded-xl text-white">
+          <a href="/login" onClick={() => setMobileMenuOpen(false)} className="mt-4 w-full py-3 text-center bg-orange-500 hover:bg-orange-600 transition-colors font-semibold rounded-xl text-white">
             Sign In
           </a>
         </div>

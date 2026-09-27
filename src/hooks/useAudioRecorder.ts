@@ -11,7 +11,7 @@ export function useAudioRecorder() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isPausedBySilence, setIsPausedBySilence] = useState(false);
   const [transcript, setTranscript] = useState("");
-  
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
   const micStreamRef = useRef<MediaStream | null>(null);
@@ -21,6 +21,8 @@ export function useAudioRecorder() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const vadLoopRef = useRef<number | null>(null);
+  const recognitionRef = useRef<any>(null);
+  const isRecordingRef = useRef<boolean>(false);
 
   const startRecording = useCallback(async (captureSystemAudio = false) => {
     try {
@@ -80,8 +82,56 @@ export function useAudioRecorder() {
 
       mediaRecorder.start(1000); // chunk every second
       setIsRecording(true);
+      isRecordingRef.current = true;
       setIsPausedBySilence(false);
       setTranscript("");
+
+      // --- Real-Time Speech Recognition Setup ---
+      const SpeechRecognitionAPI = typeof window !== "undefined" && ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+      if (SpeechRecognitionAPI) {
+        try {
+          const recognition = new SpeechRecognitionAPI();
+          recognition.continuous = true;
+          recognition.interimResults = true;
+          recognition.lang = "en-US";
+
+          let finalTranscript = "";
+
+          recognition.onresult = (event: any) => {
+            let interimTranscript = "";
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+              if (event.results[i].isFinal) {
+                finalTranscript += event.results[i][0].transcript + " ";
+              } else {
+                interimTranscript += event.results[i][0].transcript;
+              }
+            }
+            const currentText = (finalTranscript + interimTranscript).trim();
+            if (currentText) {
+              setTranscript(currentText);
+            }
+          };
+
+          recognition.onerror = (event: any) => {
+            console.warn("SpeechRecognition warning:", event.error);
+          };
+
+          recognition.onend = () => {
+            if (isRecordingRef.current) {
+              try {
+                recognition.start();
+              } catch (e) {
+                // Ignore if already running
+              }
+            }
+          };
+
+          recognition.start();
+          recognitionRef.current = recognition;
+        } catch (recErr) {
+          console.warn("SpeechRecognition start failed:", recErr);
+        }
+      }
 
       // --- VAD (Silence Detection) Setup ---
       const audioCtx = new AudioContext();
@@ -138,6 +188,14 @@ export function useAudioRecorder() {
   }, []);
 
   const stopRecording = useCallback(() => {
+    isRecordingRef.current = false;
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {}
+      recognitionRef.current = null;
+    }
+
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       mediaRecorderRef.current.stop();
     }
@@ -230,3 +288,4 @@ export function useAudioRecorder() {
 
   return { startRecording, stopRecording, isRecording, isProcessing, isPausedBySilence, transcript };
 }
+

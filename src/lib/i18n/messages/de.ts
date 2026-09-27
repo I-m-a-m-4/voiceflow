@@ -1981,7 +1981,6 @@ const de: Messages = {
     colCompany: 'Unternehmen',
     linkMission: 'Unsere Mission',
     linkCareers: 'Karriere',
-    linkGrants: 'Förderungen',
     linkContact: 'Kontakt',
     linkPrivacyPolicy: 'Datenschutzerklärung',
     linkTerms: 'Nutzungsbedingungen',
