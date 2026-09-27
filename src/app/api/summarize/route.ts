@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
       systemPrompt = "You are an AI assistant specialized in structuring meeting transcripts. Your task is to extract:\n1. Executive Summary (3-5 bullets)\n2. Action Items (with owners if specified)\n3. Key Decisions.\nFormat the output in clean Markdown.";
     }
 
-    const modelsToTry = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"];
+    const modelsToTry = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama3-70b-8192", "mixtral-8x7b-32768"];
     let completion = null;
     let lastError = null;
 
@@ -47,7 +47,6 @@ export async function POST(req: NextRequest) {
           model: model,
           temperature: 0.2,
           max_tokens: 2048,
-          reasoning_effort: "low",
         });
         if (completion) break;
       } catch (err: any) {

@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState } from 'react';
-import { ChevronDown, Square, Sparkles, Wand2, MessageSquare, RotateCcw, MoreHorizontal, Play, Send, Loader2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { ChevronDown, Square, Sparkles, Wand2, MessageSquare, RotateCcw, MoreHorizontal, Play, Send, Loader2, ShieldCheck, ShieldAlert } from 'lucide-react';
 import { captureScreenBase64 } from '@/lib/capture-screen';
 
 interface MeetingWidgetProps {
@@ -15,6 +15,33 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
   const [query, setQuery] = useState("");
   const [isQuerying, setIsQuerying] = useState(false);
   const [aiResponse, setAiResponse] = useState<string | null>(null);
+  const [isStealth, setIsStealth] = useState<boolean>(true);
+
+  // Initialize stealth mode on mount
+  useEffect(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_stealth_mode') : null;
+    const shouldBeStealth = saved !== null ? saved === 'true' : true;
+    setIsStealth(shouldBeStealth);
+    applyStealth(shouldBeStealth);
+  }, []);
+
+  const applyStealth = async (stealthOn: boolean) => {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('set_detectable', { detectable: stealthOn });
+    } catch {
+      // In web browser mode, invoke is unavailable; handled natively in Tauri desktop
+    }
+  };
+
+  const toggleStealth = async () => {
+    const next = !isStealth;
+    setIsStealth(next);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('voiceflow_stealth_mode', String(next));
+    }
+    await applyStealth(next);
+  };
   
   if (!isRecording) return null;
 
@@ -69,6 +96,20 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
           <Send size={16} className="text-white transform -rotate-45 ml-1" />
         </div>
         
+        {/* Toggleable Stealth Mode button */}
+        <button 
+          onClick={toggleStealth}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
+            isStealth 
+              ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30" 
+              : "bg-white/10 text-white/70 hover:text-white hover:bg-white/20 border border-white/10"
+          }`}
+          title={isStealth ? "Stealth Mode ON: Invisible to screen sharing (Zoom/Meet) & hidden from taskbar" : "Stealth Mode OFF: Click to enable undetectable mode"}
+        >
+          {isStealth ? <ShieldCheck size={14} className="text-emerald-400" /> : <ShieldAlert size={14} className="text-amber-400" />}
+          <span>{isStealth ? "Stealth: ON" : "Stealth: OFF"}</span>
+        </button>
+
         <button 
           onClick={() => setIsHidden(!isHidden)}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-full hover:bg-white/10 text-white/80 hover:text-white transition-colors text-sm font-semibold"

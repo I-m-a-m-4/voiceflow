@@ -34,9 +34,15 @@ fn validate_subscription(access_level: String, trial_expires_at: i64) -> bool {
 
 #[tauri::command]
 fn set_detectable(window: tauri::Window, detectable: bool) -> Result<(), String> {
-    // In the frontend, 'detectable' = true means Stealth Mode is ON.
-    // Therefore, if true, we want to protect the content (WDA_EXCLUDEFROMCAPTURE / NSWindowSharingNone).
+    // In the frontend, 'detectable' = true means Stealth Mode is ON (100% Undetectable).
+    // 1. Exclude window from screen capture (Zoom, Google Meet, Teams, OBS via WDA_EXCLUDEFROMCAPTURE)
     window.set_content_protected(detectable).map_err(|e| e.to_string())?;
+    // 2. Hide or restore taskbar icon so the interviewer never sees Voiceflow in the taskbar
+    window.set_skip_taskbar(detectable).map_err(|e| e.to_string())?;
+    // 3. Keep floating widget levitating smoothly above meeting windows
+    if detectable {
+        let _ = window.set_always_on_top(true);
+    }
     Ok(())
 }
 

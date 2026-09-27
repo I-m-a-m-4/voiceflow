@@ -81,19 +81,28 @@ export default function RightPanel() {
         <p className="text-[11px] font-semibold text-muted-foreground mb-3">Record system audio and mic</p>
         
         {!isRecording && !isProcessing ? (
-          <>
+          <div className="space-y-2">
+            <button 
+              onClick={() => startRecording(true)} 
+              className="w-full flex items-center justify-center gap-2 py-3 bg-voiceflow-orange text-white rounded-lg hover:bg-orange-600 transition-colors font-semibold shadow-sm"
+              title="Capture System Audio (Zoom/Meet/Teams call participants) and your Microphone"
+            >
+              <Video size={18} />
+              Record Online Meeting
+            </button>
             <button 
               onClick={() => startRecording(false)} 
-              className="w-full flex items-center justify-center gap-2 py-3 bg-voiceflow-orange text-white rounded-lg hover:bg-orange-600 transition-colors font-semibold shadow-sm"
+              className="w-full flex items-center justify-center gap-2 py-2.5 bg-muted/60 hover:bg-muted text-foreground border border-border rounded-lg transition-colors font-semibold text-xs shadow-sm"
+              title="Capture Microphone for in-person conversations, 1-on-1s, and room talks"
             >
-              <Mic size={18} />
-              Start Recording
+              <Mic size={15} className="text-muted-foreground" />
+              In-Person Conversation (Mic)
             </button>
             <div className="mt-2.5 flex items-center justify-center gap-1.5 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 py-1.5 px-3 rounded-full border border-emerald-500/20">
               <ShieldCheck size={14} className="text-emerald-500" />
-              <span className="text-[11px] font-bold tracking-tight">100% Undetectable in Zoom, Teams & Meet</span>
+              <span className="text-[11px] font-bold tracking-tight">100% Undetectable • No Bots • Taskbar Hidden</span>
             </div>
-          </>
+          </div>
         ) : isRecording ? (
           <div className="w-full p-4 border border-red-500/30 bg-red-500/10 rounded-lg flex flex-col items-center justify-center gap-3">
             <div className="flex items-center gap-2 text-red-500 font-semibold animate-pulse">
