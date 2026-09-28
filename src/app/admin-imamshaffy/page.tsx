@@ -3038,8 +3038,8 @@ function AdminDashboardContent({
         if (searchQuery) {
             const lowerQuery = searchQuery.toLowerCase();
             result = result.filter(u =>
-                u.name.toLowerCase().includes(lowerQuery) ||
-                u.email.toLowerCase().includes(lowerQuery) ||
+                (u.name || u.displayName || '').toLowerCase().includes(lowerQuery) ||
+                (u.email || '').toLowerCase().includes(lowerQuery) ||
                 (businesses?.find(b => b.id === u.businessId)?.name || '').toLowerCase().includes(lowerQuery)
             );
         }
@@ -3048,12 +3048,13 @@ function AdminDashboardContent({
         if (filterPlan !== 'all') {
             result = result.filter(u => {
                 const business = businesses?.find(b => b.id === u.businessId);
-                // If no business, assume starter/no plan unless looking for strictly starter
-                if (!business) return filterPlan === 'starter';
+                const userPlan = (u.subscriptionPlan || u.planTier || u.plan || business?.plan || 'free').toLowerCase();
 
-                if (filterPlan === 'lifetime') return business.accessLevel === 'lifetime';
-                if (filterPlan === 'starter') return (!business.plan || business.plan === 'starter') && business.accessLevel !== 'lifetime';
-                return business.plan === filterPlan && business.accessLevel !== 'lifetime';
+                if (filterPlan === 'pro') return userPlan.includes('pro');
+                if (filterPlan === 'business') return userPlan.includes('business') || userPlan.includes('team') || userPlan.includes('enterprise');
+                if (filterPlan === 'lifetime') return userPlan.includes('lifetime') || business?.accessLevel === 'lifetime';
+                if (filterPlan === 'starter' || filterPlan === 'free') return userPlan.includes('free') || userPlan.includes('starter') || (!userPlan.includes('pro') && !userPlan.includes('business'));
+                return false;
             });
         }
 
@@ -3080,7 +3081,7 @@ function AdminDashboardContent({
                 const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(0);
                 return dateB.getTime() - dateA.getTime();
             } else {
-                return a.name.localeCompare(b.name);
+                return (a.name || a.displayName || a.email || '').localeCompare(b.name || b.displayName || b.email || '');
             }
         });
     }, [users, businesses, searchQuery, filterPlan, filterPlatform, sortBy]);
@@ -4798,7 +4799,7 @@ function AdminDashboardContent({
                     </div>
                     
                     <div className="lg:col-span-2">
-                        <PlanDistributionChart businesses={businesses || []} />
+                        <PlanDistributionChart businesses={businesses || []} users={users || []} />
                     </div>
 
 
@@ -4911,9 +4912,19 @@ function AdminDashboardContent({
                                                                 {business?.name || 'N/A'}
                                                             </TableCell>
                                                             <TableCell>
-                                                                {business ? (
-                                                                    business.accessLevel === 'lifetime' ? <Badge variant="default" className="bg-green-600 hover:bg-green-700">Lifetime</Badge> : <Badge variant="secondary" className="capitalize">{business.plan || 'starter'}</Badge>
-                                                                ) : <Badge variant="outline">N/A</Badge>}
+                                                                {(() => {
+                                                                    const rawPlan = (user.subscriptionPlan || user.planTier || user.plan || business?.plan || 'Free').toLowerCase();
+                                                                    if (rawPlan.includes('pro')) {
+                                                                        return <Badge className="bg-emerald-600/90 text-white font-semibold hover:bg-emerald-600">Pro Plan</Badge>;
+                                                                    }
+                                                                    if (rawPlan.includes('enterprise') || rawPlan.includes('team') || rawPlan.includes('business')) {
+                                                                        return <Badge className="bg-purple-600/90 text-white font-semibold hover:bg-purple-600">Enterprise</Badge>;
+                                                                    }
+                                                                    if (rawPlan.includes('lifetime') || business?.accessLevel === 'lifetime') {
+                                                                        return <Badge className="bg-amber-600/90 text-white font-semibold hover:bg-amber-600">Lifetime</Badge>;
+                                                                    }
+                                                                    return <Badge variant="outline" className="text-zinc-600 dark:text-zinc-400">Free Tier</Badge>;
+                                                                })()}
                                                             </TableCell>
                                                             <TableCell>
                                                                 {(() => {
@@ -6088,7 +6099,7 @@ const ADMIN_LOG_LIMIT = 250;
 export default function AdminDashboardPage() {
     const firestore = useFirestore();
 
-    const usersQuery = useMemoFirebase(() => query(collection(firestore, 'users'), orderBy('name')), [firestore]);
+    const usersQuery = useMemoFirebase(() => query(collection(firestore, 'users')), [firestore]);
     const businessesQuery = useMemoFirebase(() => query(collection(firestore, 'businessInstances')), [firestore]);
     const productsQuery = useMemoFirebase(() => query(collection(firestore, 'products')), [firestore]);
     const applicationsQuery = useMemoFirebase(() => query(collection(firestore, 'job_applications'), orderBy('createdAt', 'desc'), limit(ADMIN_LOG_LIMIT)), [firestore]);
@@ -6128,7 +6139,7 @@ export default function AdminDashboardPage() {
     const { data: receiptShares, isLoading: receiptSharesLoading } = useCollection<any>(receiptSharesQuery);
     const { data: onlineOrders, isLoading: onlineOrdersLoading } = useCollection<any>(onlineOrdersQuery);
 
-    const isLoading = usersLoading || businessesLoading || productsLoading || applicationsLoading || grantsLoading || receiptsLoading || purchasesLoading || downloadClicksLoading || branchesLoading || checkoutAttemptsLoading || importAttemptsLoading || storefrontSharesLoading || receiptSharesLoading || onlineOrdersLoading;
+    const isLoading = usersLoading;
 
     if (isLoading) {
         return (

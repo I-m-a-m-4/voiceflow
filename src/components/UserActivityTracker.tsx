@@ -354,6 +354,9 @@ export function UserActivityTracker() {
                     }
 
                     batch.set(userRef, {
+                        name: user.displayName || user.email?.split('@')[0] || 'Voiceflow User',
+                        displayName: user.displayName || '',
+                        email: user.email || '',
                         lastSeen: serverTimestamp(),
                         status: 'active',
                         deviceType,

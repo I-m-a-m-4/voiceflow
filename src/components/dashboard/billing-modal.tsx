@@ -17,6 +17,30 @@ const UpgradeButton = ({ plan, isAnnual, auth, onClose, className, children }: a
   const handleUpgrade = async () => {
     setLoading(true);
     try {
+      const clientOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+      const redirectUrl = `${clientOrigin}/dashboard`;
+
+      // Log checkout attempt to Firestore so admin-imamshaffy tracks it immediately
+      try {
+        const { collection, addDoc, serverTimestamp, getFirestore } = await import("firebase/firestore");
+        const db = getFirestore();
+        await addDoc(collection(db, "checkout_attempts"), {
+          userId: auth?.currentUser?.uid || "guest",
+          userEmail: auth?.currentUser?.email || "",
+          userName: auth?.currentUser?.displayName || "Voiceflow User",
+          plan: plan.name,
+          planId: plan.id,
+          cycle: isAnnual ? "annual" : "monthly",
+          amount: amount,
+          currency: "USD",
+          gateway: "Flutterwave",
+          timestamp: serverTimestamp(),
+          status: "initiated"
+        });
+      } catch (logErr) {
+        console.warn("Could not log checkout attempt:", logErr);
+      }
+
       // 1. Call real backend checkout API
       const res = await fetch("/api/flutterwave/checkout", {
         method: "POST",
@@ -28,6 +52,8 @@ const UpgradeButton = ({ plan, isAnnual, auth, onClose, className, children }: a
           planName: plan.name,
           email: auth?.currentUser?.email || "user@voiceflow.space",
           name: auth?.currentUser?.displayName || "Voiceflow User",
+          origin: clientOrigin,
+          redirectUrl: redirectUrl,
         }),
       });
 

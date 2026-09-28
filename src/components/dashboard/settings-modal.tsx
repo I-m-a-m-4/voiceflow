@@ -50,6 +50,33 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling }: SettingsModalP
   const micAudioCtxRef = useRef<AudioContext | null>(null);
   const micAnimRef = useRef<number | null>(null);
 
+  // Dynamic subscription states
+  const [currentPlan, setCurrentPlan] = useState<string>('VoiceFlow Basic Plan');
+  const [isProUser, setIsProUser] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!auth?.currentUser?.uid) return;
+    let unsub = () => {};
+    (async () => {
+      try {
+        const { doc, onSnapshot, getFirestore } = await import("firebase/firestore");
+        const db = getFirestore();
+        unsub = onSnapshot(doc(db, "users", auth.currentUser!.uid), (snap) => {
+          if (snap.exists()) {
+            const data = snap.data();
+            const plan = data?.subscriptionPlan || data?.planTier || data?.plan || 'Free';
+            const pro = data?.isPro === true || plan.toLowerCase().includes('pro') || plan.toLowerCase().includes('enterprise');
+            setIsProUser(pro);
+            setCurrentPlan(pro ? (plan.toLowerCase().includes('pro') ? 'VoiceFlow Pro Plan' : plan) : 'VoiceFlow Basic Plan');
+          }
+        });
+      } catch (e) {
+        console.warn("Could not attach user subscription listener:", e);
+      }
+    })();
+    return () => unsub();
+  }, [auth?.currentUser?.uid]);
+
   useEffect(() => {
     if (auth?.currentUser?.displayName) {
       setDisplayName(auth.currentUser.displayName);
@@ -686,24 +713,63 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling }: SettingsModalP
                 <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Billing & Plans</h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Manage your subscription, minutes, and payment methods.</p>
                 
-                <div className="bg-gray-50 dark:bg-[#1A1A1A] p-6 rounded-xl border border-gray-200 dark:border-gray-800 mb-6 flex items-center justify-between">
+                <div className={`p-6 rounded-xl border mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                  isProUser 
+                    ? 'bg-emerald-500/10 border-emerald-500/30 dark:bg-emerald-950/20 dark:border-emerald-800/40' 
+                    : 'bg-gray-50 dark:bg-[#1A1A1A] border-gray-200 dark:border-gray-800'
+                }`}>
                   <div>
-                    <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">VoiceFlow Basic Plan</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Free tier with 300 minutes/month & real-time meeting transcription.</p>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <h3 className="text-lg font-bold text-gray-900 dark:text-white">{currentPlan}</h3>
+                      {isProUser ? (
+                        <span className="bg-emerald-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                          Active Plan
+                        </span>
+                      ) : (
+                        <span className="bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                          Free Tier
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      {isProUser 
+                        ? 'Unlimited real-time meeting transcription, instant AI copilot, audio drops, and live screen notes.'
+                        : 'Free tier with 300 minutes/month & real-time meeting transcription.'}
+                    </p>
                   </div>
-                  <span className="text-2xl font-bold text-gray-900 dark:text-white">$0<span className="text-sm text-gray-500 font-medium">/mo</span></span>
+                  <div className="sm:text-right shrink-0">
+                    <span className="text-2xl font-bold text-gray-900 dark:text-white">
+                      {isProUser ? '$11.99' : '$0'}
+                      <span className="text-sm text-gray-500 font-medium">/mo</span>
+                    </span>
+                  </div>
                 </div>
                 
-                <button 
-                  onClick={() => {
-                    onClose();
-                    onOpenBilling?.();
-                  }} 
-                  className="w-full bg-voiceflow-orange hover:bg-orange-600 text-white py-3.5 rounded-xl font-bold text-sm transition-colors shadow-lg shadow-orange-900/20 flex items-center justify-center gap-2"
-                >
-                  <CreditCard size={18} />
-                  Upgrade to Pro (View Plans & Checkout)
-                </button>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <button 
+                    onClick={() => {
+                      onClose();
+                      onOpenBilling?.();
+                    }} 
+                    className="flex-1 bg-voiceflow-orange hover:bg-orange-600 text-white py-3.5 rounded-xl font-bold text-sm transition-colors shadow-lg shadow-orange-900/20 flex items-center justify-center gap-2"
+                  >
+                    <CreditCard size={18} />
+                    {isProUser ? "Change Plan / View Tiers" : "Upgrade to Pro (View Plans & Checkout)"}
+                  </button>
+                  {isProUser && (
+                    <button 
+                      onClick={() => {
+                        toast({
+                          title: "Subscription in Good Standing",
+                          description: "Your Voiceflow Pro subscription is active with Flutterwave payment verification.",
+                        });
+                      }}
+                      className="px-6 py-3.5 border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-[#2A2A2A] rounded-xl font-semibold text-sm transition-colors text-gray-700 dark:text-gray-300"
+                    >
+                      Billing Details
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           )}

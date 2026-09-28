@@ -4,7 +4,7 @@ import crypto from "crypto";
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId, planId, amount, planName, email, name } = await req.json();
+    const { userId, planId, amount, planName, email, name, origin, redirectUrl } = await req.json();
 
     const userEmail = email || "user@voiceflow.space";
     const plan = SUBSCRIPTION_PLANS[planId];
@@ -14,7 +14,32 @@ export async function POST(req: NextRequest) {
     const secretKey = process.env.FLUTTERWAVE_SECRET_KEY || "FLWSECK-43d41d0befc821edd7a9b6a098ae827b-1a0a6503a4avt-X";
 
     const txRef = `tx-${userId || 'guest'}-${planId || 'pro'}-${Date.now()}`;
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (req.headers.get("origin") || "http://localhost:3000");
+    
+    // Resolve base URL dynamically so localhost requests always return back to localhost!
+    const headerOrigin = req.headers.get("origin");
+    const referer = req.headers.get("referer");
+    let refererOrigin: string | null = null;
+    if (referer) {
+      try {
+        refererOrigin = new URL(referer).origin;
+      } catch {}
+    }
+
+    const detectedOrigin = origin || headerOrigin || refererOrigin;
+    let baseUrl = "http://localhost:3000";
+
+    if (detectedOrigin && (detectedOrigin.includes("localhost") || detectedOrigin.includes("127.0.0.1") || detectedOrigin.startsWith("http://"))) {
+      // Local development or custom port
+      baseUrl = detectedOrigin;
+    } else if (detectedOrigin && !detectedOrigin.startsWith("tauri://")) {
+      baseUrl = detectedOrigin;
+    } else if (process.env.NEXT_PUBLIC_BASE_URL) {
+      baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
+    }
+
+    const finalRedirectUrl = redirectUrl 
+      ? `${redirectUrl}${redirectUrl.includes('?') ? '&' : '?'}tx_ref=${txRef}&plan_id=${planId || 'pro'}`
+      : `${baseUrl}/dashboard?tx_ref=${txRef}&plan_id=${planId || 'pro'}`;
 
     // Call Flutterwave Standard Checkout API
     const response = await fetch("https://api.flutterwave.com/v3/payments", {
@@ -27,7 +52,7 @@ export async function POST(req: NextRequest) {
         tx_ref: txRef,
         amount: finalAmount,
         currency: "USD",
-        redirect_url: `${baseUrl}/dashboard?success=true`,
+        redirect_url: finalRedirectUrl,
         meta: {
           user_id: userId || 'guest',
           plan_id: planId || 'pro',
@@ -47,7 +72,7 @@ export async function POST(req: NextRequest) {
     const data = await response.json();
 
     if (data.status === "success" && data.data?.link) {
-      return NextResponse.json({ url: data.data.link });
+      return NextResponse.json({ url: data.data.link, txRef });
     } else {
       throw new Error(data.message || "Failed to generate payment link");
     }
