@@ -138,7 +138,17 @@ export const useFlutterwave = () => {
       return;
     }
 
-    const publicKey = process.env.NEXT_PUBLIC_FLUTTERWAVE_PUBLIC_KEY || 'FLWPUBK-33162c3bb2bb347a6606f3e44645f1c9-X';
+    const publicKey = process.env.NEXT_PUBLIC_FLUTTERWAVE_PUBLIC_KEY;
+    if (!publicKey) {
+      toast({
+        variant: 'destructive',
+        title: 'Payment Configuration Error',
+        description: 'Flutterwave public key is not configured.',
+      });
+      config.onClose?.();
+      setIsLoading(false);
+      return;
+    }
 
     const txRef = `VF-${Date.now()}-${Math.random().toString(36).slice(2, 9).toUpperCase()}`;
 

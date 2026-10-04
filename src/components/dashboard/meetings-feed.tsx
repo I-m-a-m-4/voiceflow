@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { ChevronDown, MessageSquare, Play, Video, Share, Settings2, FileText, Loader2, Calendar, RefreshCw } from 'lucide-react';
 import { useAuth } from '@/firebase';
 import { getUserMeetings, MeetingData } from '@/firebase/meetings';
@@ -82,7 +83,11 @@ export default function MeetingsFeed() {
         ) : (
           <div className="space-y-6">
             {meetings.map((meeting) => (
-              <div key={meeting.id} className="bg-card border border-border rounded-2xl overflow-hidden hover:shadow-lg dark:hover:shadow-none transition-all cursor-pointer flex flex-col group">
+              <Link 
+                href={`/dashboard/meeting/${meeting.id}`}
+                key={meeting.id} 
+                className="bg-card border border-border rounded-2xl overflow-hidden hover:shadow-lg dark:hover:shadow-none transition-all cursor-pointer flex flex-col group"
+              >
                 
                 <div className="p-6 flex-1 flex flex-col">
                   <div className="flex items-center justify-between mb-4">
@@ -96,7 +101,7 @@ export default function MeetingsFeed() {
                     </div>
                   </div>
                   
-                  <h2 className="text-xl font-bold text-card-foreground mb-3 group-hover:text-voiceflow-orange transition-colors">
+                  <h2 className="text-xl font-bold text-card-foreground mb-3 group-hover:text-voiceflow-orange transition-colors font-clash">
                     {meeting.summary ? 'AI Summary' : 'Raw Transcript'}
                   </h2>
                   
@@ -107,22 +112,11 @@ export default function MeetingsFeed() {
                     </p>
                   </div>
                   
-                  <details className="group/details">
-                    <summary className="text-sm text-voiceflow-orange font-semibold hover:underline cursor-pointer list-none flex items-center gap-1 mb-2">
-                      <span className="group-open/details:hidden">View full transcript</span>
-                      <span className="hidden group-open/details:block">Hide transcript</span>
-                      <ChevronDown size={14} className="group-open/details:rotate-180 transition-transform" />
-                    </summary>
-                    <div className="mt-4 p-4 bg-muted/50 rounded-xl border border-border max-h-64 overflow-y-auto">
-                       <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">Transcript</h4>
-                       <p className="text-sm text-card-foreground/80 whitespace-pre-wrap leading-relaxed font-mono text-[13px]">
-                         {meeting.transcript}
-                       </p>
-                    </div>
-                  </details>
-                  
+                  <div className="text-sm text-voiceflow-orange font-semibold flex items-center gap-1 mt-2">
+                    View full details
+                  </div>
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
         )}

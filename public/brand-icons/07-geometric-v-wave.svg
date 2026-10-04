@@ -1,0 +1,45 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg-07" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FF6F00"/>
+      <stop offset="50%" stop-color="#FF5000"/>
+      <stop offset="100%" stop-color="#DE3B00"/>
+    </linearGradient>
+
+    <linearGradient id="bar-grad-07" x1="256" y1="120" x2="256" y2="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#FFF2E8"/>
+    </linearGradient>
+
+    <!-- Glass Sheen Overlay -->
+    <linearGradient id="sheen-07" x1="0" y1="0" x2="512" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- App Canvas -->
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg-07)"/>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#sheen-07)"/>
+
+  <!-- Frequency Bars forming a dynamic sharp 'V' (Voiceflow Monogram) -->
+  <g fill="url(#bar-grad-07)">
+    <!-- Left outer bar -->
+    <rect x="136" y="140" width="28" height="150" rx="14"/>
+    <!-- Left inner bar -->
+    <rect x="188" y="180" width="28" height="150" rx="14"/>
+    <!-- Center apex bar (lowest point of V) -->
+    <rect x="242" y="220" width="28" height="150" rx="14"/>
+    <!-- Right inner bar -->
+    <rect x="296" y="180" width="28" height="150" rx="14"/>
+    <!-- Right outer bar -->
+    <rect x="348" y="140" width="28" height="150" rx="14"/>
+  </g>
+
+  <!-- Sound Acoustic Accent Arcs -->
+  <path d="M 104 180 C 84 216 84 264 104 300" stroke="#FFFFFF" stroke-opacity="0.4" stroke-width="12" stroke-linecap="round"/>
+  <path d="M 408 180 C 428 216 428 264 408 300" stroke="#FFFFFF" stroke-opacity="0.4" stroke-width="12" stroke-linecap="round"/>
+
+  <!-- AI Intelligence Core Crown at Center -->
+  <circle cx="256" cy="180" r="12" fill="#FFFFFF"/>
+</svg>

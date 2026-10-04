@@ -34,7 +34,7 @@ export default function AppSidebar() {
         <div className="p-4 flex items-center justify-between">
           <Link href="/dashboard" className="flex items-center gap-2.5">
             <img src="/icon.svg" alt="VoiceFlow" className="w-8 h-8 rounded-lg shadow-sm" />
-            <span className="font-bold text-voiceflow-orange text-2xl tracking-tight">VoiceFlow</span>
+            <span className="font-bold text-voiceflow-orange text-2xl tracking-tight font-clash">VoiceFlow</span>
           </Link>
           <button className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
             <Bell size={20} />

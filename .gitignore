@@ -43,7 +43,11 @@ next-env.d.ts
 # firebase
 firebase-debug.log
 firestore-debug.log
+*firebase-adminsdk*.json
+*serviceAccount*.json
+*service_account*.json
 android-keystore-backup.json
+
 
 # marketing recorder output (videos + raw frame sequences)
 /marketing-out

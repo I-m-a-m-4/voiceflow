@@ -1,0 +1,67 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Background Canvas Gradient -->
+    <linearGradient id="bg-01" x1="64" y1="32" x2="448" y2="480" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1E1E24"/>
+      <stop offset="100%" stop-color="#0D0D11"/>
+    </linearGradient>
+
+    <!-- Shield Glow Gradient -->
+    <linearGradient id="shield-stroke-01" x1="120" y1="80" x2="392" y2="440" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FF7A1A"/>
+      <stop offset="45%" stop-color="#FF5500"/>
+      <stop offset="100%" stop-color="#FF2E00"/>
+    </linearGradient>
+
+    <!-- Shield Fill Gradient -->
+    <linearGradient id="shield-fill-01" x1="256" y1="100" x2="256" y2="430" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FF5500" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#FF5500" stop-opacity="0.02"/>
+    </linearGradient>
+
+    <!-- Wave Core Gradient -->
+    <linearGradient id="wave-grad-01" x1="256" y1="180" x2="256" y2="340" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="40%" stop-color="#FFE7D6"/>
+      <stop offset="100%" stop-color="#FF8533"/>
+    </linearGradient>
+
+    <!-- Filter for subtle outer glow -->
+    <filter id="glow-01" x="180" y="140" width="152" height="232" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="16" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- App Rounded Squircle Frame -->
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg-01)"/>
+  <rect x="16" y="16" width="480" height="480" rx="112" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="2"/>
+
+  <!-- Protective Stealth Shield Outline -->
+  <path d="M 256 92 C 330 92 384 116 384 116 C 384 250 344 358 256 420 C 168 358 128 250 128 116 C 128 116 182 92 256 92 Z"
+        fill="url(#shield-fill-01)"
+        stroke="url(#shield-stroke-01)"
+        stroke-width="12"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+
+  <!-- Internal Shield Accent Contour -->
+  <path d="M 256 126 C 308 126 348 144 348 144 C 348 244 316 330 256 382 C 196 330 164 244 164 144 C 164 144 204 126 256 126 Z"
+        stroke="#FF7A1A"
+        stroke-opacity="0.25"
+        stroke-width="3"
+        stroke-dasharray="6 6"/>
+
+  <!-- Centered Audio Soundwave (Equalizer) -->
+  <g fill="url(#wave-grad-01)">
+    <rect x="200" y="236" width="16" height="40" rx="8"/>
+    <rect x="228" y="200" width="16" height="112" rx="8"/>
+    <rect x="256" y="168" width="16" height="176" rx="8"/>
+    <rect x="284" y="200" width="16" height="112" rx="8"/>
+    <rect x="312" y="236" width="16" height="40" rx="8"/>
+  </g>
+
+  <!-- Top-Right AI Diamond Sparkle (Real-time Co-pilot Intelligence) -->
+  <path d="M 374 86 Q 374 116 404 116 Q 374 116 374 146 Q 374 116 344 116 Q 374 116 374 86 Z"
+        fill="#FF9E4A"/>
+</svg>

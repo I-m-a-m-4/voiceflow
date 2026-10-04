@@ -1,0 +1,58 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Background Canvas Gradient -->
+    <linearGradient id="bg-02" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FF6600"/>
+      <stop offset="60%" stop-color="#F4511E"/>
+      <stop offset="100%" stop-color="#D84315"/>
+    </linearGradient>
+
+    <!-- Glass Sheen Overlay -->
+    <linearGradient id="sheen-02" x1="0" y1="0" x2="512" y2="300" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+
+    <linearGradient id="ghost-grad-02" x1="256" y1="120" x2="256" y2="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#FFF0E6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- App Squircle Canvas -->
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg-02)"/>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#sheen-02)"/>
+
+  <!-- Stealth Ghost Body with Integrated Acoustic Waveforms at Base -->
+  <path d="M 256 112 
+           C 184 112 144 168 144 240 
+           L 144 340 
+           C 144 362 168 368 180 348
+           C 192 328 208 328 220 348
+           C 232 368 248 368 256 348
+           C 264 368 280 368 292 348
+           C 304 328 320 328 332 348
+           C 344 368 368 362 368 340
+           L 368 240 
+           C 368 168 328 112 256 112 Z"
+        fill="url(#ghost-grad-02)"
+        stroke="#FFFFFF"
+        stroke-width="4"/>
+
+  <!-- Discreet Eyes / Scanner Visor -->
+  <rect x="196" y="210" width="32" height="14" rx="7" fill="#F4511E"/>
+  <rect x="284" y="210" width="32" height="14" rx="7" fill="#F4511E"/>
+
+  <!-- Equalizer Pulse Wave Floating in the Ghost's Core -->
+  <g fill="#F4511E">
+    <rect x="216" y="260" width="10" height="32" rx="5"/>
+    <rect x="236" y="244" width="10" height="64" rx="5"/>
+    <rect x="256" y="234" width="10" height="84" rx="5"/>
+    <rect x="276" y="244" width="10" height="64" rx="5"/>
+    <rect x="296" y="260" width="10" height="32" rx="5"/>
+  </g>
+
+  <!-- Glowing Radar Dot / Active Listening Beacon -->
+  <circle cx="396" cy="116" r="14" fill="#FFFFFF"/>
+  <circle cx="396" cy="116" r="24" stroke="#FFFFFF" stroke-opacity="0.4" stroke-width="3"/>
+</svg>

@@ -1,35 +1,43 @@
 <svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- Orange Background Gradient -->
   <defs>
-    <linearGradient id="vf-bg-orange" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#FF6B00"/>
-      <stop offset="50%" stop-color="#FF5500"/>
-      <stop offset="100%" stop-color="#D94000"/>
+    <!-- Background Canvas Gradient -->
+    <linearGradient id="bg-vf-10" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FF5D00"/>
+      <stop offset="60%" stop-color="#FF4000"/>
+      <stop offset="100%" stop-color="#D62B00"/>
     </linearGradient>
-    <linearGradient id="vf-sheen" x1="0" y1="0" x2="0" y2="512" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.2"/>
+
+    <!-- Glass Surface Sheen -->
+    <linearGradient id="sheen-vf-10" x1="0" y1="0" x2="0" y2="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.32"/>
       <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
     </linearGradient>
+
+    <!-- Wave Glow -->
+    <filter id="soft-glow-vf-10" x="100" y="100" width="312" height="312" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
   </defs>
 
-  <!-- Icon Rounded Canvas -->
-  <rect width="512" height="512" rx="120" fill="url(#vf-bg-orange)"/>
-  <rect width="512" height="512" rx="120" fill="url(#vf-sheen)"/>
+  <!-- App Canvas -->
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg-vf-10)"/>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#sheen-vf-10)"/>
 
-  <!-- Logo Content: White Voice AI Soundwave Bubble -->
-  <g fill="#FFFFFF">
-    <!-- Soundwave Equalizer Bars -->
-    <rect x="160" y="236" width="20" height="40" rx="10"/>
-    <rect x="204" y="196" width="20" height="120" rx="10"/>
-    <rect x="248" y="156" width="20" height="200" rx="10"/>
-    <rect x="292" y="196" width="20" height="120" rx="10"/>
-    <rect x="336" y="236" width="20" height="40" rx="10"/>
-
-    <!-- Acoustic Sound Wave Accent Arcs -->
-    <path d="M 120 200 C 100 230 100 282 120 312" stroke="#FFFFFF" stroke-width="18" stroke-linecap="round" fill="none"/>
-    <path d="M 392 200 C 412 230 412 282 392 312" stroke="#FFFFFF" stroke-width="18" stroke-linecap="round" fill="none"/>
-
-    <!-- Sparkle / AI Note Highlight -->
-    <path d="M 380 130 Q 380 150 400 150 Q 380 150 380 170 Q 380 150 360 150 Q 380 150 380 130 Z"/>
+  <!-- Centered Precision Soundwave Bars -->
+  <g fill="#FFFFFF" filter="url(#soft-glow-vf-10)">
+    <rect x="144" y="234" width="22" height="44" rx="11"/>
+    <rect x="188" y="196" width="22" height="120" rx="11"/>
+    <rect x="232" y="152" width="22" height="208" rx="11"/>
+    <rect x="276" y="206" width="22" height="100" rx="11"/>
+    <rect x="320" y="244" width="22" height="24" rx="11"/>
+    <rect x="364" y="234" width="22" height="44" rx="11"/>
   </g>
+
+  <!-- Prominent AI Co-Pilot Starburst / Intelligence Diamond -->
+  <path d="M 334 130 Q 334 164 368 164 Q 334 164 334 198 Q 334 164 300 164 Q 334 164 334 130 Z"
+        fill="#FFFFFF"/>
+
+  <!-- Secondary Satellite Spark -->
+  <circle cx="156" cy="180" r="7" fill="#FFFFFF" fill-opacity="0.75"/>
 </svg>

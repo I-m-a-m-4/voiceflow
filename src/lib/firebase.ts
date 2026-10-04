@@ -1,2 +1,4 @@
-// This file is intentionally left blank. 
-// The new dashboard components have been adapted to use the existing Firebase setup in /src/firebase.
+'use client';
+
+// Singleton Firebase exports for application convenience
+export { auth, firestore as db, firestore, firebaseApp } from '@/firebase/instance';

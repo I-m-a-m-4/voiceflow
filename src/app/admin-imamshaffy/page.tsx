@@ -4707,7 +4707,7 @@ function AdminDashboardContent({
                             <CardDescription>Track Zeneva's live infrastructure costs, database reads, and store performance.</CardDescription>
                         </CardHeader>
                         <CardContent className="flex flex-col gap-4">
-                            <a href="https://console.cloud.google.com/billing/01459A-506211-CE0671?project=studio-3699136485-6747d" target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-3 rounded-lg border bg-background hover:bg-muted/50 transition-colors cursor-pointer group">
+                            <a href="https://console.cloud.google.com/billing?project=voiceflow-bimex" target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-3 rounded-lg border bg-background hover:bg-muted/50 transition-colors cursor-pointer group">
                                 <div className="flex items-center gap-3">
                                     <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-full group-hover:bg-blue-200 transition-colors">
                                         <DollarSign className="h-4 w-4 text-blue-600 dark:text-blue-500" />
@@ -4720,7 +4720,7 @@ function AdminDashboardContent({
                                 <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
                             </a>
                             
-                            <a href="https://console.cloud.google.com/firestore/databases/-default-/usage?authuser=0&hl=en-US&project=studio-3699136485-6747d" target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-3 rounded-lg border bg-background hover:bg-muted/50 transition-colors cursor-pointer group">
+                            <a href="https://console.cloud.google.com/firestore/databases/-default-/usage?project=voiceflow-bimex" target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-3 rounded-lg border bg-background hover:bg-muted/50 transition-colors cursor-pointer group">
                                 <div className="flex items-center gap-3">
                                     <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-full group-hover:bg-purple-200 transition-colors">
                                         <Activity className="h-4 w-4 text-purple-600 dark:text-purple-500" />

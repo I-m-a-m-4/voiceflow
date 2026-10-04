@@ -11,7 +11,14 @@ export async function POST(req: NextRequest) {
     const finalAmount = amount || (plan ? plan.price : 11.99);
     const finalPlanName = planName || (plan ? plan.name : "Voiceflow Pro");
 
-    const secretKey = process.env.FLUTTERWAVE_SECRET_KEY || "FLWSECK-43d41d0befc821edd7a9b6a098ae827b-1a0a6503a4avt-X";
+    const secretKey = process.env.FLUTTERWAVE_SECRET_KEY;
+    if (!secretKey) {
+      console.error("FLUTTERWAVE_SECRET_KEY environment variable is missing.");
+      return NextResponse.json(
+        { error: "Payment gateway configuration error. Please contact administrator." },
+        { status: 500 }
+      );
+    }
 
     const txRef = `tx-${userId || 'guest'}-${planId || 'pro'}-${Date.now()}`;
     
