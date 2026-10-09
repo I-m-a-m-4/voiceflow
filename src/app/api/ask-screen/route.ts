@@ -77,8 +77,8 @@ export async function POST(req: NextRequest) {
       maxRetries: 1,
     });
     
-    // Prioritize fast 20b model first for sub-second responses during live meetings
-    const modelsToTry = ["openai/gpt-oss-20b", "qwen/qwen3.8-27b", "openai/gpt-oss-120b"];
+    // Official high-speed Groq models for instant answers
+    const modelsToTry = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "mixtral-8x7b-32768"];
 
     let completion = null;
     let lastError: any = null;

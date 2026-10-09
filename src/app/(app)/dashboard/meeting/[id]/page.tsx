@@ -21,16 +21,51 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ id: st
   const [isAsking, setIsAsking] = useState(false);
   const [qaHistory, setQaHistory] = useState<{ q: string; a: string }[]>([]);
 
+  const rawId = id || '';
+  const cleanId = rawId.replace(/^\?/, '').split('?')[0].split('&')[0].trim();
+
   useEffect(() => {
-    const fetchMeeting = async () => {
-      if (!auth?.currentUser?.uid || !id) return;
-      try {
-        const docRef = doc(db, `users/${auth.currentUser.uid}/meetings/${id}`);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          setMeeting({ id: docSnap.id, ...docSnap.data() });
+    let resolvedId = cleanId;
+    if ((!resolvedId || resolvedId === 'undefined') && typeof window !== 'undefined') {
+      const search = window.location.search.replace(/^\?/, '').trim();
+      if (search) {
+        if (search.startsWith('id=')) {
+          resolvedId = search.slice(3).split('&')[0];
         } else {
-          console.log("No such document!");
+          resolvedId = search.split('&')[0].split('=')[0];
+        }
+      } else {
+        const parts = window.location.pathname.split('/').filter(Boolean);
+        resolvedId = parts[parts.length - 1];
+      }
+    }
+    resolvedId = (resolvedId || '').replace(/^\?/, '').trim();
+
+    const fetchMeeting = async () => {
+      if (!resolvedId) return;
+      try {
+        const { getFirestore, doc, getDoc } = await import('firebase/firestore');
+        const firestoreDb = getFirestore();
+
+        // 1. Primary: root 'meetings' collection (where saveMeeting stores docs)
+        let docRef = doc(firestoreDb, 'meetings', resolvedId);
+        let docSnap = await getDoc(docRef);
+
+        // 2. Secondary fallback: subcollection 'users/{uid}/meetings/{id}'
+        if (!docSnap.exists() && auth?.currentUser?.uid) {
+          docRef = doc(firestoreDb, `users/${auth.currentUser.uid}/meetings/${resolvedId}`);
+          docSnap = await getDoc(docRef);
+        }
+
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setMeeting({ id: docSnap.id, ...data });
+          // If no summary was generated, switch automatically to transcript tab
+          if (!data?.summary && data?.transcript) {
+            setActiveTab('transcript');
+          }
+        } else {
+          console.log("No such meeting document found with id:", resolvedId);
         }
       } catch (error) {
         console.error("Error fetching meeting:", error);
@@ -39,7 +74,7 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ id: st
       }
     };
     fetchMeeting();
-  }, [auth?.currentUser?.uid, id]);
+  }, [auth?.currentUser?.uid, cleanId]);
 
   const handleCopySummary = async () => {
     if (!meeting?.summary) return;
@@ -178,10 +213,22 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ id: st
                   {meeting.summary}
                 </ReactMarkdown>
               </div>
+            ) : meeting.transcript ? (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between text-xs font-semibold text-gray-400 px-1">
+                  <span>Raw Transcript</span>
+                  <span className="text-voiceflow-orange">Full captured audio text</span>
+                </div>
+                <div className="bg-white/5 p-6 rounded-2xl border border-white/10 text-gray-200">
+                  <p className="text-[15px] whitespace-pre-wrap leading-relaxed font-mono">
+                    {meeting.transcript}
+                  </p>
+                </div>
+              </div>
             ) : (
               <div className="flex flex-col items-center justify-center py-20 text-gray-500 gap-4">
                 <Sparkles size={32} className="text-gray-600 mb-2" />
-                <p>No AI summary generated for this meeting yet.</p>
+                <p>No content recorded for this session.</p>
               </div>
             )}
           </div>

@@ -7,7 +7,7 @@ import {
   Settings, Calendar, Keyboard, User, Shield, Globe, CreditCard, 
   FileText, HelpCircle, LifeBuoy, LogOut, Power, X, Download, 
   Eye, Headphones, Palette, Mic, ChevronDown, Check, Loader2, 
-  Volume2, ShieldCheck, ShieldAlert, MessageSquare, Wand2, Monitor, Sparkles, BookOpen
+  Volume2, ShieldCheck, ShieldAlert, MessageSquare, Wand2, Monitor, Sparkles, BookOpen, Gift, RotateCcw, Clock, Crown
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { useAuth } from '@/firebase';
@@ -154,6 +154,121 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
     setOverlayPosition(pos);
     if (typeof window !== 'undefined') {
       localStorage.setItem('voiceflow_overlay_pos', pos);
+    }
+  };
+
+  const isAdmin = auth?.currentUser?.email?.toLowerCase() === 'belloimam431@gmail.com';
+
+  // Dash Credits states for Admin
+  const [dashEmail, setDashEmail] = useState('');
+  const [dashType, setDashType] = useState<'pro' | 'minutes' | 'reset'>('pro');
+  const [dashMinutes, setDashMinutes] = useState(300);
+  const [dashNote, setDashNote] = useState('Gifted by Bello Imam');
+  const [isDashing, setIsDashing] = useState(false);
+
+  const handleAdminDash = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanEmail = dashEmail.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      toast({
+        variant: 'destructive',
+        title: 'Invalid Email',
+        description: 'Please enter a valid email address to dash credits.',
+      });
+      return;
+    }
+
+    setIsDashing(true);
+    try {
+      const { getFirestore, collection, query, where, getDocs, updateDoc, doc, setDoc, addDoc, serverTimestamp } = await import('firebase/firestore');
+      const db = getFirestore();
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('email', '==', cleanEmail));
+      const snap = await getDocs(q);
+
+      let targetId = '';
+      let existingData: any = null;
+      if (!snap.empty) {
+        targetId = snap.docs[0].id;
+        existingData = snap.docs[0].data();
+      }
+
+      const adminEmail = auth?.currentUser?.email || 'belloimam431@gmail.com';
+
+      if (dashType === 'pro') {
+        const payload = {
+          isPro: true,
+          planTier: 'pro',
+          subscriptionPlan: 'Voiceflow Pro (Gifted by Bello Imam)',
+          dashedBy: adminEmail,
+          dashedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
+        if (targetId) {
+          await updateDoc(doc(db, 'users', targetId), payload);
+        } else {
+          await setDoc(doc(usersRef), { email: cleanEmail, ...payload, createdAt: serverTimestamp() });
+        }
+        toast({
+          title: '🎉 Pro Plan Dashed!',
+          description: `Successfully gifted lifetime Voiceflow Pro to ${cleanEmail}.`,
+        });
+      } else if (dashType === 'minutes') {
+        const curUsed = typeof existingData?.usedMinutes === 'number' ? existingData.usedMinutes : 0;
+        const newUsed = Math.max(0, curUsed - dashMinutes);
+        const payload = {
+          usedMinutes: newUsed,
+          bonusMinutesGranted: (existingData?.bonusMinutesGranted || 0) + dashMinutes,
+          dashedBy: adminEmail,
+          dashedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
+        if (targetId) {
+          await updateDoc(doc(db, 'users', targetId), payload);
+        } else {
+          await setDoc(doc(usersRef), { email: cleanEmail, ...payload, createdAt: serverTimestamp() });
+        }
+        toast({
+          title: '⏱️ Minutes Dashed!',
+          description: `Dashed +${dashMinutes} minutes to ${cleanEmail}.`,
+        });
+      } else if (dashType === 'reset') {
+        const payload = {
+          usedMinutes: 0,
+          sessionCount: 0,
+          dashedBy: adminEmail,
+          dashedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
+        if (targetId) {
+          await updateDoc(doc(db, 'users', targetId), payload);
+        } else {
+          await setDoc(doc(usersRef), { email: cleanEmail, ...payload, createdAt: serverTimestamp() });
+        }
+        toast({
+          title: '🔄 Usage Reset & Dashed!',
+          description: `All limits and counters reset to 0 for ${cleanEmail}.`,
+        });
+      }
+
+      await addDoc(collection(db, 'admin_dashes'), {
+        adminEmail,
+        recipientEmail: cleanEmail,
+        dashType,
+        minutes: dashType === 'minutes' ? dashMinutes : null,
+        note: dashNote,
+        createdAt: serverTimestamp(),
+      });
+
+      setDashEmail('');
+    } catch (err: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Failed to dash credits',
+        description: err.message,
+      });
+    } finally {
+      setIsDashing(false);
     }
   };
 
@@ -378,6 +493,7 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
   const tabs = [
     { id: 'general', label: 'General', icon: Settings },
     { id: 'answers', label: 'Live Answers & Context', icon: MessageSquare },
+    ...(isAdmin ? [{ id: 'admin-dash', label: '🎁 Dash Credits', icon: Gift }] : []),
     { id: 'calendar', label: 'Calendar', icon: Calendar },
     { id: 'keybinds', label: 'Keybinds & Guide', icon: Keyboard },
     { id: 'profile', label: 'Profile', icon: User },
@@ -981,6 +1097,160 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
             </div>
           )}
 
+          {/* Admin Dash Credits Panel */}
+          {activeTab === 'admin-dash' && isAdmin && (
+            <div className="space-y-6 max-w-2xl">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                    <Gift className="text-voiceflow-orange" size={22} />
+                    Dash People Credit
+                  </h2>
+                  <a
+                    href="/admin-imamshaffy/users"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-voiceflow-orange hover:underline font-semibold"
+                  >
+                    Open Full Admin Portal →
+                  </a>
+                </div>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+                  As the Voiceflow founder, you can gift Lifetime Pro, bonus minutes, or reset usage for any user by their email address.
+                </p>
+
+                <form onSubmit={handleAdminDash} className="space-y-5 bg-gray-50 dark:bg-[#1A1A1A] p-6 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm">
+                  <div>
+                    <label className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 block mb-2">
+                      Recipient Email Address
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="e.g. friend@gmail.com, colleague@work.com"
+                      value={dashEmail}
+                      onChange={(e) => setDashEmail(e.target.value)}
+                      className="w-full bg-white dark:bg-[#111111] border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-voiceflow-orange shadow-sm"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 block mb-2">
+                      Select Credit / Privilege to Dash
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setDashType('pro')}
+                        className={`p-3.5 rounded-xl border text-left transition-all ${
+                          dashType === 'pro'
+                            ? 'border-voiceflow-orange bg-orange-50 dark:bg-orange-950/20 text-voiceflow-orange font-bold shadow-sm'
+                            : 'border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-[#252525] text-gray-700 dark:text-gray-300'
+                        }`}
+                      >
+                        <div className="text-sm font-bold flex items-center gap-1.5">
+                          <Crown size={15} /> Lifetime Pro
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 font-normal">
+                          Unlock all features & unlimited limits
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setDashType('minutes')}
+                        className={`p-3.5 rounded-xl border text-left transition-all ${
+                          dashType === 'minutes'
+                            ? 'border-voiceflow-orange bg-orange-50 dark:bg-orange-950/20 text-voiceflow-orange font-bold shadow-sm'
+                            : 'border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-[#252525] text-gray-700 dark:text-gray-300'
+                        }`}
+                      >
+                        <div className="text-sm font-bold flex items-center gap-1.5">
+                          <Clock size={15} /> Free Minutes
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 font-normal">
+                          Grant additional minutes quota
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setDashType('reset')}
+                        className={`p-3.5 rounded-xl border text-left transition-all ${
+                          dashType === 'reset'
+                            ? 'border-voiceflow-orange bg-orange-50 dark:bg-orange-950/20 text-voiceflow-orange font-bold shadow-sm'
+                            : 'border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-[#252525] text-gray-700 dark:text-gray-300'
+                        }`}
+                      >
+                        <div className="text-sm font-bold flex items-center gap-1.5">
+                          <RotateCcw size={15} /> Reset Limits
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 font-normal">
+                          Reset counters to 0 / fresh start
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {dashType === 'minutes' && (
+                    <div>
+                      <label className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 block mb-2">
+                        Minutes Quantity
+                      </label>
+                      <div className="grid grid-cols-4 gap-2">
+                        {[60, 120, 300, 1000].map((mins) => (
+                          <button
+                            key={mins}
+                            type="button"
+                            onClick={() => setDashMinutes(mins)}
+                            className={`py-2 px-3 text-xs rounded-lg border font-semibold transition-colors ${
+                              dashMinutes === mins
+                                ? 'bg-voiceflow-orange text-white border-voiceflow-orange shadow-sm'
+                                : 'border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-[#252525] text-gray-700 dark:text-gray-300'
+                            }`}
+                          >
+                            +{mins} mins
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300 block mb-2">
+                      Gift Note (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Compliments of Bello Imam"
+                      value={dashNote}
+                      onChange={(e) => setDashNote(e.target.value)}
+                      className="w-full bg-white dark:bg-[#111111] border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-voiceflow-orange shadow-sm"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isDashing || !dashEmail}
+                    className="w-full bg-voiceflow-orange hover:bg-orange-600 disabled:opacity-50 text-white font-bold py-3.5 rounded-xl transition-all shadow-md flex items-center justify-center gap-2"
+                  >
+                    {isDashing ? (
+                      <>
+                        <Loader2 size={18} className="animate-spin" />
+                        Dashing Credit...
+                      </>
+                    ) : (
+                      <>
+                        <Gift size={18} />
+                        Grant & Dash Credit Now
+                      </>
+                    )}
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
+
           {/* Billing & Subscription Plans */}
           {activeTab === 'billing' && (
             <div className="space-y-8 max-w-2xl">
@@ -989,14 +1259,22 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Manage your subscription, minutes, and payment methods.</p>
                 
                 <div className={`p-6 rounded-xl border mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
-                  isProUser 
+                  isAdmin
+                    ? 'bg-orange-500/10 border-orange-500/30 dark:bg-orange-950/20 dark:border-orange-800/40'
+                    : isProUser 
                     ? 'bg-emerald-500/10 border-emerald-500/30 dark:bg-emerald-950/20 dark:border-emerald-800/40' 
                     : 'bg-gray-50 dark:bg-[#1A1A1A] border-gray-200 dark:border-gray-800'
                 }`}>
                   <div>
                     <div className="flex items-center gap-2 mb-1.5">
-                      <h3 className="text-lg font-bold text-gray-900 dark:text-white">{currentPlan}</h3>
-                      {isProUser ? (
+                      <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                        {isAdmin ? 'Voiceflow Founder & Admin' : currentPlan}
+                      </h3>
+                      {isAdmin ? (
+                        <span className="bg-voiceflow-orange text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                          Founder & Owner
+                        </span>
+                      ) : isProUser ? (
                         <span className="bg-emerald-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
                           Active Plan
                         </span>
@@ -1007,15 +1285,17 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
                       )}
                     </div>
                     <p className="text-sm text-gray-500 dark:text-gray-400">
-                      {isProUser 
+                      {isAdmin
+                        ? 'Unlimited transcription, infinite AI meeting copilot, zero rate limits, and full administrative rights.'
+                        : isProUser 
                         ? 'Unlimited real-time meeting transcription, instant AI copilot, audio drops, and live screen notes.'
                         : 'Free tier with 30 minutes/month & 3 meeting sessions.'}
                     </p>
                   </div>
                   <div className="sm:text-right shrink-0">
                     <span className="text-2xl font-bold text-gray-900 dark:text-white">
-                      {isProUser ? '$11.99' : '$0'}
-                      <span className="text-sm text-gray-500 font-medium">/mo</span>
+                      {isAdmin ? '$0' : isProUser ? '$11.99' : '$0'}
+                      <span className="text-sm text-gray-500 font-medium">{isAdmin ? ' / Founder' : '/mo'}</span>
                     </span>
                   </div>
                 </div>
@@ -1029,19 +1309,21 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
                     className="flex-1 bg-voiceflow-orange hover:bg-orange-600 text-white py-3.5 rounded-xl font-bold text-sm transition-colors shadow-lg shadow-orange-900/20 flex items-center justify-center gap-2"
                   >
                     <CreditCard size={18} />
-                    {isProUser ? "Change Plan / View Tiers" : "Upgrade to Pro (View Plans & Checkout)"}
+                    {isAdmin ? "View All Plans & Features" : isProUser ? "Change Plan / View Tiers" : "Upgrade to Pro (View Plans & Checkout)"}
                   </button>
-                  {isProUser && (
+                  {(isProUser || isAdmin) && (
                     <button 
                       onClick={() => {
                         toast({
-                          title: "Subscription in Good Standing",
-                          description: "Your Voiceflow Pro subscription is active with Flutterwave payment verification.",
+                          title: isAdmin ? "Founder Account" : "Subscription in Good Standing",
+                          description: isAdmin 
+                            ? "Founder account: All limits bypassed permanently."
+                            : "Your Voiceflow Pro subscription is active with Flutterwave payment verification.",
                         });
                       }}
                       className="px-6 py-3.5 border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-[#2A2A2A] rounded-xl font-semibold text-sm transition-colors text-gray-700 dark:text-gray-300"
                     >
-                      Billing Details
+                      {isAdmin ? "Founder Privileges" : "Billing Details"}
                     </button>
                   )}
                 </div>

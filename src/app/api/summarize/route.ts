@@ -15,11 +15,17 @@ export async function POST(req: NextRequest) {
 
     const { text, type, customContext } = await req.json();
 
-    if (!text) {
+    if (!text || typeof text !== 'string') {
       return NextResponse.json(
         { error: "No text provided" },
         { status: 400 }
       );
+    }
+
+    const trimmed = text.trim();
+    // Optimization: If text is extremely short or blank, do not waste Groq quota
+    if (trimmed.length < 15) {
+      return NextResponse.json({ text: trimmed });
     }
 
     let systemPrompt = "You are a helpful assistant.";
@@ -33,8 +39,8 @@ export async function POST(req: NextRequest) {
       systemPrompt += `\n\nUser Profile & Custom Context:\n"${customContext.trim()}"\nTailor the summary and action items to specifically address the priorities, role, and industry mentioned above.`;
     }
 
-    // Prioritize fast 20b model first for rapid turnaround
-    const modelsToTry = ["openai/gpt-oss-20b", "qwen/qwen3.8-27b", "openai/gpt-oss-120b"];
+    // Official lightning-fast Groq models: llama-3.1-8b-instant consumes minimal quota & sub-300ms latency
+    const modelsToTry = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "mixtral-8x7b-32768"];
     let completion = null;
     let lastError = null;
 
@@ -48,21 +54,21 @@ export async function POST(req: NextRequest) {
             },
             {
               role: "user",
-              content: text,
+              content: trimmed,
             },
           ],
           model: model,
           temperature: 0.2,
-          max_tokens: 2048,
+          max_tokens: 1500,
         });
-        if (completion) break;
+        if (completion?.choices?.[0]?.message?.content) break;
       } catch (err: any) {
-        console.warn(`Model ${model} failed, trying fallback:`, err.message);
+        console.warn(`Groq model ${model} failed, trying fallback:`, err.message);
         lastError = err;
       }
     }
 
-    if (!completion) {
+    if (!completion?.choices?.[0]?.message?.content) {
       throw lastError || new Error("All Groq summarization models failed");
     }
 

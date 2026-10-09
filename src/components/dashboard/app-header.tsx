@@ -55,23 +55,17 @@ export default function AppHeader() {
               {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
             </button>
           )}
-          <button className="p-2 text-muted-foreground hover:bg-muted hover:text-foreground rounded-full transition-colors">
-            <Video size={18} />
-          </button>
-          <button className="flex items-center gap-2 px-4 py-1.5 text-sm font-semibold text-foreground bg-background border border-border rounded-full hover:bg-muted shadow-sm transition-colors">
-            <Upload size={16} />
-            Import
-          </button>
           <button 
             onClick={handleRecordToggle}
-            className={`flex items-center gap-2 px-5 py-1.5 text-sm font-semibold rounded-full shadow-sm transition-all ${
+            className={`flex items-center gap-2 px-4 py-1.5 text-xs font-bold rounded-full shadow-sm transition-all ${
               isRecording 
                 ? "bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-red-500/20" 
-                : "bg-blue-600 hover:bg-blue-700 text-white shadow-blue-500/20 dark:text-white dark:bg-blue-600"
+                : "bg-voiceflow-orange hover:bg-orange-600 text-white shadow-orange-500/20"
             }`}
+            title="Start or stop capturing meeting/conversation audio"
           >
-            <Mic size={16} />
-            {isRecording ? "Listening..." : "Record"}
+            <Mic size={15} className={isRecording ? "animate-bounce" : ""} />
+            <span>{isRecording ? "Listening Live..." : "Capture Conversation"}</span>
           </button>
         </div>
       </header>

@@ -6,6 +6,7 @@ import { doc, getDoc, updateDoc, onSnapshot, collection, query, where, getDocs }
 
 export interface PlanUsageState {
   isPro: boolean;
+  isAdmin: boolean;
   planName: string;
   sessionCount: number;
   usedMinutes: number;
@@ -20,8 +21,12 @@ export function usePlanUsage(): PlanUsageState {
   const auth = useAuth();
   const firestore = useFirestore();
 
+  const currentUserEmail = auth?.currentUser?.email?.toLowerCase() || '';
+  const isAdmin = currentUserEmail === 'belloimam431@gmail.com';
+
   const [isPro, setIsPro] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
+    if (isAdmin) return true;
     return localStorage.getItem('voiceflow_is_pro') === 'true';
   });
 
@@ -42,13 +47,17 @@ export function usePlanUsage(): PlanUsageState {
 
   const syncFromStorage = useCallback(() => {
     if (typeof window === 'undefined') return;
+    if (isAdmin) {
+      setIsPro(true);
+      return;
+    }
     const pro = localStorage.getItem('voiceflow_is_pro') === 'true';
     const sessions = parseInt(localStorage.getItem('voiceflow_session_count') || '0', 10);
     const mins = parseInt(localStorage.getItem('voiceflow_used_minutes') || '0', 10);
     setIsPro(pro);
     setSessionCount(sessions);
     setUsedMinutes(mins);
-  }, []);
+  }, [isAdmin]);
 
   // Listen to cross-component usage events
   useEffect(() => {
@@ -70,10 +79,30 @@ export function usePlanUsage(): PlanUsageState {
     }
     const uid = auth.currentUser.uid;
 
+    if (isAdmin) {
+      setIsPro(true);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('voiceflow_is_pro', 'true');
+      }
+    }
+
     const userDocRef = doc(firestore, 'users', uid);
     const unsubscribe = onSnapshot(userDocRef, (snap) => {
       if (snap.exists()) {
         const data = snap.data();
+        if (isAdmin) {
+          setIsPro(true);
+          if (!data.isPro || data.role !== 'admin') {
+            updateDoc(userDocRef, {
+              isPro: true,
+              role: 'admin',
+              subscriptionPlan: 'Voiceflow Founder & Admin',
+              planTier: 'pro'
+            }).catch((e) => console.warn('Could not sync admin status in Firestore:', e));
+          }
+          return;
+        }
+
         const proStatus = !!(data.isPro === true || data.planTier === 'pro' || data.subscriptionPlan?.toLowerCase().includes('pro'));
         const firestoreMins = typeof data.usedMinutes === 'number' ? data.usedMinutes : 0;
         const firestoreSessions = typeof data.sessionCount === 'number' ? data.sessionCount : 0;
@@ -169,15 +198,17 @@ export function usePlanUsage(): PlanUsageState {
   }, [auth?.currentUser?.uid, firestore, sessionCount, usedMinutes]);
 
   // Anti-cheating: limit reached if user is not pro AND (exceeded 3 sessions OR exceeded 30 minutes)
-  const isLimitReached = !isPro && (sessionCount >= maxFreeSessions || usedMinutes >= maxMinutes);
+  // Bello Imam is the owner/admin: NEVER restricted by limits
+  const isLimitReached = isAdmin ? false : (!isPro && (sessionCount >= maxFreeSessions || usedMinutes >= maxMinutes));
 
   return {
-    isPro,
-    planName: isPro ? 'Voiceflow Pro' : 'Basic Plan',
+    isPro: isAdmin ? true : isPro,
+    isAdmin,
+    planName: isAdmin ? 'Voiceflow Founder & Admin' : isPro ? 'Voiceflow Pro' : 'Basic Plan',
     sessionCount,
     usedMinutes,
-    maxMinutes,
-    maxFreeSessions,
+    maxMinutes: isAdmin ? 999999 : maxMinutes,
+    maxFreeSessions: isAdmin ? 999999 : maxFreeSessions,
     isLimitReached,
     recordSession,
     refreshUsage: syncFromStorage,

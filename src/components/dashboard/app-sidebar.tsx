@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { 
   Home, Settings, FileText, Sparkles, 
-  PanelLeftClose, PanelLeftOpen 
+  PanelLeftClose, PanelLeftOpen, Gift, Mic 
 } from 'lucide-react';
 import { useAuth } from '@/firebase';
 import { usePlanUsage } from '@/hooks/use-plan-usage';
@@ -156,6 +156,31 @@ export default function AppSidebar() {
             );
           })}
           
+          <button
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent('voiceflow-toggle-record'));
+            }}
+            title="Capture Conversation"
+            className={`w-full flex items-center ${isCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2'} rounded-xl text-sm font-medium transition-colors text-voiceflow-orange bg-orange-50 hover:bg-orange-100 dark:bg-orange-500/10 dark:hover:bg-orange-500/20`}
+          >
+            <Mic size={18} className="text-voiceflow-orange shrink-0" />
+            {!isCollapsed && <span className="font-semibold truncate">Capture Conversation</span>}
+          </button>
+
+          {auth?.currentUser?.email?.toLowerCase() === 'belloimam431@gmail.com' && (
+            <button
+              onClick={() => {
+                setSettingsTab('admin-dash');
+                setIsSettingsModalOpen(true);
+              }}
+              title="Dash Credits"
+              className={`w-full flex items-center ${isCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2'} rounded-xl text-sm font-medium transition-colors text-emerald-600 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20`}
+            >
+              <Gift size={18} className="text-emerald-500 shrink-0" />
+              {!isCollapsed && <span className="font-bold truncate">Dash Credits</span>}
+            </button>
+          )}
+
           <button
             onClick={() => {
               setSettingsTab('general');
