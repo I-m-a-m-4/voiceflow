@@ -211,6 +211,8 @@ import {
 } from '@/components/admin/user-detail/usage-insights';
 import ProductIntelligence from '@/components/admin/usage/product-intelligence';
 import NotificationEngagement from '@/components/admin/usage/notification-engagement';
+import VoiceflowSessionAnalytics from '@/components/admin/voiceflow-session-analytics';
+import VoiceflowAiInterviewDiagnostics from '@/components/admin/voiceflow-ai-interview-diagnostics';
 
 const CustomTooltipContent = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
@@ -2680,7 +2682,7 @@ function BusinessIntelDialog({
 
 function AdminDashboardContent({
     users, businesses, products, receipts, purchases, applications, downloadClicks, grants, checkoutAttempts, branches, onRefresh, isRefreshing,
-    storefrontShares = [], receiptShares = [], onlineOrders = [], importAttempts = []
+    storefrontShares = [], receiptShares = [], onlineOrders = [], importAttempts = [], meetings = []
 }: {
     users: any[];
     businesses: any[];
@@ -2698,6 +2700,7 @@ function AdminDashboardContent({
     receiptShares?: any[];
     onlineOrders?: any[];
     importAttempts?: any[];
+    meetings?: any[];
 }) {
 
     const firestore = useFirestore();
@@ -4147,7 +4150,15 @@ function AdminDashboardContent({
 
             <Tabs defaultValue="overview" className="space-y-4">
                 <TabsList className="no-capture flex w-full justify-start overflow-x-auto overflow-y-hidden snap-x h-auto py-2 scrollbar-hide">
-                    <TabsTrigger value="overview" className="snap-start shrink-0">Overview</TabsTrigger>
+                    <TabsTrigger value="overview" className="snap-start shrink-0 font-bold">Overview</TabsTrigger>
+                    <TabsTrigger value="voiceflow-sessions" className="gap-2 snap-start shrink-0 font-bold text-orange-600 dark:text-orange-400">
+                        <Clock className="h-4 w-4 text-orange-500" />
+                        Meeting Sessions ({meetings?.length || 0})
+                    </TabsTrigger>
+                    <TabsTrigger value="ai-diagnostics" className="gap-2 snap-start shrink-0 font-bold text-amber-600 dark:text-amber-400">
+                        <Zap className="h-4 w-4 text-amber-500" />
+                        AI & Interview Diagnostics
+                    </TabsTrigger>
                     <TabsTrigger value="acquisition" className="gap-2 snap-start shrink-0">
                         <DoorOpen className="h-4 w-4" />
                         Acquisition
@@ -4182,6 +4193,8 @@ function AdminDashboardContent({
                 </TabsList>
 
                 <TabsContent value="overview" className="space-y-6">
+                    {/* Voiceflow Core Session & Time Spent Analytics */}
+                    <VoiceflowSessionAnalytics meetings={meetings || []} users={users || []} purchases={purchases || []} />
                     <Card>
                         <CardHeader>
                             <CardTitle className="flex items-center gap-2">
@@ -4247,7 +4260,7 @@ function AdminDashboardContent({
                     
                     <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4 border-t border-white/5 pt-6">
                         <button onClick={() => handleOpenDetailModal('active')} className="text-left w-full h-full transition-transform active:scale-95">
-                            <StatCard title="Active Stores" value={platformAnalytics.totalActiveBusinesses} icon={Building} description="Currently active businesses" />
+                            <StatCard title="Active Workspaces" value={platformAnalytics.totalActiveBusinesses} icon={Building} description="Currently active workspaces" />
                         </button>
                         <button onClick={() => setIsSaaSMetricsOpen(true)} className="text-left w-full h-full transition-transform active:scale-95">
                             <StatCard title="MRR" value={`₦${Math.round(analyticsData.mrr).toLocaleString()}`} icon={DollarSign} description={analyticsData.mrrDescription} />
@@ -4256,7 +4269,7 @@ function AdminDashboardContent({
                             <StatCard title="Sales Velocity" value={`₦${analyticsData.averageSalesPerDay.toLocaleString(undefined, { maximumFractionDigits: 0 })}/day`} icon={Activity} description="Platform momentum" />
                         </button>
                         <button onClick={() => handleOpenDetailModal('activated')} className="text-left w-full h-full transition-transform active:scale-95">
-                            <StatCard title="Activated" value={platformAnalytics.activatedBusinessesCount} icon={UserCheck} description="Businesses with >10 products" />
+                            <StatCard title="Notetaker Users" value={platformAnalytics.activatedBusinessesCount} icon={UserCheck} description="Active meeting notetaker users" />
                         </button>
                         <button onClick={() => handleOpenDetailModal('atRisk')} className="text-left w-full h-full transition-transform active:scale-95" disabled={platformAnalytics.atRiskBusinesses.length === 0}>
                             <StatCard title="At Risk" value={platformAnalytics.atRiskBusinesses.length} icon={AlertTriangle} description="No activity for 14 days" />
@@ -4281,7 +4294,7 @@ function AdminDashboardContent({
                                 ? `+₦${Math.round(analyticsData.totalCreditPackRevenue).toLocaleString()} AI credits · ₦${Math.round(analyticsData.totalCompanyRevenue).toLocaleString()} all in`
                                 : 'Total Software Sales'}
                         />
-                        <StatCard title="Platform AOV" value={`₦${analyticsData.platformAOV.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={ShoppingCart} description="Avg. Receipt Value" />
+                        <StatCard title="Plan ARPU" value={`₦${analyticsData.platformAOV.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={ShoppingCart} description="Average User Revenue" />
                     </div>
                     </Card>
 
@@ -4805,6 +4818,16 @@ function AdminDashboardContent({
 
                     </div>
                  </TabsContent>
+
+                {/* Voiceflow Meeting & Session Time Tracking */}
+                <TabsContent value="voiceflow-sessions" className="space-y-6">
+                    <VoiceflowSessionAnalytics meetings={meetings || []} users={users || []} purchases={purchases || []} />
+                </TabsContent>
+
+                {/* Voiceflow Shadow AI & Interview Diagnostics */}
+                <TabsContent value="ai-diagnostics" className="space-y-6">
+                    <VoiceflowAiInterviewDiagnostics />
+                </TabsContent>
 
                 {/* Everyone who installed and never got as far as an account. This
                     is the only surface in the app that sees a signed-out user —
@@ -6123,6 +6146,7 @@ export default function AdminDashboardPage() {
     // this listener throws. Deploying an index first is safe: it is additive and
     // does not affect the running app.
     const onlineOrdersQuery = useMemoFirebase(() => query(collectionGroup(firestore, 'onlineOrders'), orderBy('createdAt', 'desc'), limit(ADMIN_LOG_LIMIT)), [firestore]);
+    const meetingsQuery = useMemoFirebase(() => query(collection(firestore, 'meetings'), orderBy('createdAt', 'desc'), limit(150)), [firestore]);
 
     const { data: users, isLoading: usersLoading } = useCollection<UserProfile>(usersQuery);
     const { data: businesses, isLoading: businessesLoading } = useCollection<BusinessInstance>(businessesQuery);
@@ -6138,6 +6162,7 @@ export default function AdminDashboardPage() {
     const { data: storefrontShares, isLoading: storefrontSharesLoading } = useCollection<any>(storefrontSharesQuery);
     const { data: receiptShares, isLoading: receiptSharesLoading } = useCollection<any>(receiptSharesQuery);
     const { data: onlineOrders, isLoading: onlineOrdersLoading } = useCollection<any>(onlineOrdersQuery);
+    const { data: meetings, isLoading: meetingsLoading } = useCollection<any>(meetingsQuery);
 
     const isLoading = usersLoading;
 
@@ -6165,5 +6190,6 @@ export default function AdminDashboardPage() {
         storefrontShares={storefrontShares || []}
         receiptShares={receiptShares || []}
         onlineOrders={onlineOrders || []}
+        meetings={meetings || []}
     />
 }

@@ -23,6 +23,7 @@ export function useAudioRecorder() {
   const vadLoopRef = useRef<number | null>(null);
   const recognitionRef = useRef<any>(null);
   const isRecordingRef = useRef<boolean>(false);
+  const shouldRestartRecognitionRef = useRef<boolean>(true);
 
   const startRecording = useCallback(async (captureSystemAudio = false) => {
     try {
@@ -31,11 +32,11 @@ export function useAudioRecorder() {
       micStreamRef.current = micStream;
       let finalStream = micStream;
 
-      // 2. Combine with System Audio (if Granola mode)
-      if (captureSystemAudio) {
+      // 2. Combine with System Audio (if user explicitly requested and supported)
+      if (captureSystemAudio && navigator.mediaDevices?.getDisplayMedia) {
         try {
           const displayStream = await navigator.mediaDevices.getDisplayMedia({
-            video: true, // required to get display media, we'll ignore it
+            video: true, // required by browser spec to get display media
             audio: true,
           });
           displayStreamRef.current = displayStream;
@@ -59,14 +60,21 @@ export function useAudioRecorder() {
              track.stop();
           });
         } catch (e) {
-          console.warn("Could not capture system audio", e);
+          console.info("System audio share cancelled or not provided, proceeding with microphone:", e);
         }
       }
 
       streamRef.current = finalStream;
       chunksRef.current = [];
 
-      const mediaRecorder = new MediaRecorder(finalStream, { mimeType: "audio/webm" });
+      const mimeType = typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : "audio/webm";
+
+      const mediaRecorder = new MediaRecorder(finalStream, { 
+        mimeType,
+        audioBitsPerSecond: 64000 // Voice-optimized 64kbps Opus for lightweight fast uploads
+      });
       mediaRecorderRef.current = mediaRecorder;
 
       mediaRecorder.ondataavailable = (e) => {
@@ -83,6 +91,7 @@ export function useAudioRecorder() {
       mediaRecorder.start(1000); // chunk every second
       setIsRecording(true);
       isRecordingRef.current = true;
+      shouldRestartRecognitionRef.current = true;
       setIsPausedBySilence(false);
       setTranscript("");
 
@@ -113,11 +122,16 @@ export function useAudioRecorder() {
           };
 
           recognition.onerror = (event: any) => {
-            console.warn("SpeechRecognition warning:", event.error);
+            if (event.error === 'network' || event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+              shouldRestartRecognitionRef.current = false;
+              console.info(`SpeechRecognition disabled (${event.error}). Recording continues via Whisper AI.`);
+            } else {
+              console.warn("SpeechRecognition warning:", event.error);
+            }
           };
 
           recognition.onend = () => {
-            if (isRecordingRef.current) {
+            if (isRecordingRef.current && shouldRestartRecognitionRef.current) {
               try {
                 recognition.start();
               } catch (e) {
@@ -251,11 +265,16 @@ export function useAudioRecorder() {
 
       if (!transcribeRes.ok) throw new Error(transcribeData.error);
 
-      // 2. Summarize / Clean up
+      // 2. Summarize / Clean up with user's custom context if provided
+      const customContext = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_custom_context') || '' : '';
       const summarizeRes = await fetch("/api/summarize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: transcribeData.text, type }),
+        body: JSON.stringify({ 
+          text: transcribeData.text, 
+          type, 
+          customContext 
+        }),
       });
       const summarizeData = await summarizeRes.json();
 
@@ -272,6 +291,27 @@ export function useAudioRecorder() {
           summary: finalOutput,
           type
         });
+
+        // Also persist user plan usage directly to Firestore (anti-cheating)
+        try {
+          const { getFirestore, doc, updateDoc, increment } = await import("firebase/firestore");
+          const db = getFirestore();
+          await updateDoc(doc(db, "users", user.uid), {
+            sessionCount: increment(1),
+            usedMinutes: increment(2)
+          });
+        } catch (planErr) {
+          console.warn("Could not increment user usage in firestore:", planErr);
+        }
+      }
+
+      // Track usage & increment session count locally
+      if (typeof window !== 'undefined') {
+        const curSessions = parseInt(localStorage.getItem('voiceflow_session_count') || '0', 10);
+        const curMins = parseInt(localStorage.getItem('voiceflow_used_minutes') || '0', 10);
+        localStorage.setItem('voiceflow_session_count', String(curSessions + 1));
+        localStorage.setItem('voiceflow_used_minutes', String(curMins + 2)); // Add 2 minutes per session
+        window.dispatchEvent(new CustomEvent('voiceflow-usage-updated'));
       }
 
       // 4. Auto Copy to Clipboard

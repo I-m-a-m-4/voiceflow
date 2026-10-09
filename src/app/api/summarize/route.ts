@@ -9,9 +9,11 @@ export async function POST(req: NextRequest) {
     
     const groq = new Groq({
       apiKey: process.env.GROQ_API_KEY,
+      timeout: 25000,
+      maxRetries: 1,
     });
 
-    const { text, type } = await req.json();
+    const { text, type, customContext } = await req.json();
 
     if (!text) {
       return NextResponse.json(
@@ -27,7 +29,12 @@ export async function POST(req: NextRequest) {
       systemPrompt = "You are an AI assistant specialized in structuring meeting transcripts. Your task is to extract:\n1. Executive Summary (3-5 bullets)\n2. Action Items (with owners if specified)\n3. Key Decisions.\nFormat the output in clean Markdown.";
     }
 
-    const modelsToTry = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama3-70b-8192", "mixtral-8x7b-32768"];
+    if (customContext && typeof customContext === 'string' && customContext.trim()) {
+      systemPrompt += `\n\nUser Profile & Custom Context:\n"${customContext.trim()}"\nTailor the summary and action items to specifically address the priorities, role, and industry mentioned above.`;
+    }
+
+    // Prioritize fast 20b model first for rapid turnaround
+    const modelsToTry = ["openai/gpt-oss-20b", "qwen/qwen3.8-27b", "openai/gpt-oss-120b"];
     let completion = null;
     let lastError = null;
 

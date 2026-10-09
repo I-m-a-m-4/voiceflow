@@ -7,7 +7,7 @@ import {
   Settings, Calendar, Keyboard, User, Shield, Globe, CreditCard, 
   FileText, HelpCircle, LifeBuoy, LogOut, Power, X, Download, 
   Eye, Headphones, Palette, Mic, ChevronDown, Check, Loader2, 
-  Volume2, ShieldCheck, ShieldAlert 
+  Volume2, ShieldCheck, ShieldAlert, MessageSquare, Wand2, Monitor, Sparkles, BookOpen
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { useAuth } from '@/firebase';
@@ -26,10 +26,11 @@ interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onOpenBilling?: () => void;
+  initialTab?: string;
 }
 
-export function SettingsModal({ isOpen, onClose, onOpenBilling }: SettingsModalProps) {
-  const [activeTab, setActiveTab] = useState('general');
+export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: SettingsModalProps) {
+  const [activeTab, setActiveTab] = useState(initialTab || 'general');
   const { theme, setTheme } = useTheme();
   const auth = useAuth();
   const { toast } = useToast();
@@ -53,6 +54,108 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling }: SettingsModalP
   // Dynamic subscription states
   const [currentPlan, setCurrentPlan] = useState<string>('VoiceFlow Basic Plan');
   const [isProUser, setIsProUser] = useState<boolean>(false);
+
+  // Live Answers & Context states
+  const [copilotEnabled, setCopilotEnabled] = useState(true);
+  const [proactiveMode, setProactiveMode] = useState(false);
+  const [overlayPosition, setOverlayPosition] = useState('bottom-right');
+  const [customContext, setCustomContext] = useState('');
+  const [isSavingContext, setIsSavingContext] = useState(false);
+  const [isSavedContext, setIsSavedContext] = useState(false);
+
+  // Sync initialTab when modal opens
+  useEffect(() => {
+    if (isOpen && initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [isOpen, initialTab]);
+
+  // Load Live Answers settings & custom context on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedContext = localStorage.getItem('voiceflow_custom_context');
+      if (savedContext) setCustomContext(savedContext);
+
+      const savedCopilot = localStorage.getItem('voiceflow_copilot_enabled');
+      if (savedCopilot !== null) setCopilotEnabled(savedCopilot === 'true');
+
+      const savedProactive = localStorage.getItem('voiceflow_proactive_mode');
+      if (savedProactive !== null) setProactiveMode(savedProactive === 'true');
+
+      const savedPos = localStorage.getItem('voiceflow_overlay_pos');
+      if (savedPos) setOverlayPosition(savedPos);
+    }
+
+    if (auth?.currentUser?.uid) {
+      import('firebase/firestore').then(({ doc, getDoc, getFirestore }) => {
+        const db = getFirestore();
+        getDoc(doc(db, 'users', auth.currentUser!.uid)).then((snap) => {
+          if (snap.exists() && snap.data()?.customContext) {
+            setCustomContext(snap.data().customContext);
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('voiceflow_custom_context', snap.data().customContext);
+            }
+          }
+        }).catch((e) => console.warn('Could not load user custom context:', e));
+      });
+    }
+  }, [auth?.currentUser?.uid]);
+
+  const handleSaveContext = async () => {
+    setIsSavingContext(true);
+    try {
+      const cleanContext = customContext.trim();
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('voiceflow_custom_context', cleanContext);
+        window.dispatchEvent(new CustomEvent('voiceflow-context-updated', { detail: { context: cleanContext } }));
+      }
+
+      if (auth?.currentUser?.uid) {
+        const { doc, updateDoc, getFirestore } = await import('firebase/firestore');
+        const db = getFirestore();
+        await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+          customContext: cleanContext,
+        });
+      }
+
+      setIsSavedContext(true);
+      toast({
+        title: "✨ Custom Context Saved!",
+        description: "Voiceflow AI will now tailor meeting notes, summaries, and real-time answers specifically to your role and preferences.",
+      });
+      setTimeout(() => setIsSavedContext(false), 3000);
+    } catch (err: any) {
+      console.error('Error saving context:', err);
+      toast({
+        variant: "destructive",
+        title: "Failed to save context",
+        description: err?.message || "Please check your network connection.",
+      });
+    } finally {
+      setIsSavingContext(false);
+    }
+  };
+
+  const handleCopilotToggle = (checked: boolean) => {
+    setCopilotEnabled(checked);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('voiceflow_copilot_enabled', String(checked));
+    }
+  };
+
+  const handleProactiveToggle = (checked: boolean) => {
+    setProactiveMode(checked);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('voiceflow_proactive_mode', String(checked));
+    }
+  };
+
+  const handleOverlayPositionChange = (pos: string) => {
+    setOverlayPosition(pos);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('voiceflow_overlay_pos', pos);
+    }
+  };
 
   useEffect(() => {
     if (!auth?.currentUser?.uid) return;
@@ -274,8 +377,9 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling }: SettingsModalP
 
   const tabs = [
     { id: 'general', label: 'General', icon: Settings },
+    { id: 'answers', label: 'Live Answers & Context', icon: MessageSquare },
     { id: 'calendar', label: 'Calendar', icon: Calendar },
-    { id: 'keybinds', label: 'Keybinds', icon: Keyboard },
+    { id: 'keybinds', label: 'Keybinds & Guide', icon: Keyboard },
     { id: 'profile', label: 'Profile', icon: User },
     { id: 'security', label: 'Security', icon: Shield },
     { id: 'language', label: 'Language', icon: Globe },
@@ -482,6 +586,166 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling }: SettingsModalP
             </div>
           )}
 
+          {/* Live Answers & Custom Context Section */}
+          {activeTab === 'answers' && (
+            <div className="space-y-8 max-w-2xl">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Live Answers & AI Context</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+                  Configure your in-call AI co-pilot overlay, proactive assistance, and tailored persona instructions.
+                </p>
+
+                {/* Main Toggles */}
+                <div className="space-y-3 mb-6">
+                  <div className="flex items-start justify-between p-4 bg-gray-50 dark:bg-[#1A1A1A] rounded-xl border border-gray-200 dark:border-gray-800">
+                    <div className="flex items-start gap-3">
+                      <div className="bg-orange-100 dark:bg-orange-500/20 p-2 rounded-lg shrink-0 mt-0.5">
+                        <MessageSquare size={18} className="text-voiceflow-orange" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-bold text-gray-900 dark:text-white">Enable Live Answers Overlay</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                          Displays an unobtrusive overlay during meetings that allows you to ask VoiceFlow questions privately.
+                        </div>
+                      </div>
+                    </div>
+                    <Switch 
+                      checked={copilotEnabled} 
+                      onCheckedChange={handleCopilotToggle} 
+                      className="data-[state=checked]:bg-voiceflow-orange shrink-0 ml-4" 
+                    />
+                  </div>
+
+                  <div className="flex items-start justify-between p-4 bg-gray-50 dark:bg-[#1A1A1A] rounded-xl border border-gray-200 dark:border-gray-800">
+                    <div className="flex items-start gap-3">
+                      <div className="bg-blue-100 dark:bg-blue-500/20 p-2 rounded-lg shrink-0 mt-0.5">
+                        <Wand2 size={18} className="text-blue-500" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-bold text-gray-900 dark:text-white">Proactive Coaching</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                          AI will automatically suggest answers and key hints when it detects you are being asked a question.
+                        </div>
+                      </div>
+                    </div>
+                    <Switch 
+                      checked={proactiveMode} 
+                      onCheckedChange={handleProactiveToggle} 
+                      className="data-[state=checked]:bg-voiceflow-orange shrink-0 ml-4" 
+                    />
+                  </div>
+                </div>
+
+                {/* Overlay Position & Quick Trigger */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                  <div className="p-4 bg-gray-50 dark:bg-[#1A1A1A] rounded-xl border border-gray-200 dark:border-gray-800">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Monitor size={16} className="text-gray-700 dark:text-gray-300" />
+                      <h3 className="text-sm font-bold text-gray-900 dark:text-white">Overlay Position</h3>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Choose where on screen the overlay floats.</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {['top-right', 'top-left', 'bottom-right', 'bottom-left'].map((pos) => (
+                        <button
+                          key={pos}
+                          onClick={() => handleOverlayPositionChange(pos)}
+                          className={`py-1.5 px-2.5 rounded-lg border text-xs font-semibold capitalize flex items-center justify-center transition-all ${
+                            overlayPosition === pos
+                              ? 'border-voiceflow-orange bg-orange-50 dark:bg-orange-500/10 text-voiceflow-orange'
+                              : 'border-gray-200 dark:border-gray-800 bg-white dark:bg-[#202020] text-gray-600 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-700'
+                          }`}
+                        >
+                          {pos.replace('-', ' ')}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-gray-50 dark:bg-[#1A1A1A] rounded-xl border border-gray-200 dark:border-gray-800 flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <Keyboard size={16} className="text-gray-700 dark:text-gray-300" />
+                        <h3 className="text-sm font-bold text-gray-900 dark:text-white">Quick Trigger Shortcut</h3>
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Instantly focus input and ask during meetings.</p>
+                    </div>
+                    <div className="bg-white dark:bg-[#202020] border border-gray-200 dark:border-gray-800 rounded-lg p-2.5 flex items-center justify-center gap-2">
+                      <kbd className="bg-gray-100 dark:bg-[#2A2A2A] text-gray-800 dark:text-gray-200 px-2.5 py-1 rounded text-xs font-mono font-bold border border-gray-300 dark:border-gray-700 shadow-sm">Ctrl</kbd>
+                      <span className="text-gray-400 text-xs font-bold">+</span>
+                      <kbd className="bg-gray-100 dark:bg-[#2A2A2A] text-gray-800 dark:text-gray-200 px-2.5 py-1 rounded text-xs font-mono font-bold border border-gray-300 dark:border-gray-700 shadow-sm">Enter</kbd>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Custom System Instructions & Role Context */}
+                <div className="p-4 bg-gray-50 dark:bg-[#1A1A1A] rounded-xl border border-gray-200 dark:border-gray-800 mb-6">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <Sparkles size={16} className="text-voiceflow-orange" />
+                    <h3 className="text-sm font-bold text-gray-900 dark:text-white">Custom System Instructions & Role Context</h3>
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                    Provide context about your company, seniority, tech stack, or answer style so VoiceFlow tailors meeting summaries and live answers to your exact needs.
+                  </p>
+                  <textarea
+                    value={customContext}
+                    onChange={(e) => setCustomContext(e.target.value)}
+                    placeholder="e.g. I am a Senior Software Engineer interviewing for a role at Google. My primary stack is React, Next.js, and Python. When giving me answers, keep them concise and technical, focusing on system architecture."
+                    className="w-full h-28 bg-white dark:bg-[#141414] border border-gray-200 dark:border-gray-800 rounded-lg p-3 text-xs text-gray-900 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-voiceflow-orange/50 focus:border-voiceflow-orange resize-none transition-all"
+                  />
+                  <div className="flex justify-between items-center mt-3">
+                    <span className="text-xs text-gray-400">
+                      {customContext.trim().length > 0 ? `${customContext.trim().length} characters configured` : 'Default instructions active'}
+                    </span>
+                    <button
+                      onClick={handleSaveContext}
+                      disabled={isSavingContext}
+                      className="bg-voiceflow-orange hover:bg-orange-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      {isSavingContext ? (
+                        <>
+                          <Loader2 size={13} className="animate-spin" /> Saving...
+                        </>
+                      ) : isSavedContext ? (
+                        <>
+                          <Check size={13} className="text-white" /> Saved!
+                        </>
+                      ) : (
+                        'Save Context'
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Voiceflow In-Call Co-Pilot Guide */}
+                <div className="p-4 bg-orange-500/5 dark:bg-orange-500/10 rounded-xl border border-orange-500/20">
+                  <div className="flex items-center gap-2 mb-2 text-voiceflow-orange">
+                    <BookOpen size={16} />
+                    <h3 className="text-sm font-bold text-gray-900 dark:text-white">VoiceFlow In-Call Co-Pilot Guide</h3>
+                  </div>
+                  <div className="space-y-2 text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
+                    <div className="flex items-start gap-2">
+                      <span className="bg-voiceflow-orange text-white w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">1</span>
+                      <span><strong>Join your call:</strong> Works seamlessly with Zoom, Google Meet, Teams, or Slack calls.</span>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="bg-voiceflow-orange text-white w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">2</span>
+                      <span><strong>Start VoiceFlow:</strong> Press <kbd className="px-1.5 py-0.5 bg-white dark:bg-gray-800 border rounded font-mono text-[10px]">Ctrl + Shift + \</kbd> or click Start VoiceFlow in the top header.</span>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="bg-voiceflow-orange text-white w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">3</span>
+                      <span><strong>Ask anytime:</strong> Press <kbd className="px-1.5 py-0.5 bg-white dark:bg-gray-800 border rounded font-mono text-[10px]">Ctrl + Enter</kbd> to type or ask about ongoing audio/screen context.</span>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="bg-voiceflow-orange text-white w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">4</span>
+                      <span><strong>Stealth & Privacy:</strong> Enable Stealth Mode in General settings so the window is completely invisible to screen share.</span>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          )}
+
           {activeTab === 'keybinds' && (
             <div className="space-y-8 max-w-2xl">
               <div>
@@ -511,6 +775,17 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling }: SettingsModalP
                       <ShortcutRow icon="←" label="Move the window position left" keys={['Ctrl', '←']} />
                       <ShortcutRow icon="→" label="Move the window position right" keys={['Ctrl', '→']} />
                     </div>
+                  </div>
+
+                  {/* Quick Usage Summary */}
+                  <div className="p-4 bg-orange-500/5 dark:bg-orange-500/10 rounded-xl border border-orange-500/20 mt-6">
+                    <div className="flex items-center gap-2 mb-2 text-voiceflow-orange">
+                      <BookOpen size={16} />
+                      <h3 className="text-sm font-bold text-gray-900 dark:text-white">In-Call Shortcut Workflow</h3>
+                    </div>
+                    <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
+                      During your meeting, toggle VoiceFlow recording with <kbd className="px-1.5 py-0.5 bg-white dark:bg-gray-800 border rounded font-mono text-[10px]">Ctrl + Shift + \</kbd>. Whenever a difficult question arises, press <kbd className="px-1.5 py-0.5 bg-white dark:bg-gray-800 border rounded font-mono text-[10px]">Ctrl + Enter</kbd> to bring up Live Answers. Hide the window completely anytime with <kbd className="px-1.5 py-0.5 bg-white dark:bg-gray-800 border rounded font-mono text-[10px]">Ctrl + `</kbd>.
+                    </p>
                   </div>
                 </div>
               </div>
@@ -734,7 +1009,7 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling }: SettingsModalP
                     <p className="text-sm text-gray-500 dark:text-gray-400">
                       {isProUser 
                         ? 'Unlimited real-time meeting transcription, instant AI copilot, audio drops, and live screen notes.'
-                        : 'Free tier with 300 minutes/month & real-time meeting transcription.'}
+                        : 'Free tier with 30 minutes/month & 3 meeting sessions.'}
                     </p>
                   </div>
                   <div className="sm:text-right shrink-0">

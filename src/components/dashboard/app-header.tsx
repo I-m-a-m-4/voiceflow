@@ -1,17 +1,29 @@
 "use client";
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, Video, Upload, Mic, Sun, Moon } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { useTheme } from 'next-themes';
 
 export default function AppHeader() {
   const { theme, setTheme, resolvedTheme } = useTheme();
-  const [mounted, setMounted] = React.useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
 
-  React.useEffect(() => {
+  useEffect(() => {
     setMounted(true);
+    const handleState = (e: any) => {
+      if (typeof e.detail?.isRecording === 'boolean') {
+        setIsRecording(e.detail.isRecording);
+      }
+    };
+    window.addEventListener('voiceflow-record-state', handleState);
+    return () => window.removeEventListener('voiceflow-record-state', handleState);
   }, []);
+
+  const handleRecordToggle = () => {
+    window.dispatchEvent(new CustomEvent('voiceflow-toggle-record'));
+  };
 
   const isDarkMode = resolvedTheme === 'dark';
 
@@ -50,9 +62,16 @@ export default function AppHeader() {
             <Upload size={16} />
             Import
           </button>
-          <button className="flex items-center gap-2 px-5 py-1.5 text-sm font-semibold text-white bg-blue-600 rounded-full hover:bg-blue-700 shadow-sm transition-colors shadow-blue-500/20 dark:text-white dark:bg-blue-600">
+          <button 
+            onClick={handleRecordToggle}
+            className={`flex items-center gap-2 px-5 py-1.5 text-sm font-semibold rounded-full shadow-sm transition-all ${
+              isRecording 
+                ? "bg-red-500 hover:bg-red-600 text-white animate-pulse shadow-red-500/20" 
+                : "bg-blue-600 hover:bg-blue-700 text-white shadow-blue-500/20 dark:text-white dark:bg-blue-600"
+            }`}
+          >
             <Mic size={16} />
-            Record
+            {isRecording ? "Listening..." : "Record"}
           </button>
         </div>
       </header>

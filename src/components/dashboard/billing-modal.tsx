@@ -64,26 +64,7 @@ const UpgradeButton = ({ plan, isAnnual, auth, onClose, className, children }: a
       }
       throw new Error(data.error || "Failed to initialize payment gateway");
     } catch (err: any) {
-      console.warn("Payment initiation error, activating instant trial/plan update:", err);
-      // Fallback: update user plan in Firestore so user is never blocked
-      if (auth?.currentUser?.uid) {
-        try {
-          const { doc, updateDoc, getFirestore } = await import("firebase/firestore");
-          const db = getFirestore();
-          await updateDoc(doc(db, "users", auth.currentUser.uid), {
-            subscriptionPlan: plan.name,
-            planTier: plan.id,
-            isPro: true,
-            updatedAt: new Date(),
-          });
-          alert(`🎉 Welcome to ${plan.name}! Your account has been upgraded.`);
-          onClose();
-          window.location.reload();
-          return;
-        } catch (dbErr) {
-          console.error("Firestore plan update fallback failed:", dbErr);
-        }
-      }
+      console.error("Payment initiation error:", err);
       alert(`Could not open checkout: ${err.message || "Please check your network or try again."}`);
     } finally {
       setLoading(false);

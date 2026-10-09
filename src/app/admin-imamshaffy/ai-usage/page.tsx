@@ -40,6 +40,7 @@ import {
   BarChart, LineChart, PieChart, ComposedChart, XAxis, YAxis, Bar, Line, Pie, Cell, Area,
   CartesianGrid, Legend, Tooltip as ReTooltip, ResponsiveContainer,
 } from 'recharts';
+import VoiceflowAiInterviewDiagnostics from '@/components/admin/voiceflow-ai-interview-diagnostics';
 
 /**
  * Admin AI board.
@@ -767,22 +768,22 @@ export default function AdminAIUsage() {
       {/* Header */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
+          <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center gap-2">
             <Zap className="w-8 h-8 text-orange-500" />
-            AI Usage Tracker
+            Voiceflow AI & Interview Diagnostics
           </h1>
-          <p className="text-slate-500 mt-1">
-            What people ask Zen AI, which tools answer it, and what it costs to run.
+          <p className="text-muted-foreground mt-1 text-sm">
+            Real-time Groq & Shadow AI model performance, live interview question latency benchmarking, and pass probability analysis.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex rounded-lg border border-slate-200 bg-white p-1">
+          <div className="flex rounded-lg border border-border bg-card p-1">
             {RANGES.map((r) => (
               <button
                 key={r.days}
                 onClick={() => setRangeDays(r.days)}
                 className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                  rangeDays === r.days ? 'bg-orange-500 text-white' : 'text-slate-600 hover:bg-slate-50'
+                  rangeDays === r.days ? 'bg-orange-500 text-white' : 'text-muted-foreground hover:bg-muted'
                 }`}
               >
                 {r.label}
@@ -794,6 +795,9 @@ export default function AdminAIUsage() {
           </Button>
         </div>
       </div>
+
+      {/* Voiceflow Shadow AI & Interview Diagnostics Engine */}
+      <VoiceflowAiInterviewDiagnostics />
 
       {/*
         History only exists from the day the rollup recorder shipped. Saying so

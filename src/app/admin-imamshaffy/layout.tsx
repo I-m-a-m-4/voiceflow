@@ -33,6 +33,7 @@ const ADMIN_EMAIL = 'belloimam431@gmail.com';
  */
 const navLinks = [
   { href: '/admin-imamshaffy', label: 'Dashboard', icon: LayoutDashboard, primary: true },
+  { href: '/admin-imamshaffy/ai-usage', label: 'AI Diagnostics', icon: Zap, primary: true },
   { href: '/admin-imamshaffy/users', label: 'Users', icon: Users, primary: true },
   { href: '/admin-imamshaffy/achievements', label: 'Achievements', icon: Crown },
   { href: '/admin-imamshaffy/outreach', label: 'Email', icon: Mail },
@@ -41,7 +42,6 @@ const navLinks = [
   { href: '/admin-imamshaffy/promos', label: 'Promo Popups', icon: Sparkles },
   { href: '/admin-imamshaffy/notifications', label: 'Alerts', icon: Bell, primary: true },
   { href: '/admin-imamshaffy/support', label: 'Support', icon: MessageSquare, primary: true },
-  { href: '/admin-imamshaffy/ai-usage', label: 'AI Usage', icon: Zap },
   { href: '/admin-imamshaffy/updates', label: 'App Updates', icon: Smartphone },
   { href: '/admin-imamshaffy/developer-logs', label: 'Dev Logs', icon: Bug },
   { href: '/admin-imamshaffy/backups', label: 'Backups', icon: Database },
@@ -110,7 +110,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               // was never written by anything, so every one of these popups used
               // to read "A new system error was just logged." and say nothing.
               notify(
-                data.type === 'anomaly' ? 'Zeneva Anomaly Detected' : 'New Developer Log',
+                data.type === 'anomaly' ? 'Voiceflow AI Anomaly Detected' : 'New Developer Log',
                 data.message || data.errorMessage || 'A new system error was just logged.',
                 '/admin-imamshaffy/developer-logs'
               );
@@ -270,8 +270,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             href="/admin-imamshaffy"
             className="flex items-center gap-2 text-base font-black tracking-tight whitespace-nowrap shrink-0 mr-2"
           >
-            <span className="bg-gradient-to-r from-primary to-purple-500 bg-clip-text text-transparent">
-              Zeneva Admin
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-orange-500/10 text-orange-500 border border-orange-500/20">
+              <Zap className="h-4 w-4 fill-orange-500" />
+            </span>
+            <span className="bg-gradient-to-r from-orange-500 via-amber-500 to-orange-600 bg-clip-text text-transparent">
+              Voiceflow Admin
             </span>
           </Link>
 

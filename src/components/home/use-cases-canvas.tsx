@@ -957,7 +957,7 @@ export function UseCasesCanvas() {
                   fill
                   sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
                   className={cn(
-                    'object-cover transition-all duration-700 ease-[cubic-bezier(0.25,0.46,0.45,0.94)] group-hover:scale-[1.07]',
+                    'object-cover transition-all duration-700 [transition-timing-function:cubic-bezier(0.25,0.46,0.45,0.94)] group-hover:scale-[1.07]',
                     isActive ? 'opacity-90 saturate-100' : 'opacity-60 saturate-[0.7]',
                     'group-hover:opacity-95 group-hover:saturate-100',
                   )}

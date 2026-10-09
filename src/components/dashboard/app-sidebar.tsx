@@ -3,8 +3,9 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Settings, Bell, FileText, MessageSquare, Ghost } from 'lucide-react';
+import { Home, Settings, Bell, FileText, MessageSquare, Ghost, Sparkles, Zap } from 'lucide-react';
 import { useAuth } from '@/firebase';
+import { usePlanUsage } from '@/hooks/use-plan-usage';
 import { BillingModal } from './billing-modal';
 import { SettingsModal } from './settings-modal';
 
@@ -13,19 +14,29 @@ export default function AppSidebar() {
   const auth = useAuth();
   const [isBillingModalOpen, setIsBillingModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState('general');
   
   const navItems = [
     { label: 'My Meetings', icon: Home, href: '/dashboard' },
     { label: 'AI Meeting Notetaker', icon: FileText, href: '/dashboard/notetaker' },
-    { label: 'Live Answers', icon: MessageSquare, href: '/dashboard/answers' },
     { label: 'Stealth Mode', icon: Ghost, href: '/dashboard/stealth' },
   ];
 
   React.useEffect(() => {
     const handleOpenBilling = () => setIsBillingModalOpen(true);
+    const handleOpenSettings = (e: any) => {
+      if (e.detail?.tab) setSettingsTab(e.detail.tab);
+      setIsSettingsModalOpen(true);
+    };
     window.addEventListener('open-billing-modal', handleOpenBilling);
-    return () => window.removeEventListener('open-billing-modal', handleOpenBilling);
+    window.addEventListener('open-settings-modal', handleOpenSettings);
+    return () => {
+      window.removeEventListener('open-billing-modal', handleOpenBilling);
+      window.removeEventListener('open-settings-modal', handleOpenSettings);
+    };
   }, []);
+
+  const { isPro, planName, sessionCount, usedMinutes, maxMinutes, maxFreeSessions, isLimitReached } = usePlanUsage();
 
   return (
     <>
@@ -88,20 +99,48 @@ export default function AppSidebar() {
         {/* Bottom section */}
         <div className="mt-auto pt-6 px-4 pb-4">
           <div className="border-t border-gray-200 pt-4 dark:border-border">
-            <div className="flex justify-between items-end mb-1">
-              <span className="text-sm font-bold text-gray-900 dark:text-gray-200">Basic Plan</span>
+            <div className="flex justify-between items-center mb-1">
+              <span className="text-sm font-bold text-gray-900 dark:text-gray-200 flex items-center gap-1.5">
+                {isPro ? (
+                  <>
+                    <Sparkles size={14} className="text-voiceflow-orange fill-voiceflow-orange" />
+                    <span>Voiceflow Pro</span>
+                  </>
+                ) : (
+                  <span>Basic Plan</span>
+                )}
+              </span>
+              {!isPro && (
+                <span className="text-[10px] font-semibold text-gray-400">
+                  {sessionCount}/{maxFreeSessions} sessions
+                </span>
+              )}
             </div>
-            <div className="text-xs text-gray-500 mb-3 dark:text-gray-400">0 of 300 monthly mins used</div>
+
+            <div className="text-xs text-gray-500 mb-2.5 dark:text-gray-400">
+              {isPro ? "Unlimited monthly mins" : `${usedMinutes} of ${maxMinutes} monthly mins used`}
+            </div>
             
             <div className="w-full bg-gray-200 h-1.5 rounded-full mb-3 overflow-hidden dark:bg-gray-700">
-              <div className="bg-voiceflow-orange h-full" style={{ width: '0%' }}></div>
+              <div 
+                className={`h-full transition-all duration-500 ${isPro ? "bg-emerald-500" : isLimitReached ? "bg-red-500" : "bg-voiceflow-orange"}`} 
+                style={{ 
+                  width: isPro ? '100%' : `${Math.min(100, Math.max(usedMinutes > 0 ? 5 : 0, Math.round((usedMinutes / maxMinutes) * 100)))}%` 
+                }}
+              />
             </div>
             
             <button 
               onClick={() => setIsBillingModalOpen(true)}
-              className="w-full py-1.5 px-3 rounded-full border border-voiceflow-orange text-voiceflow-orange text-sm font-semibold hover:bg-orange-50 transition-colors dark:hover:bg-orange-500/10"
+              className={`w-full py-1.5 px-3 rounded-full text-xs font-bold transition-all shadow-sm ${
+                isPro
+                  ? "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 hover:bg-emerald-500/20 dark:text-emerald-400"
+                  : isLimitReached
+                    ? "bg-red-500 text-white hover:bg-red-600 border border-red-500 animate-pulse"
+                    : "border border-voiceflow-orange text-voiceflow-orange hover:bg-orange-50 dark:hover:bg-orange-500/10"
+              }`}
             >
-              Upgrade to Pro
+              {isPro ? "Pro Active • Manage" : isLimitReached ? "Limit Reached • Upgrade" : "Upgrade to Pro"}
             </button>
           </div>
         </div>
@@ -115,6 +154,7 @@ export default function AppSidebar() {
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
         onOpenBilling={() => setIsBillingModalOpen(true)}
+        initialTab={settingsTab}
       />
     </>
   );

@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useEffect } from 'react';
-import { Calendar, Video, RefreshCw, Settings, Mic, Square, Loader2, ShieldCheck } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Calendar, Video, RefreshCw, Settings, Mic, Square, Loader2, ShieldCheck, Sparkles } from 'lucide-react';
 import { useAuth, auth as firebaseAuth } from '@/firebase';
 import { GoogleAuthProvider, OAuthProvider, linkWithPopup } from 'firebase/auth';
 import { useAudioRecorder } from '@/hooks/useAudioRecorder';
+import { usePlanUsage } from '@/hooks/use-plan-usage';
 import MeetingWidget from './meeting-widget';
 
 export default function RightPanel() {
@@ -12,8 +13,9 @@ export default function RightPanel() {
   const userEmail = auth?.currentUser?.email || 'user@example.com';
   
   const { startRecording, stopRecording, isRecording, isProcessing, transcript } = useAudioRecorder();
+  const { isPro, sessionCount, maxFreeSessions, isLimitReached } = usePlanUsage();
   
-  const [recordingTime, setRecordingTime] = React.useState(0);
+  const [recordingTime, setRecordingTime] = useState(0);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -26,6 +28,31 @@ export default function RightPanel() {
     }
     return () => clearInterval(interval);
   }, [isRecording]);
+
+  // Synchronize state with top navigation bar
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('voiceflow-record-state', { detail: { isRecording } }));
+    }
+  }, [isRecording]);
+
+  useEffect(() => {
+    const handleToggle = () => {
+      if (isRecording) {
+        stopRecording();
+      } else {
+        if (isLimitReached) {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('open-billing-modal'));
+          }
+          return;
+        }
+        startRecording(false);
+      }
+    };
+    window.addEventListener('voiceflow-toggle-record', handleToggle);
+    return () => window.removeEventListener('voiceflow-toggle-record', handleToggle);
+  }, [isRecording, stopRecording, startRecording, isLimitReached]);
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60).toString().padStart(2, '0');
@@ -68,64 +95,71 @@ export default function RightPanel() {
   return (
     <div className="w-full lg:w-[320px] h-auto lg:h-full bg-muted/30 border-t lg:border-t-0 border-l border-border flex flex-col shrink-0 overflow-y-visible lg:overflow-y-auto p-6">
       
-      {/* Floating Undetectable Widget (visible during recording) */}
+      {/* Floating Undetectable Widget (visible during recording & draggable) */}
       <MeetingWidget 
         isRecording={isRecording} 
         stopRecording={stopRecording} 
         transcript={transcript} 
       />
 
-      {/* Record a live meeting */}
+      {/* Voiceflow Co-Pilot Control */}
       <div className="mb-8">
-        <h3 className="text-[15px] font-bold text-foreground mb-1">Record a live meeting</h3>
-        <p className="text-[11px] font-semibold text-muted-foreground mb-3">Record system audio and mic</p>
+        <h3 className="text-[15px] font-bold text-foreground mb-1">Voiceflow Co-Pilot</h3>
+        <p className="text-[11px] font-medium text-muted-foreground mb-3">Stealth real-time notetaker & live assistant</p>
         
         {!isRecording && !isProcessing ? (
-          <div className="space-y-2">
+          <div className="space-y-3">
             <button 
-              onClick={() => startRecording(true)} 
-              className="w-full flex items-center justify-center gap-2 py-3 bg-voiceflow-orange text-white rounded-lg hover:bg-orange-600 transition-colors font-semibold shadow-sm"
-              title="Capture System Audio (Zoom/Meet/Teams call participants) and your Microphone"
+              onClick={() => {
+                if (isLimitReached) {
+                  if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('open-billing-modal'));
+                  }
+                  return;
+                }
+                startRecording(false);
+              }} 
+              className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl transition-all font-semibold shadow-md active:scale-[0.98] ${
+                isLimitReached 
+                  ? "bg-red-500 hover:bg-red-600 text-white shadow-red-500/10" 
+                  : "bg-voiceflow-orange hover:bg-orange-600 text-white shadow-orange-500/10"
+              }`}
+              title={isLimitReached ? "Upgrade to Pro to start a new session" : "Launch Voiceflow Floating Assistant and start live listening"}
             >
-              <Video size={18} />
-              Record Online Meeting
+              <Mic size={18} />
+              {isLimitReached ? "Upgrade to Start (Limit Reached)" : "Start Voiceflow"}
             </button>
-            <button 
-              onClick={() => startRecording(false)} 
-              className="w-full flex items-center justify-center gap-2 py-2.5 bg-muted/60 hover:bg-muted text-foreground border border-border rounded-lg transition-colors font-semibold text-xs shadow-sm"
-              title="Capture Microphone for in-person conversations, 1-on-1s, and room talks"
-            >
-              <Mic size={15} className="text-muted-foreground" />
-              In-Person Conversation (Mic)
-            </button>
-            <div className="mt-2.5 flex items-center justify-center gap-1.5 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 py-1.5 px-3 rounded-full border border-emerald-500/20">
+            <div className="flex items-center justify-center gap-1.5 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 py-1.5 px-3 rounded-full border border-emerald-500/20">
               <ShieldCheck size={14} className="text-emerald-500" />
-              <span className="text-[11px] font-bold tracking-tight">100% Undetectable • No Bots • Taskbar Hidden</span>
+              <span className="text-[11px] font-bold tracking-tight">100% Undetectable • Draggable • Taskbar Hidden</span>
             </div>
           </div>
         ) : isRecording ? (
-          <div className="w-full p-4 border border-red-500/30 bg-red-500/10 rounded-lg flex flex-col items-center justify-center gap-3">
-            <div className="flex items-center gap-2 text-red-500 font-semibold animate-pulse">
+          <div className="w-full p-4 border border-red-500/30 bg-red-500/10 rounded-xl flex flex-col items-center justify-center gap-3">
+            <div className="flex items-center gap-2 text-red-500 font-semibold animate-pulse text-sm">
               <div className="w-2.5 h-2.5 rounded-full bg-red-500"></div>
-              Recording... {formatTime(recordingTime)}
+              Session Active • {formatTime(recordingTime)}
             </div>
+            <p className="text-[11px] text-muted-foreground text-center">
+              Floating widget active above your meeting tabs. Drag anywhere on screen.
+            </p>
             <button 
               onClick={stopRecording} 
-              className="w-full flex items-center justify-center gap-2 py-2 bg-red-500/20 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-500/30 transition-colors font-semibold border border-red-500/20"
+              className="w-full flex items-center justify-center gap-2 py-2.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors font-semibold shadow-sm text-sm"
             >
-              <Square size={16} fill="currentColor" />
-              Stop & Save
+              <Square size={15} fill="currentColor" />
+              Stop & Save Meeting
             </button>
           </div>
         ) : (
-          <div className="w-full p-4 border border-orange-500/30 bg-orange-500/10 rounded-lg flex flex-col items-center justify-center gap-2 text-voiceflow-orange font-semibold">
+          <div className="w-full p-4 border border-orange-500/30 bg-orange-500/10 rounded-xl flex flex-col items-center justify-center gap-2 text-voiceflow-orange font-semibold">
             <Loader2 className="w-6 h-6 animate-spin" />
-            Processing Audio...
+            <span className="text-sm">Processing Meeting & Notes...</span>
           </div>
         )}
       </div>
 
-      {/* Record upcoming meetings */}
+      {/* Upcoming meetings */}
       <div>
         <h3 className="text-[15px] font-bold text-foreground mb-3">Upcoming meetings</h3>
         

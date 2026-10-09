@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { Switch } from '@/components/ui/switch';
 import { FileText, Calendar, Clock, Download, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/firebase';
@@ -88,8 +89,15 @@ export default function NotetakerPage() {
             <div className="relative z-10">
               <h2 className="text-lg font-bold mb-2">Want better summaries?</h2>
               <p className="text-white/80 text-sm mb-4 max-w-sm">Provide VoiceFlow with context about your role and company in the Live Answers settings to get hyper-tailored notes.</p>
-              <button className="bg-white text-orange-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-orange-50 transition-colors">
+              <button 
+                type="button"
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent('open-settings-modal', { detail: { tab: 'answers' } }));
+                }}
+                className="inline-flex items-center gap-1.5 bg-white text-orange-600 px-4 py-2 rounded-lg text-sm font-bold hover:bg-orange-50 transition-colors shadow-sm"
+              >
                 Configure Context
+                <ChevronRight size={16} />
               </button>
             </div>
             <FileText className="absolute -right-4 -bottom-4 w-32 h-32 text-white/10" />

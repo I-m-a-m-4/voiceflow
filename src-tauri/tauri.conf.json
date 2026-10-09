@@ -37,7 +37,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' tauri: https: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.paystack.co https://cdn.jsdelivr.net; connect-src 'self' https: wss: blob:; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; font-src 'self' data: https://fonts.gstatic.com https://www.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; frame-src 'self' https://checkout.paystack.com https://js.paystack.co;"
+      "csp": "default-src 'self' tauri: https: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.paystack.co https://cdn.jsdelivr.net; connect-src 'self' https: wss: blob: https://api.fontshare.com https://cdn.fontshare.com; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; font-src 'self' data: https://fonts.gstatic.com https://www.cloudflare.com https://cdn.fontshare.com https://api.fontshare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://api.fontshare.com; frame-src 'self' https://checkout.paystack.com https://js.paystack.co;"
     }
   },
   "bundle": {
