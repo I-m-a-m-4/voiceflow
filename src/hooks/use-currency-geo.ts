@@ -13,35 +13,66 @@ export interface GeoCurrencyInfo {
 }
 
 export function useCurrencyGeo(): GeoCurrencyInfo {
-  const [currency, setCurrencyState] = useState<CurrencyCode>("USD");
-  const [isNigeria, setIsNigeria] = useState<boolean>(false);
-  const [country, setCountry] = useState<string>("US");
+  const [isNigeria, setIsNigeria] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+      if (tz.includes("Lagos") || tz.includes("Nigeria") || tz.includes("W. Central Africa")) {
+        return true;
+      }
+      const languages = navigator.languages || [navigator.language || ""];
+      if (languages.some(lang => lang.toLowerCase().includes("-ng") || lang.toLowerCase() === "ng")) {
+        return true;
+      }
+    } catch {}
+    return false;
+  });
+
+  const [country, setCountry] = useState<string>(() => (isNigeria ? "NG" : "US"));
 
   useEffect(() => {
-    // 1. Client time zone check as fast immediate hint
+    let clientDetectedNigeria = false;
     try {
-      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
-      if (timeZone.includes("Lagos") || timeZone.includes("Africa/Lagos") || timeZone.includes("Nigeria")) {
-        setCurrencyState("NGN");
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+      const languages = navigator.languages || [navigator.language || ""];
+      if (
+        tz.includes("Lagos") || 
+        tz.includes("Nigeria") || 
+        tz.includes("W. Central Africa") || 
+        languages.some(lang => lang.toLowerCase().includes("-ng") || lang.toLowerCase() === "ng")
+      ) {
+        clientDetectedNigeria = true;
         setIsNigeria(true);
         setCountry("NG");
       }
     } catch {}
 
-    // 2. Query /api/geo endpoint
+    // Query /api/geo endpoint
     fetch("/api/geo")
       .then((res) => res.json())
       .then((data) => {
-        if (data.country) setCountry(data.country);
         if (data.isNigeria || data.country === "NG") {
           setIsNigeria(true);
-          setCurrencyState("NGN");
-        } else {
+          setCountry("NG");
+        } else if (!clientDetectedNigeria) {
           setIsNigeria(false);
-          setCurrencyState("USD");
+          if (data.country) setCountry(data.country);
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        // Fallback: direct query to ip-api if /api/geo had network error
+        if (!clientDetectedNigeria) {
+          fetch("http://ip-api.com/json")
+            .then((r) => r.json())
+            .then((geo) => {
+              if (geo.countryCode === "NG" || geo.country === "Nigeria" || (geo.timezone && geo.timezone.includes("Lagos"))) {
+                setIsNigeria(true);
+                setCountry("NG");
+              }
+            })
+            .catch(() => {});
+        }
+      });
   }, []);
 
   const activeCurrency: CurrencyCode = isNigeria ? "NGN" : "USD";

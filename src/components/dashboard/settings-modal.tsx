@@ -1222,7 +1222,7 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
                     </label>
                     <input
                       type="text"
-                      placeholder="e.g. Compliments of Bello Imam"
+                      placeholder="e.g. Compliments of Voiceflow Team"
                       value={dashNote}
                       onChange={(e) => setDashNote(e.target.value)}
                       className="w-full bg-white dark:bg-[#111111] border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-voiceflow-orange shadow-sm"
@@ -1272,7 +1272,7 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
                   Contact Support
                 </h2>
                 <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mb-4">
-                  Chat directly with Bello Imam and the Voiceflow engineering team. Send texts, screenshots, or voice notes.
+                  Chat directly with the Voiceflow engineering and support team. Send texts, screenshots, or voice notes.
                 </p>
                 <SupportChatWidget user={auth?.currentUser} />
               </div>

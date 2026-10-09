@@ -35,7 +35,7 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
         'Screen Q&A (Ask AI questions about active screen shares)',
         'Automated Executive Summaries & Follow-up Email Drafts',
         'Custom Role, Company & Industry Persona Context',
-        'High-Speed Whisper Turbo & Llama 3.3 70B AI Engine',
+        'Ultra-Fast Neural Audio Intelligence & Copilot Engine',
         'Unlimited Audio Dictation & Voice Note Clean-up',
       ],
       isPopular: true,
@@ -54,7 +54,7 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
       features: [
         'Everything in Voiceflow Pro included',
         'Shared Team Workspace & Centralized Meeting Library',
-        'Priority 24/7 Dedicated Support with Bello Imam',
+        'Priority 24/7 Dedicated Support & Assistance',
         'Export to CRM, Notion & Slack integrations',
         'Consolidated Billing & Organization Admin Controls',
       ],

@@ -310,7 +310,7 @@ export function SupportChatWidget({ user }: SupportChatWidgetProps) {
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             </div>
             <div className="text-[11px] text-muted-foreground">
-              Direct line to Bello Imam & Engineering team • Typically replies in minutes
+              Direct line to Voiceflow Engineering & Support Team • Typically replies in minutes
             </div>
           </div>
         </div>
