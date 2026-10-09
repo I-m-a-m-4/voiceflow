@@ -4,12 +4,13 @@ import crypto from "crypto";
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId, planId, amount, planName, email, name, origin, redirectUrl } = await req.json();
+    const { userId, planId, amount, planName, email, name, origin, redirectUrl, currency } = await req.json();
 
     const userEmail = email || "user@voiceflow.space";
     const plan = SUBSCRIPTION_PLANS[planId];
     const finalAmount = amount || (plan ? plan.price : 11.99);
     const finalPlanName = planName || (plan ? plan.name : "Voiceflow Pro");
+    const finalCurrency = (currency === "NGN" || currency === "ngn") ? "NGN" : "USD";
 
     const secretKey = process.env.FLUTTERWAVE_SECRET_KEY;
     if (!secretKey) {
@@ -58,7 +59,7 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         tx_ref: txRef,
         amount: finalAmount,
-        currency: "USD",
+        currency: finalCurrency,
         redirect_url: finalRedirectUrl,
         meta: {
           user_id: userId || 'guest',

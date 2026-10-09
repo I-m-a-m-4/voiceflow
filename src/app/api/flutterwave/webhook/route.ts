@@ -33,12 +33,14 @@ export async function POST(req: NextRequest) {
       if (user_id && plan_id && admin.apps.length > 0) {
         const db = admin.firestore();
         await db.collection("users").doc(user_id).set({
-          subscriptionPlan: plan_id,
+          isPro: true,
+          planTier: plan_id || 'pro',
+          subscriptionPlan: plan_id === 'pro' ? 'Voiceflow Pro' : plan_id,
           subscriptionUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
           paymentRef: payload.data.tx_ref
         }, { merge: true });
         
-        console.log(`Successfully updated user ${user_id} to plan ${plan_id}`);
+        console.log(`Successfully activated Pro status for user ${user_id} with plan ${plan_id}`);
       }
     }
 

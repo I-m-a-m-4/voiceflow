@@ -2,25 +2,99 @@
 
 import React, { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Check, Loader2 } from 'lucide-react';
+import { Check, Loader2, Sparkles, ShieldCheck, Zap, Globe, Crown } from 'lucide-react';
 import { useAuth } from '@/firebase';
+import { useCurrencyGeo, CurrencyCode } from '@/hooks/use-currency-geo';
 
 interface BillingModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-const UpgradeButton = ({ plan, isAnnual, auth, onClose, className, children }: any) => {
-  const [loading, setLoading] = useState(false);
-  const amount = isAnnual ? plan.annualPrice : plan.discountedMonthly;
+export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () => void }) {
+  const [isAnnual, setIsAnnual] = useState(false);
+  const auth = useAuth();
+  const { currency, currencySymbol, setCurrency, formatPrice } = useCurrencyGeo();
+  const [loadingPlanId, setLoadingPlanId] = useState<string | null>(null);
 
-  const handleUpgrade = async () => {
-    setLoading(true);
+  const plans = [
+    {
+      id: 'free',
+      name: 'Free Plan',
+      description: 'Essential meeting recording and basic transcription.',
+      monthlyUsd: 0,
+      monthlyNgn: 0,
+      annualUsd: 0,
+      annualNgn: 0,
+      features: [
+        'Stealth Mode: 100% Undetectable to Zoom & Google Meet',
+        '30 minutes / month limit',
+        'Up to 3 meeting sessions',
+        'Standard Whisper transcription',
+        'Basic meeting notes & action items',
+      ],
+      isPopular: false,
+      buttonText: 'Current Free Tier',
+      isFree: true,
+    },
+    {
+      id: 'pro',
+      name: 'Voiceflow Pro',
+      badge: 'Most Popular',
+      description: 'The ultimate live meeting copilot & unlimited AI companion.',
+      monthlyUsd: 11.99,
+      monthlyNgn: 12500,
+      annualUsd: 119.00, // ~$9.90/mo
+      annualNgn: 120000, // ₦10,000/mo
+      features: [
+        'Stealth Mode: 100% Undetectable to Zoom, Meet & Teams',
+        'Unlimited Minutes (No monthly caps)',
+        'Unlimited Meeting Sessions',
+        'Live Real-Time AI Copilot & Suggested Answers',
+        'Screen Q&A (Ask AI about active screen during call)',
+        'Automated Executive Summaries & Follow-up Email Drafts',
+        'Custom Role & Company Context Tuning',
+        'High-Speed Whisper Turbo & Llama 3.3 70B AI Engine',
+        'Unlimited Audio Dictation & Voice Note Clean-up',
+      ],
+      isPopular: true,
+      buttonText: 'Upgrade to Pro',
+      isFree: false,
+    },
+    {
+      id: 'business',
+      name: 'Team / Business',
+      badge: 'For Power Users',
+      description: 'Multi-seat collaboration, custom integrations and direct support.',
+      monthlyUsd: 29.99,
+      monthlyNgn: 35000,
+      annualUsd: 299.00,
+      annualNgn: 350000,
+      features: [
+        'Everything in Pro included',
+        'Team Shared Workspace & Centralized Meeting Library',
+        'Priority 24/7 Dedicated Support with Bello Imam',
+        'Custom CRM & Slack / Notion Sync',
+        'Multi-user Meeting Analytics',
+      ],
+      isPopular: false,
+      buttonText: 'Upgrade to Business',
+      isFree: false,
+    },
+  ];
+
+  const handleCheckout = async (plan: typeof plans[0]) => {
+    if (plan.isFree) return;
+    setLoadingPlanId(plan.id);
+
     try {
       const clientOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
       const redirectUrl = `${clientOrigin}/dashboard`;
+      const amount = isAnnual 
+        ? (currency === 'NGN' ? plan.annualNgn : plan.annualUsd) 
+        : (currency === 'NGN' ? plan.monthlyNgn : plan.monthlyUsd);
 
-      // Log checkout attempt to Firestore so admin-imamshaffy tracks it immediately
+      // Log checkout attempt
       try {
         const { collection, addDoc, serverTimestamp, getFirestore } = await import("firebase/firestore");
         const db = getFirestore();
@@ -32,7 +106,7 @@ const UpgradeButton = ({ plan, isAnnual, auth, onClose, className, children }: a
           planId: plan.id,
           cycle: isAnnual ? "annual" : "monthly",
           amount: amount,
-          currency: "USD",
+          currency: currency,
           gateway: "Flutterwave",
           timestamp: serverTimestamp(),
           status: "initiated"
@@ -41,7 +115,7 @@ const UpgradeButton = ({ plan, isAnnual, auth, onClose, className, children }: a
         console.warn("Could not log checkout attempt:", logErr);
       }
 
-      // 1. Call real backend checkout API
+      // Call Flutterwave checkout endpoint with selected currency & amount
       const res = await fetch("/api/flutterwave/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -49,6 +123,7 @@ const UpgradeButton = ({ plan, isAnnual, auth, onClose, className, children }: a
           userId: auth?.currentUser?.uid || "guest",
           planId: plan.id,
           amount: amount,
+          currency: currency,
           planName: plan.name,
           email: auth?.currentUser?.email || "user@voiceflow.space",
           name: auth?.currentUser?.displayName || "Voiceflow User",
@@ -67,176 +142,175 @@ const UpgradeButton = ({ plan, isAnnual, auth, onClose, className, children }: a
       console.error("Payment initiation error:", err);
       alert(`Could not open checkout: ${err.message || "Please check your network or try again."}`);
     } finally {
-      setLoading(false);
+      setLoadingPlanId(null);
     }
   };
 
   return (
-    <button 
-      onClick={handleUpgrade}
-      disabled={loading}
-      className={className}
-    >
-      {loading ? (
-        <span className="flex items-center justify-center gap-2">
-          <Loader2 className="w-5 h-5 animate-spin" />
-          Processing...
-        </span>
-      ) : children}
-    </button>
-  );
-};
-
-export function BillingModal({ isOpen, onClose }: BillingModalProps) {
-  const [isAnnual, setIsAnnual] = useState(false);
-  const auth = useAuth();
-
-  const plans = [
-    {
-      id: 'pro',
-      name: 'Pro plan',
-      monthlyPrice: 19.99,
-      discountedMonthly: 11.99,
-      annualPrice: 143.88, // 11.99 * 12
-      features: [
-        'Unlimited AI Responses',
-        'Unlimited meetings',
-        'Access to newest AI models',
-        'Priority chat support'
-      ],
-      isPopular: false,
-    },
-    {
-      id: 'stealth_pro',
-      name: 'Pro + Undetectability',
-      monthlyPrice: 149.99,
-      discountedMonthly: 79.99,
-      annualPrice: 959.88, // 79.99 * 12
-      features: [
-        'Voiceflow Undetectability',
-        'Voiceflow will be invisible to screen share during meetings',
-        'Automatic taskbar hiding in calls'
-      ],
-      isPopular: true,
-    }
-  ];
-
-  return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[700px] bg-white dark:bg-[#111111] text-black dark:text-white border-gray-200 dark:border-gray-800 p-0 overflow-hidden">
-        <div className="p-8">
-          <DialogHeader className="mb-8">
-            <DialogTitle className="text-3xl font-bold">Choose your plan</DialogTitle>
-            <DialogDescription className="text-gray-400 text-base">
-              Unlock all features with Voiceflow Pro
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="flex justify-end mb-6">
-            <div className="bg-gray-100 dark:bg-[#1C1C1E] p-1 rounded-full flex items-center gap-2 border border-gray-200 dark:border-gray-800">
-              <span className={`px-4 py-1.5 text-sm rounded-full cursor-pointer transition-colors ${!isAnnual ? 'bg-white dark:bg-[#333333] text-black dark:text-white shadow-sm' : 'text-gray-500 dark:text-gray-400'}`} onClick={() => setIsAnnual(false)}>
-                Monthly
-              </span>
-              <span className={`px-4 py-1.5 text-sm rounded-full cursor-pointer transition-colors flex items-center gap-2 ${isAnnual ? 'bg-white dark:bg-[#333333] text-black dark:text-white shadow-sm' : 'text-gray-500 dark:text-gray-400'}`} onClick={() => setIsAnnual(true)}>
-                Annual <span className="bg-orange-100 text-orange-600 text-[10px] px-2 py-0.5 rounded-full font-bold">Save 45%</span>
-              </span>
-            </div>
+    <div className="w-full space-y-6">
+      {/* Controls Bar: Currency Selector + Billing Cycle Toggle */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pb-2 border-b border-border">
+        {/* Currency Switcher */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-muted-foreground flex items-center gap-1">
+            <Globe size={13} />
+            Currency:
+          </span>
+          <div className="inline-flex rounded-lg border border-border p-0.5 bg-muted/40">
+            <button
+              type="button"
+              onClick={() => setCurrency("USD")}
+              className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
+                currency === "USD"
+                  ? "bg-background text-foreground shadow-xs"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              $ USD (Global)
+            </button>
+            <button
+              type="button"
+              onClick={() => setCurrency("NGN")}
+              className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
+                currency === "NGN"
+                  ? "bg-background text-voiceflow-orange shadow-xs"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              ₦ NGN (Nigeria)
+            </button>
           </div>
+        </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-            {/* Pro Plan */}
-            <div className="bg-orange-500 rounded-2xl p-6 text-white flex flex-col h-full relative overflow-hidden">
-              <h3 className="font-medium text-lg mb-2">Pro plan</h3>
-              <div className="flex items-baseline gap-2 mb-6">
-                <span className="text-white/60 line-through text-xl">${plans[0].monthlyPrice}</span>
-                <span className="text-4xl font-bold">${plans[0].discountedMonthly}</span>
-                <span className="text-white/80">/month</span>
+        {/* Monthly vs Annual Toggle */}
+        <div className="inline-flex rounded-full border border-border p-1 bg-muted/40">
+          <button
+            type="button"
+            onClick={() => setIsAnnual(false)}
+            className={`px-4 py-1 text-xs font-bold rounded-full transition-all ${
+              !isAnnual
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Monthly
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsAnnual(true)}
+            className={`px-4 py-1 text-xs font-bold rounded-full transition-all flex items-center gap-1.5 ${
+              isAnnual
+                ? "bg-background text-voiceflow-orange shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Annual
+            <span className="bg-orange-500/10 text-voiceflow-orange text-[10px] px-2 py-0.5 rounded-full font-bold">
+              Save 20%
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {/* Plans Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        {plans.map((p) => {
+          const isPro = p.id === 'pro';
+          const priceStr = p.isFree
+            ? `${currencySymbol}0`
+            : isAnnual
+            ? formatPrice(p.annualUsd / 12, Math.round(p.annualNgn / 12))
+            : formatPrice(p.monthlyUsd, p.monthlyNgn);
+
+          return (
+            <div
+              key={p.id}
+              className={`rounded-2xl p-5 sm:p-6 flex flex-col relative transition-all ${
+                isPro
+                  ? 'border-2 border-voiceflow-orange bg-orange-500/[0.03] dark:bg-orange-500/[0.05] shadow-lg shadow-orange-500/10'
+                  : 'border border-border bg-card'
+              }`}
+            >
+              {p.badge && (
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-voiceflow-orange text-white text-[10px] font-bold px-3 py-0.5 rounded-full uppercase tracking-wider shadow-sm">
+                  {p.badge}
+                </div>
+              )}
+
+              <div className="mb-4">
+                <h3 className="text-lg font-bold text-foreground font-clash">{p.name}</h3>
+                <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{p.description}</p>
               </div>
-              
-              <ul className="space-y-4 mb-8 flex-1">
-                {plans[0].features.map((feature, i) => (
-                  <li key={i} className="flex items-start gap-3 text-sm font-medium">
-                    <div className="mt-0.5 bg-white/20 rounded-full p-0.5 shrink-0">
-                      <Check size={14} className="text-white" />
-                    </div>
-                    {feature}
+
+              <div className="mb-6">
+                <div className="flex items-baseline gap-1">
+                  <span className="text-3xl font-extrabold text-foreground font-clash">{priceStr}</span>
+                  {!p.isFree && <span className="text-xs text-muted-foreground">/mo</span>}
+                </div>
+                {!p.isFree && isAnnual && (
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Billed annually ({formatPrice(p.annualUsd, p.annualNgn)}/yr)
+                  </p>
+                )}
+              </div>
+
+              <ul className="space-y-2.5 mb-6 flex-1 text-xs">
+                {p.features.map((feat, idx) => (
+                  <li key={idx} className="flex items-start gap-2 text-foreground">
+                    <Check size={14} className="text-voiceflow-orange shrink-0 mt-0.5" />
+                    <span className="leading-tight">{feat}</span>
                   </li>
                 ))}
               </ul>
-              
-              <UpgradeButton 
-                plan={plans[0]} 
-                isAnnual={isAnnual} 
-                auth={auth} 
-                onClose={onClose}
-                className="w-full bg-white text-black py-3 rounded-xl font-bold text-lg hover:bg-gray-100 transition-colors flex justify-center items-center gap-2"
-              >
-                Upgrade <span className="bg-orange-100 text-orange-600 text-xs px-2 py-0.5 rounded-full">-45%</span>
-              </UpgradeButton>
-            </div>
 
-            {/* Pro + Undetectability */}
-            <div className="bg-gradient-to-b from-orange-50 to-orange-100 dark:from-zinc-800 dark:to-zinc-900 rounded-2xl p-6 text-black dark:text-white flex flex-col h-full relative border border-orange-500/30">
-              <div className="flex justify-between items-center mb-2">
-                <h3 className="font-medium text-lg text-orange-600 dark:text-orange-400">Pro + Undetectability</h3>
-                <span className="bg-orange-500/20 text-orange-600 dark:text-orange-400 px-2 py-1 rounded-md text-xs font-medium border border-orange-500/30">Popular</span>
-              </div>
-              <div className="flex items-baseline gap-2 mb-6">
-                <span className="text-black/60 dark:text-white/60 line-through text-xl">${plans[1].monthlyPrice}</span>
-                <span className="text-4xl font-bold text-black dark:text-white">${plans[1].discountedMonthly}</span>
-                <span className="text-black/80 dark:text-white/80">/month</span>
-              </div>
-              
-              <ul className="space-y-4 mb-8 flex-1 relative z-10">
-                <li className="flex items-start gap-3 text-sm">
-                  <div className="mt-0.5 bg-orange-500 rounded-full p-0.5 shrink-0">
-                    <Check size={14} className="text-white" />
-                  </div>
-                  <div>
-                    <span className="font-bold block mb-1">{plans[1].features[0]}</span>
-                    <span className="text-black/80 dark:text-white/80 leading-snug block">{plans[1].features[1]}</span>
-                  </div>
-                </li>
-              </ul>
-              
-              <UpgradeButton 
-                plan={plans[1]} 
-                isAnnual={isAnnual} 
-                auth={auth} 
-                onClose={onClose}
-                className="w-full bg-orange-500 text-white py-3 rounded-xl font-bold text-lg hover:bg-orange-600 transition-colors flex justify-center items-center gap-2 relative z-10"
+              <button
+                type="button"
+                onClick={() => handleCheckout(p)}
+                disabled={p.isFree || loadingPlanId === p.id}
+                className={`w-full py-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-2 ${
+                  p.isFree
+                    ? 'bg-muted text-muted-foreground cursor-default'
+                    : isPro
+                    ? 'bg-voiceflow-orange hover:bg-orange-600 text-white shadow-md shadow-orange-500/20'
+                    : 'bg-foreground hover:bg-foreground/90 text-background'
+                }`}
               >
-                Upgrade <span className="bg-white text-orange-600 text-xs px-2 py-0.5 rounded-full">-45%</span>
-              </UpgradeButton>
+                {loadingPlanId === p.id ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    Initializing Checkout...
+                  </>
+                ) : (
+                  <>
+                    {isPro && <Crown size={14} />}
+                    {p.buttonText}
+                  </>
+                )}
+              </button>
             </div>
-          </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
-          <div className="border-t border-gray-200 dark:border-gray-800 pt-6 flex items-center justify-between text-sm">
-            <div>
-              <span className="text-gray-600 dark:text-gray-400 block mb-1">Free plan</span>
-              <span className="text-2xl font-bold text-black dark:text-white">$0</span>
-            </div>
-            <div className="grid grid-cols-2 gap-x-8 gap-y-3">
-              <div className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
-                <div className="bg-gray-200 dark:bg-gray-800 p-0.5 rounded-full"><Check size={12} className="text-gray-500 dark:text-gray-400" /></div>
-                Limited AI usage per meeting
-              </div>
-              <div className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
-                <div className="bg-gray-200 dark:bg-gray-800 p-0.5 rounded-full"><Check size={12} className="text-gray-500 dark:text-gray-400" /></div>
-                Limited free meetings
-              </div>
-              <div className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
-                <div className="bg-gray-200 dark:bg-gray-800 p-0.5 rounded-full"><Check size={12} className="text-gray-500 dark:text-gray-400" /></div>
-                Ask AI about past meetings
-              </div>
-              <div className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
-                <div className="bg-gray-200 dark:bg-gray-800 p-0.5 rounded-full"><Check size={12} className="text-gray-500 dark:text-gray-400" /></div>
-                Customize AI instructions
-              </div>
-            </div>
-          </div>
-        </div>
+export function BillingModal({ isOpen, onClose }: BillingModalProps) {
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-[900px] w-[95vw] max-h-[90vh] overflow-y-auto bg-background text-foreground border-border p-6 sm:p-8">
+        <DialogHeader className="mb-4">
+          <DialogTitle className="text-2xl sm:text-3xl font-bold font-clash">
+            Subscription Plans & Pricing
+          </DialogTitle>
+          <DialogDescription className="text-sm text-muted-foreground">
+            Experience unlimited real-time meeting transcription, instant AI suggestions, and 100% stealth mode.
+          </DialogDescription>
+        </DialogHeader>
+
+        <PricingPlansView />
       </DialogContent>
     </Dialog>
   );
 }
+export default BillingModal;

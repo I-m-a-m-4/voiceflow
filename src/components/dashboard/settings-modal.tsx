@@ -21,6 +21,8 @@ import {
 } from 'firebase/auth';
 import { doc, updateDoc, getFirestore } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
+import { PricingPlansView } from './billing-modal';
+import { SupportChatWidget } from './support-chat-widget';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -503,9 +505,7 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
   ];
 
   const supportTabs = [
-    { id: 'release-notes', label: 'Release Notes', icon: FileText },
-    { id: 'help-center', label: 'Help Center', icon: HelpCircle },
-    { id: 'contact', label: 'Contact Support', icon: LifeBuoy },
+    { id: 'contact', label: 'Contact Support', icon: MessageSquare },
   ];
 
   return (
@@ -1253,12 +1253,12 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
 
           {/* Billing & Subscription Plans */}
           {activeTab === 'billing' && (
-            <div className="space-y-8 max-w-2xl">
+            <div className="space-y-6 max-w-3xl">
               <div>
                 <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Billing & Plans</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Manage your subscription, minutes, and payment methods.</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Manage your subscription, minutes, and payment methods with auto-currency localization.</p>
                 
-                <div className={`p-6 rounded-xl border mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                <div className={`p-5 rounded-2xl border mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
                   isAdmin
                     ? 'bg-orange-500/10 border-orange-500/30 dark:bg-orange-950/20 dark:border-orange-800/40'
                     : isProUser 
@@ -1266,8 +1266,8 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
                     : 'bg-gray-50 dark:bg-[#1A1A1A] border-gray-200 dark:border-gray-800'
                 }`}>
                   <div>
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h3 className="text-base sm:text-lg font-bold text-gray-900 dark:text-white">
                         {isAdmin ? 'Voiceflow Founder & Admin' : currentPlan}
                       </h3>
                       {isAdmin ? (
@@ -1284,76 +1284,39 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
                         </span>
                       )}
                     </div>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
                       {isAdmin
                         ? 'Unlimited transcription, infinite AI meeting copilot, zero rate limits, and full administrative rights.'
                         : isProUser 
                         ? 'Unlimited real-time meeting transcription, instant AI copilot, audio drops, and live screen notes.'
-                        : 'Free tier with 30 minutes/month & 3 meeting sessions.'}
+                        : 'Free tier includes 100% Undetectable Stealth Mode with 30 monthly minutes & 3 meeting sessions.'}
                     </p>
                   </div>
                   <div className="sm:text-right shrink-0">
                     <span className="text-2xl font-bold text-gray-900 dark:text-white">
                       {isAdmin ? '$0' : isProUser ? '$11.99' : '$0'}
-                      <span className="text-sm text-gray-500 font-medium">{isAdmin ? ' / Founder' : '/mo'}</span>
+                      <span className="text-xs text-gray-500 font-medium">{isAdmin ? ' / Founder' : '/mo'}</span>
                     </span>
                   </div>
                 </div>
-                
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <button 
-                    onClick={() => {
-                      onClose();
-                      onOpenBilling?.();
-                    }} 
-                    className="flex-1 bg-voiceflow-orange hover:bg-orange-600 text-white py-3.5 rounded-xl font-bold text-sm transition-colors shadow-lg shadow-orange-900/20 flex items-center justify-center gap-2"
-                  >
-                    <CreditCard size={18} />
-                    {isAdmin ? "View All Plans & Features" : isProUser ? "Change Plan / View Tiers" : "Upgrade to Pro (View Plans & Checkout)"}
-                  </button>
-                  {(isProUser || isAdmin) && (
-                    <button 
-                      onClick={() => {
-                        toast({
-                          title: isAdmin ? "Founder Account" : "Subscription in Good Standing",
-                          description: isAdmin 
-                            ? "Founder account: All limits bypassed permanently."
-                            : "Your Voiceflow Pro subscription is active with Flutterwave payment verification.",
-                        });
-                      }}
-                      className="px-6 py-3.5 border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-[#2A2A2A] rounded-xl font-semibold text-sm transition-colors text-gray-700 dark:text-gray-300"
-                    >
-                      {isAdmin ? "Founder Privileges" : "Billing Details"}
-                    </button>
-                  )}
-                </div>
+
+                {/* Embed Full Pricing Plans Table & Checkout */}
+                <PricingPlansView />
               </div>
             </div>
           )}
 
-          {(activeTab === 'release-notes' || activeTab === 'help-center' || activeTab === 'contact') && (
-            <div className="space-y-8 max-w-2xl">
+          {/* Contact Support Tab with Live Chat & Voice Notes */}
+          {activeTab === 'contact' && (
+            <div className="space-y-4 max-w-2xl">
               <div>
                 <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">
-                  {activeTab === 'release-notes' ? "Release Notes" : activeTab === 'help-center' ? "Help Center" : "Contact Support"}
+                  Contact Support
                 </h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
-                   {activeTab === 'release-notes' ? "What's new in VoiceFlow v0.1.0." : activeTab === 'help-center' ? "Browse guides and tutorials." : "Get in touch with our team."}
+                <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mb-4">
+                  Chat directly with Bello Imam and the Voiceflow engineering team. Send texts, screenshots, or voice notes.
                 </p>
-                
-                <div className="flex flex-col items-center justify-center p-12 bg-gray-50 dark:bg-[#1A1A1A] rounded-xl border border-gray-200 dark:border-gray-800 border-dashed text-center">
-                   {activeTab === 'release-notes' && <FileText size={32} className="text-gray-400 dark:text-gray-600 mb-3" />}
-                   {activeTab === 'help-center' && <HelpCircle size={32} className="text-gray-400 dark:text-gray-600 mb-3" />}
-                   {activeTab === 'contact' && <LifeBuoy size={32} className="text-gray-400 dark:text-gray-600 mb-3" />}
-                   <h3 className="text-base font-bold text-gray-900 dark:text-white mb-1">Documentation & Guides</h3>
-                   <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">View complete guides, tutorials, and support articles online.</p>
-                   <button 
-                     onClick={() => window.open('https://voiceflow.space/help-center', '_blank')}
-                     className="text-xs bg-gray-200 dark:bg-[#2A2A2A] hover:bg-gray-300 dark:hover:bg-[#333333] border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white font-semibold px-4 py-2 rounded-lg transition-colors"
-                   >
-                     Open Help Center
-                   </button>
-                </div>
+                <SupportChatWidget user={auth?.currentUser} />
               </div>
             </div>
           )}
