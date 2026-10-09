@@ -1,5 +1,9 @@
 mod win_grid;
 
+use tauri::Emitter;
+#[cfg(desktop)]
+use tauri_plugin_global_shortcut::GlobalShortcutExt;
+
 #[cfg(desktop)]
 use tauri::Manager;
 
@@ -99,11 +103,11 @@ pub fn run() {
                             }
                         }
                     } else if shortcut == &ask {
-                        app.emit("shortcut-ask", {}).unwrap_or(());
+                        app.emit("shortcut-ask", ()).unwrap_or(());
                     } else if shortcut == &clear {
-                        app.emit("shortcut-clear", {}).unwrap_or(());
+                        app.emit("shortcut-clear", ()).unwrap_or(());
                     } else if shortcut == &session {
-                        app.emit("shortcut-session", {}).unwrap_or(());
+                        app.emit("shortcut-session", ()).unwrap_or(());
                     } else {
                         app.emit("shortcut-other", shortcut.to_string()).unwrap_or(());
                     }
@@ -195,7 +199,7 @@ pub fn run() {
         
         #[cfg(desktop)]
         {
-            use tauri_plugin_global_shortcut::{Shortcut, ShortcutState};
+            use tauri_plugin_global_shortcut::Shortcut;
             use std::str::FromStr;
             
             let shortcuts = vec![
