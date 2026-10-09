@@ -35,7 +35,7 @@ const DEFAULT_LATEST_UPDATE: FeatureUpdate = {
   changelogLink: '/notifications',
   actionText: 'Try it now',
   actionHref: '/inventory',
-  releaseVersion: '3.3.2',
+  releaseVersion: '0.1.0',
   isActive: true,
 };
 

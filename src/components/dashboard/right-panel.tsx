@@ -119,16 +119,23 @@ export default function RightPanel() {
                 }
                 startRecording(false);
               }} 
-              className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl transition-all font-semibold shadow-md active:scale-[0.98] ${
+              className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl transition-all font-semibold shadow-sm active:scale-[0.98] ${
                 isLimitReached 
                   ? "bg-red-500 hover:bg-red-600 text-white shadow-red-500/10" 
                   : "bg-voiceflow-orange hover:bg-orange-600 text-white shadow-orange-500/10"
               }`}
               title={isLimitReached ? "Upgrade to Pro to start a new session" : "Launch Voiceflow Floating Assistant and start live listening"}
             >
-              <Mic size={18} />
-              {isLimitReached ? "Upgrade to Start (Limit Reached)" : "Start Voiceflow"}
+              <Mic size={18} className="shrink-0" />
+              <span className="text-sm font-bold tracking-tight whitespace-nowrap">
+                {isLimitReached ? "Upgrade Plan to Start" : "Start Voiceflow"}
+              </span>
             </button>
+            {isLimitReached && (
+              <p className="text-[11px] text-center text-red-500 font-medium leading-tight">
+                Free limit reached (30 mins / 3 sessions)
+              </p>
+            )}
             <div className="flex items-center justify-center gap-1.5 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 py-1.5 px-3 rounded-full border border-emerald-500/20">
               <ShieldCheck size={14} className="text-emerald-500" />
               <span className="text-[11px] font-bold tracking-tight">100% Undetectable • Draggable • Taskbar Hidden</span>

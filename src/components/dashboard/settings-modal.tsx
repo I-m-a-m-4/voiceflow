@@ -476,7 +476,7 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
                     <div className="flex items-center gap-4">
                       <div className="bg-gray-100 dark:bg-[#2A2A2A] p-2 rounded-lg"><Download size={20} className="text-gray-700 dark:text-gray-300" /></div>
                       <div>
-                        <div className="text-sm font-bold text-gray-900 dark:text-white">VoiceFlow v3.3.2</div>
+                        <div className="text-sm font-bold text-gray-900 dark:text-white">VoiceFlow v0.1.0</div>
                         <div className="text-xs text-gray-500 dark:text-gray-400">Latest production release (Tauri & Web)</div>
                       </div>
                     </div>
@@ -1056,7 +1056,7 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
                   {activeTab === 'release-notes' ? "Release Notes" : activeTab === 'help-center' ? "Help Center" : "Contact Support"}
                 </h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
-                   {activeTab === 'release-notes' ? "What's new in VoiceFlow v3.3.2." : activeTab === 'help-center' ? "Browse guides and tutorials." : "Get in touch with our team."}
+                   {activeTab === 'release-notes' ? "What's new in VoiceFlow v0.1.0." : activeTab === 'help-center' ? "Browse guides and tutorials." : "Get in touch with our team."}
                 </p>
                 
                 <div className="flex flex-col items-center justify-center p-12 bg-gray-50 dark:bg-[#1A1A1A] rounded-xl border border-gray-200 dark:border-gray-800 border-dashed text-center">
