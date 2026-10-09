@@ -510,7 +510,7 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent hideScrollWrapper={true} className="w-[95vw] max-w-[850px] h-[90vh] max-h-[650px] bg-white dark:bg-[#111111] text-gray-800 dark:text-gray-200 border-gray-200 dark:border-gray-800 p-0 overflow-hidden flex flex-col sm:flex-row">
+      <DialogContent hideScrollWrapper={true} className="w-[96vw] max-w-[1060px] h-[92vh] max-h-[760px] bg-white dark:bg-[#111111] text-gray-800 dark:text-gray-200 border-gray-200 dark:border-gray-800 p-0 overflow-hidden flex flex-col sm:flex-row">
         <DialogTitle className="sr-only">Settings</DialogTitle>
         
         {/* Sidebar */}
@@ -1253,53 +1253,11 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
 
           {/* Billing & Subscription Plans */}
           {activeTab === 'billing' && (
-            <div className="space-y-6 max-w-3xl">
+            <div className="space-y-6 max-w-4xl w-full">
               <div>
                 <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-1">Billing & Plans</h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Manage your subscription, minutes, and payment methods with auto-currency localization.</p>
                 
-                <div className={`p-5 rounded-2xl border mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
-                  isAdmin
-                    ? 'bg-orange-500/10 border-orange-500/30 dark:bg-orange-950/20 dark:border-orange-800/40'
-                    : isProUser 
-                    ? 'bg-emerald-500/10 border-emerald-500/30 dark:bg-emerald-950/20 dark:border-emerald-800/40' 
-                    : 'bg-gray-50 dark:bg-[#1A1A1A] border-gray-200 dark:border-gray-800'
-                }`}>
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="text-base sm:text-lg font-bold text-gray-900 dark:text-white">
-                        {isAdmin ? 'Voiceflow Founder & Admin' : currentPlan}
-                      </h3>
-                      {isAdmin ? (
-                        <span className="bg-voiceflow-orange text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                          Founder & Owner
-                        </span>
-                      ) : isProUser ? (
-                        <span className="bg-emerald-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                          Active Plan
-                        </span>
-                      ) : (
-                        <span className="bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                          Free Tier
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      {isAdmin
-                        ? 'Unlimited transcription, infinite AI meeting copilot, zero rate limits, and full administrative rights.'
-                        : isProUser 
-                        ? 'Unlimited real-time meeting transcription, instant AI copilot, audio drops, and live screen notes.'
-                        : 'Free tier includes 100% Undetectable Stealth Mode with 30 monthly minutes & 3 meeting sessions.'}
-                    </p>
-                  </div>
-                  <div className="sm:text-right shrink-0">
-                    <span className="text-2xl font-bold text-gray-900 dark:text-white">
-                      {isAdmin ? '$0' : isProUser ? '$11.99' : '$0'}
-                      <span className="text-xs text-gray-500 font-medium">{isAdmin ? ' / Founder' : '/mo'}</span>
-                    </span>
-                  </div>
-                </div>
-
                 {/* Embed Full Pricing Plans Table & Checkout */}
                 <PricingPlansView />
               </div>

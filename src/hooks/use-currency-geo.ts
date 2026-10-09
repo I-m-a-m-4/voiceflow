@@ -9,7 +9,6 @@ export interface GeoCurrencyInfo {
   currencySymbol: string;
   isNigeria: boolean;
   country: string;
-  setCurrency: (c: CurrencyCode) => void;
   formatPrice: (usdPrice: number, ngnPrice: number) => string;
 }
 
@@ -19,62 +18,47 @@ export function useCurrencyGeo(): GeoCurrencyInfo {
   const [country, setCountry] = useState<string>("US");
 
   useEffect(() => {
-    // 1. Check cached preference in localStorage
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("voiceflow_currency") as CurrencyCode | null;
-      if (saved === "NGN" || saved === "USD") {
-        setCurrencyState(saved);
-        if (saved === "NGN") setIsNigeria(true);
-      }
-    }
-
-    // 2. Client time zone check as fast immediate hint
+    // 1. Client time zone check as fast immediate hint
     try {
       const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
-      if (timeZone.includes("Lagos") || timeZone.includes("Africa/Lagos")) {
-        setCurrencyState((prev) => (localStorage.getItem("voiceflow_currency") as CurrencyCode) || "NGN");
+      if (timeZone.includes("Lagos") || timeZone.includes("Africa/Lagos") || timeZone.includes("Nigeria")) {
+        setCurrencyState("NGN");
         setIsNigeria(true);
+        setCountry("NG");
       }
     } catch {}
 
-    // 3. Query /api/geo endpoint
+    // 2. Query /api/geo endpoint
     fetch("/api/geo")
       .then((res) => res.json())
       .then((data) => {
         if (data.country) setCountry(data.country);
-        if (data.isNigeria) {
+        if (data.isNigeria || data.country === "NG") {
           setIsNigeria(true);
-          const saved = localStorage.getItem("voiceflow_currency");
-          if (!saved) {
-            setCurrencyState("NGN");
-          }
+          setCurrencyState("NGN");
+        } else {
+          setIsNigeria(false);
+          setCurrencyState("USD");
         }
       })
       .catch(() => {});
   }, []);
 
-  const setCurrency = (c: CurrencyCode) => {
-    setCurrencyState(c);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("voiceflow_currency", c);
-    }
-  };
-
-  const currencySymbol = currency === "NGN" ? "₦" : "$";
+  const activeCurrency: CurrencyCode = isNigeria ? "NGN" : "USD";
+  const currencySymbol = activeCurrency === "NGN" ? "₦" : "$";
 
   const formatPrice = (usdPrice: number, ngnPrice: number) => {
-    if (currency === "NGN") {
+    if (activeCurrency === "NGN") {
       return `₦${ngnPrice.toLocaleString()}`;
     }
     return `$${usdPrice.toFixed(2)}`;
   };
 
   return {
-    currency,
+    currency: activeCurrency,
     currencySymbol,
     isNigeria,
     country,
-    setCurrency,
     formatPrice,
   };
 }

@@ -2,9 +2,9 @@
 
 import React, { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Check, Loader2, Sparkles, ShieldCheck, Zap, Globe, Crown } from 'lucide-react';
+import { Check, Loader2, Crown, Users } from 'lucide-react';
 import { useAuth } from '@/firebase';
-import { useCurrencyGeo, CurrencyCode } from '@/hooks/use-currency-geo';
+import { useCurrencyGeo } from '@/hooks/use-currency-geo';
 
 interface BillingModalProps {
   isOpen: boolean;
@@ -14,77 +14,56 @@ interface BillingModalProps {
 export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () => void }) {
   const [isAnnual, setIsAnnual] = useState(false);
   const auth = useAuth();
-  const { currency, currencySymbol, setCurrency, formatPrice } = useCurrencyGeo();
+  const { currency, currencySymbol, isNigeria, formatPrice } = useCurrencyGeo();
   const [loadingPlanId, setLoadingPlanId] = useState<string | null>(null);
 
   const plans = [
     {
-      id: 'free',
-      name: 'Free Plan',
-      description: 'Essential meeting recording and basic transcription.',
-      monthlyUsd: 0,
-      monthlyNgn: 0,
-      annualUsd: 0,
-      annualNgn: 0,
-      features: [
-        'Stealth Mode: 100% Undetectable to Zoom & Google Meet',
-        '30 minutes / month limit',
-        'Up to 3 meeting sessions',
-        'Standard Whisper transcription',
-        'Basic meeting notes & action items',
-      ],
-      isPopular: false,
-      buttonText: 'Current Free Tier',
-      isFree: true,
-    },
-    {
       id: 'pro',
       name: 'Voiceflow Pro',
       badge: 'Most Popular',
-      description: 'The ultimate live meeting copilot & unlimited AI companion.',
+      description: 'The ultimate live meeting copilot with unlimited transcription & instant answers.',
       monthlyUsd: 11.99,
       monthlyNgn: 12500,
-      annualUsd: 119.00, // ~$9.90/mo
-      annualNgn: 120000, // ₦10,000/mo
+      annualUsd: 119.00,
+      annualNgn: 120000,
+      icon: Crown,
       features: [
         'Stealth Mode: 100% Undetectable to Zoom, Meet & Teams',
-        'Unlimited Minutes (No monthly caps)',
-        'Unlimited Meeting Sessions',
-        'Live Real-Time AI Copilot & Suggested Answers',
-        'Screen Q&A (Ask AI about active screen during call)',
+        'Unlimited Minutes & Unlimited Meetings (No caps)',
+        'Live Real-Time AI Copilot & Suggested Answers in calls',
+        'Screen Q&A (Ask AI questions about active screen shares)',
         'Automated Executive Summaries & Follow-up Email Drafts',
-        'Custom Role & Company Context Tuning',
+        'Custom Role, Company & Industry Persona Context',
         'High-Speed Whisper Turbo & Llama 3.3 70B AI Engine',
         'Unlimited Audio Dictation & Voice Note Clean-up',
       ],
       isPopular: true,
-      buttonText: 'Upgrade to Pro',
-      isFree: false,
+      buttonText: 'Upgrade to Voiceflow Pro',
     },
     {
       id: 'business',
       name: 'Team / Business',
-      badge: 'For Power Users',
-      description: 'Multi-seat collaboration, custom integrations and direct support.',
+      badge: 'Multi-User',
+      description: 'Multi-seat collaboration, team repository, custom sync, and dedicated support.',
       monthlyUsd: 29.99,
       monthlyNgn: 35000,
       annualUsd: 299.00,
       annualNgn: 350000,
+      icon: Users,
       features: [
-        'Everything in Pro included',
-        'Team Shared Workspace & Centralized Meeting Library',
+        'Everything in Voiceflow Pro included',
+        'Shared Team Workspace & Centralized Meeting Library',
         'Priority 24/7 Dedicated Support with Bello Imam',
-        'Custom CRM & Slack / Notion Sync',
-        'Multi-user Meeting Analytics',
+        'Export to CRM, Notion & Slack integrations',
+        'Consolidated Billing & Organization Admin Controls',
       ],
       isPopular: false,
-      buttonText: 'Upgrade to Business',
-      isFree: false,
+      buttonText: 'Upgrade to Team Plan',
     },
   ];
 
   const handleCheckout = async (plan: typeof plans[0]) => {
-    if (plan.isFree) return;
     setLoadingPlanId(plan.id);
 
     try {
@@ -115,7 +94,7 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
         console.warn("Could not log checkout attempt:", logErr);
       }
 
-      // Call Flutterwave checkout endpoint with selected currency & amount
+      // Call Flutterwave checkout endpoint with country-locked currency
       const res = await fetch("/api/flutterwave/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -148,38 +127,23 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
 
   return (
     <div className="w-full space-y-6">
-      {/* Controls Bar: Currency Selector + Billing Cycle Toggle */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pb-2 border-b border-border">
-        {/* Currency Switcher */}
+      {/* Top Header Controls: Strict Currency Indicator + Monthly/Annual Cycle Switch */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-border">
+        {/* Fixed Non-switchable Currency Badge */}
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-muted-foreground flex items-center gap-1">
-            <Globe size={13} />
-            Currency:
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-muted/60 border border-border text-xs font-semibold text-foreground">
+            {isNigeria ? (
+              <>
+                <span>🇳🇬</span>
+                <span>Billing in Nigerian Naira (₦)</span>
+              </>
+            ) : (
+              <>
+                <span>🌐</span>
+                <span>Billing in US Dollars ($)</span>
+              </>
+            )}
           </span>
-          <div className="inline-flex rounded-lg border border-border p-0.5 bg-muted/40">
-            <button
-              type="button"
-              onClick={() => setCurrency("USD")}
-              className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
-                currency === "USD"
-                  ? "bg-background text-foreground shadow-xs"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              $ USD (Global)
-            </button>
-            <button
-              type="button"
-              onClick={() => setCurrency("NGN")}
-              className={`px-2.5 py-1 text-xs font-bold rounded-md transition-all ${
-                currency === "NGN"
-                  ? "bg-background text-voiceflow-orange shadow-xs"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              ₦ NGN (Nigeria)
-            </button>
-          </div>
         </div>
 
         {/* Monthly vs Annual Toggle */}
@@ -189,7 +153,7 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
             onClick={() => setIsAnnual(false)}
             className={`px-4 py-1 text-xs font-bold rounded-full transition-all ${
               !isAnnual
-                ? "bg-background text-foreground shadow-sm"
+                ? "bg-background text-foreground shadow-xs"
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
@@ -200,7 +164,7 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
             onClick={() => setIsAnnual(true)}
             className={`px-4 py-1 text-xs font-bold rounded-full transition-all flex items-center gap-1.5 ${
               isAnnual
-                ? "bg-background text-voiceflow-orange shadow-sm"
+                ? "bg-background text-voiceflow-orange shadow-xs"
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
@@ -212,53 +176,59 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
         </div>
       </div>
 
-      {/* Plans Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+      {/* 2-Column Spacious Plans Grid (Without cramped Free box) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {plans.map((p) => {
           const isPro = p.id === 'pro';
-          const priceStr = p.isFree
-            ? `${currencySymbol}0`
-            : isAnnual
+          const priceStr = isAnnual
             ? formatPrice(p.annualUsd / 12, Math.round(p.annualNgn / 12))
             : formatPrice(p.monthlyUsd, p.monthlyNgn);
 
           return (
             <div
               key={p.id}
-              className={`rounded-2xl p-5 sm:p-6 flex flex-col relative transition-all ${
+              className={`rounded-2xl p-6 sm:p-7 flex flex-col relative transition-all ${
                 isPro
                   ? 'border-2 border-voiceflow-orange bg-orange-500/[0.03] dark:bg-orange-500/[0.05] shadow-lg shadow-orange-500/10'
                   : 'border border-border bg-card'
               }`}
             >
+              {/* Badge positioned with proper clearance */}
               {p.badge && (
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-voiceflow-orange text-white text-[10px] font-bold px-3 py-0.5 rounded-full uppercase tracking-wider shadow-sm">
+                <div className="absolute top-4 right-4 bg-voiceflow-orange text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider shadow-xs">
                   {p.badge}
                 </div>
               )}
 
-              <div className="mb-4">
-                <h3 className="text-lg font-bold text-foreground font-clash">{p.name}</h3>
-                <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{p.description}</p>
+              <div className="mb-4 pr-16">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <p.icon size={20} className={isPro ? "text-voiceflow-orange" : "text-foreground"} />
+                  <h3 className="text-xl font-bold text-foreground font-clash">{p.name}</h3>
+                </div>
+                <p className="text-xs text-muted-foreground leading-relaxed">{p.description}</p>
               </div>
 
-              <div className="mb-6">
-                <div className="flex items-baseline gap-1">
-                  <span className="text-3xl font-extrabold text-foreground font-clash">{priceStr}</span>
-                  {!p.isFree && <span className="text-xs text-muted-foreground">/mo</span>}
+              <div className="mb-6 pt-2">
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-4xl font-extrabold text-foreground font-clash tracking-tight">
+                    {priceStr}
+                  </span>
+                  <span className="text-xs text-muted-foreground font-medium">/month</span>
                 </div>
-                {!p.isFree && isAnnual && (
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
-                    Billed annually ({formatPrice(p.annualUsd, p.annualNgn)}/yr)
+                {isAnnual && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Billed annually ({formatPrice(p.annualUsd, p.annualNgn)}/year)
                   </p>
                 )}
               </div>
 
-              <ul className="space-y-2.5 mb-6 flex-1 text-xs">
+              <ul className="space-y-3 mb-8 flex-1 text-xs">
                 {p.features.map((feat, idx) => (
-                  <li key={idx} className="flex items-start gap-2 text-foreground">
-                    <Check size={14} className="text-voiceflow-orange shrink-0 mt-0.5" />
-                    <span className="leading-tight">{feat}</span>
+                  <li key={idx} className="flex items-start gap-2.5 text-foreground">
+                    <div className="mt-0.5 rounded-full p-0.5 bg-orange-500/10 text-voiceflow-orange shrink-0">
+                      <Check size={13} strokeWidth={3} />
+                    </div>
+                    <span className="leading-snug">{feat}</span>
                   </li>
                 ))}
               </ul>
@@ -266,23 +236,21 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
               <button
                 type="button"
                 onClick={() => handleCheckout(p)}
-                disabled={p.isFree || loadingPlanId === p.id}
-                className={`w-full py-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-2 ${
-                  p.isFree
-                    ? 'bg-muted text-muted-foreground cursor-default'
-                    : isPro
-                    ? 'bg-voiceflow-orange hover:bg-orange-600 text-white shadow-md shadow-orange-500/20'
+                disabled={loadingPlanId === p.id}
+                className={`w-full py-3.5 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 ${
+                  isPro
+                    ? 'bg-voiceflow-orange hover:bg-orange-600 text-white shadow-md shadow-orange-500/20 hover:scale-[1.01]'
                     : 'bg-foreground hover:bg-foreground/90 text-background'
                 }`}
               >
                 {loadingPlanId === p.id ? (
                   <>
-                    <Loader2 size={14} className="animate-spin" />
+                    <Loader2 size={16} className="animate-spin" />
                     Initializing Checkout...
                   </>
                 ) : (
                   <>
-                    {isPro && <Crown size={14} />}
+                    <Crown size={16} />
                     {p.buttonText}
                   </>
                 )}
@@ -298,13 +266,13 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
 export function BillingModal({ isOpen, onClose }: BillingModalProps) {
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[900px] w-[95vw] max-h-[90vh] overflow-y-auto bg-background text-foreground border-border p-6 sm:p-8">
+      <DialogContent className="sm:max-w-[1000px] w-[96vw] max-h-[92vh] overflow-y-auto bg-background text-foreground border-border p-6 sm:p-8">
         <DialogHeader className="mb-4">
           <DialogTitle className="text-2xl sm:text-3xl font-bold font-clash">
             Subscription Plans & Pricing
           </DialogTitle>
           <DialogDescription className="text-sm text-muted-foreground">
-            Experience unlimited real-time meeting transcription, instant AI suggestions, and 100% stealth mode.
+            Experience unlimited real-time meeting transcription, instant AI copilot, and 100% stealth mode.
           </DialogDescription>
         </DialogHeader>
 
