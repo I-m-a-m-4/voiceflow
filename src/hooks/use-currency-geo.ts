@@ -28,7 +28,7 @@ export function useCurrencyGeo(): GeoCurrencyInfo {
     return false;
   });
 
-  const [country, setCountry] = useState<string>(() => (isNigeria ? "NG" : "US"));
+  const [country, setCountry] = useState<string>("NG");
 
   useEffect(() => {
     let clientDetectedNigeria = false;

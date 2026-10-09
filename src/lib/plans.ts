@@ -38,4 +38,16 @@ export const SUBSCRIPTION_PLANS: Record<string, Plan> = {
       "White-labeling",
     ],
   },
+  unlimited: {
+    id: "unlimited",
+    name: "Voiceflow Unlimited",
+    price: 24.99,
+    features: [
+      "100% Unlimited Minutes",
+      "100% Unlimited Meeting Sessions",
+      "Live Screen Q&A & Visual Context",
+      "Ultra-Fast Neural Intelligence",
+      "Priority 24/7 Support",
+    ],
+  },
 };

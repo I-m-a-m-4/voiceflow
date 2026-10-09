@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Check, Loader2, Crown, Users } from 'lucide-react';
+import { Check, Loader2, Crown, Sparkles } from 'lucide-react';
 import { useAuth } from '@/firebase';
 import { useCurrencyGeo } from '@/hooks/use-currency-geo';
 
@@ -13,16 +13,16 @@ interface BillingModalProps {
 
 export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () => void }) {
   const [isAnnual, setIsAnnual] = useState(false);
-  const auth = useAuth();
-  const { currency, currencySymbol, isNigeria, formatPrice } = useCurrencyGeo();
   const [loadingPlanId, setLoadingPlanId] = useState<string | null>(null);
+  const { currency, currencySymbol, isNigeria, formatPrice } = useCurrencyGeo();
+  const auth = useAuth();
 
   const plans = [
     {
       id: 'pro',
       name: 'Voiceflow Pro',
-      badge: 'Most Popular',
-      description: 'The ultimate live meeting copilot with unlimited transcription & instant answers.',
+      badge: 'Standard Plan',
+      description: 'Generous monthly meeting hours & live AI meeting assistance.',
       monthlyUsd: 11.99,
       monthlyNgn: 12500,
       annualUsd: 119.00,
@@ -30,36 +30,40 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
       icon: Crown,
       features: [
         'Stealth Mode: 100% Undetectable to Zoom, Meet & Teams',
-        'Unlimited Minutes & Unlimited Meetings (No caps)',
-        'Live Real-Time AI Copilot & Suggested Answers in calls',
-        'Screen Q&A (Ask AI questions about active screen shares)',
-        'Automated Executive Summaries & Follow-up Email Drafts',
-        'Custom Role, Company & Industry Persona Context',
-        'Ultra-Fast Neural Audio Intelligence & Copilot Engine',
-        'Unlimited Audio Dictation & Voice Note Clean-up',
+        '10 Hours (600 Mins) / month meeting transcription',
+        'Up to 30 meeting sessions monthly',
+        'Live Real-Time AI Copilot & Suggested Responses',
+        'Automated Executive Summaries & Action Items',
+        'Ultra-Fast Neural Audio Intelligence',
+        'Audio Dictation & Voice Note Recording',
+        'Standard Support',
       ],
-      isPopular: true,
+      isPopular: false,
       buttonText: 'Upgrade to Voiceflow Pro',
     },
     {
-      id: 'business',
-      name: 'Team / Business',
-      badge: 'Multi-User',
-      description: 'Multi-seat collaboration, team repository, custom sync, and dedicated support.',
-      monthlyUsd: 29.99,
-      monthlyNgn: 35000,
-      annualUsd: 299.00,
-      annualNgn: 350000,
-      icon: Users,
+      id: 'unlimited',
+      name: 'Voiceflow Unlimited',
+      badge: 'Highest Tier • Unlimited',
+      description: 'The ultimate all-inclusive copilot with zero caps, infinite meeting minutes, and live screen intelligence.',
+      monthlyUsd: 24.99,
+      monthlyNgn: 25000,
+      annualUsd: 239.00,
+      annualNgn: 240000,
+      icon: Sparkles,
       features: [
-        'Everything in Voiceflow Pro included',
-        'Shared Team Workspace & Centralized Meeting Library',
-        'Priority 24/7 Dedicated Support & Assistance',
-        'Export to CRM, Notion & Slack integrations',
-        'Consolidated Billing & Organization Admin Controls',
+        '100% UNLIMITED Minutes (Zero monthly caps)',
+        '100% UNLIMITED Meeting Sessions (Infinite calls)',
+        'Stealth Mode: 100% Undetectable to Zoom, Meet & Teams',
+        'Live Real-Time Screen Q&A & Visual Screen Intelligence',
+        'Instant AI Meeting Copilot with Suggested Responses',
+        'Deep Executive Briefs & Automated Follow-up Email Drafts',
+        'Custom Role, Company & Persona Intelligence Context',
+        'Ultra-Fast Neural Audio Intelligence & Copilot Engine',
+        'Priority 24/7 Dedicated Support & Rapid Assistance',
       ],
-      isPopular: false,
-      buttonText: 'Upgrade to Team Plan',
+      isPopular: true,
+      buttonText: 'Get Unlimited Access',
     },
   ];
 
@@ -179,7 +183,7 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
       {/* 2-Column Spacious Plans Grid (Without cramped Free box) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {plans.map((p) => {
-          const isPro = p.id === 'pro';
+          const isFeatured = p.isPopular;
           const priceStr = isAnnual
             ? formatPrice(p.annualUsd / 12, Math.round(p.annualNgn / 12))
             : formatPrice(p.monthlyUsd, p.monthlyNgn);
@@ -188,21 +192,25 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
             <div
               key={p.id}
               className={`rounded-2xl p-6 sm:p-7 flex flex-col relative transition-all ${
-                isPro
+                isFeatured
                   ? 'border-2 border-voiceflow-orange bg-orange-500/[0.03] dark:bg-orange-500/[0.05] shadow-lg shadow-orange-500/10'
                   : 'border border-border bg-card'
               }`}
             >
               {/* Badge positioned with proper clearance */}
               {p.badge && (
-                <div className="absolute top-4 right-4 bg-voiceflow-orange text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider shadow-xs">
+                <div className={`absolute top-4 right-4 text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider shadow-xs ${
+                  isFeatured 
+                    ? 'bg-voiceflow-orange text-white' 
+                    : 'bg-muted text-muted-foreground'
+                }`}>
                   {p.badge}
                 </div>
               )}
 
               <div className="mb-4 pr-16">
                 <div className="flex items-center gap-2 mb-1.5">
-                  <p.icon size={20} className={isPro ? "text-voiceflow-orange" : "text-foreground"} />
+                  <p.icon size={20} className={isFeatured ? "text-voiceflow-orange" : "text-foreground"} />
                   <h3 className="text-xl font-bold text-foreground font-clash">{p.name}</h3>
                 </div>
                 <p className="text-xs text-muted-foreground leading-relaxed">{p.description}</p>
@@ -225,7 +233,9 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
               <ul className="space-y-3 mb-8 flex-1 text-xs">
                 {p.features.map((feat, idx) => (
                   <li key={idx} className="flex items-start gap-2.5 text-foreground">
-                    <div className="mt-0.5 rounded-full p-0.5 bg-orange-500/10 text-voiceflow-orange shrink-0">
+                    <div className={`mt-0.5 rounded-full p-0.5 shrink-0 ${
+                      isFeatured ? 'bg-orange-500/10 text-voiceflow-orange' : 'bg-muted text-foreground'
+                    }`}>
                       <Check size={13} strokeWidth={3} />
                     </div>
                     <span className="leading-snug">{feat}</span>
@@ -238,7 +248,7 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
                 onClick={() => handleCheckout(p)}
                 disabled={loadingPlanId === p.id}
                 className={`w-full py-3.5 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 ${
-                  isPro
+                  isFeatured
                     ? 'bg-voiceflow-orange hover:bg-orange-600 text-white shadow-md shadow-orange-500/20 hover:scale-[1.01]'
                     : 'bg-foreground hover:bg-foreground/90 text-background'
                 }`}
@@ -250,7 +260,7 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
                   </>
                 ) : (
                   <>
-                    <Crown size={16} />
+                    <p.icon size={16} />
                     {p.buttonText}
                   </>
                 )}
