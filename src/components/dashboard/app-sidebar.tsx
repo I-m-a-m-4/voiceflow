@@ -19,6 +19,12 @@ export default function AppSidebar() {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState('general');
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isMobileOpen, setIsMobileOpen] = useState(false);
+
+  // Close mobile drawer on route change
+  useEffect(() => {
+    setIsMobileOpen(false);
+  }, [pathname]);
 
   // Load collapsed state from storage
   useEffect(() => {
@@ -39,6 +45,19 @@ export default function AppSidebar() {
       return next;
     });
   };
+
+  // Listen for sidebar toggle event from header
+  useEffect(() => {
+    const handleToggle = () => {
+      if (typeof window !== 'undefined' && window.innerWidth < 768) {
+        setIsMobileOpen((prev) => !prev);
+      } else {
+        toggleCollapsed();
+      }
+    };
+    window.addEventListener('voiceflow-toggle-sidebar', handleToggle);
+    return () => window.removeEventListener('voiceflow-toggle-sidebar', handleToggle);
+  }, []);
 
   const navItems = [
     { label: 'My Meetings', icon: Home, href: '/dashboard' },
@@ -63,39 +82,34 @@ export default function AppSidebar() {
 
   return (
     <>
+      {/* Mobile Drawer Backdrop */}
+      {isMobileOpen && (
+        <div 
+          onClick={() => setIsMobileOpen(false)}
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 md:hidden animate-fade-in"
+          aria-hidden="true"
+        />
+      )}
+
       <aside 
-        className={`${
-          isCollapsed ? 'w-[68px]' : 'w-[240px]'
-        } h-screen bg-[#F9F9F9] border-r border-gray-200 flex flex-col shrink-0 overflow-y-auto overflow-x-hidden transition-all duration-300 ease-in-out dark:bg-muted/50 dark:border-border select-none`}
+        className={`fixed md:relative inset-y-0 left-0 z-50 md:z-auto h-screen bg-[#F9F9F9] border-r border-gray-200 flex flex-col shrink-0 overflow-y-auto overflow-x-hidden transition-all duration-300 ease-in-out dark:bg-muted/50 dark:border-border select-none ${
+          isMobileOpen 
+            ? 'translate-x-0 w-[240px] shadow-2xl' 
+            : '-translate-x-full md:translate-x-0'
+        } ${
+          isCollapsed ? 'md:w-[68px]' : 'md:w-[240px]'
+        }`}
       >
-        {/* Brand & Toggle Header */}
-        <div className={`p-3.5 flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'} border-b border-gray-100 dark:border-border/50`}>
-          {!isCollapsed ? (
-            <>
-              <Link href="/dashboard" className="flex items-center gap-2.5 min-w-0">
-                <img src="/icon.svg" alt="VoiceFlow" className="w-8 h-8 rounded-lg shadow-sm shrink-0" />
-                <span className="font-bold text-voiceflow-orange text-2xl tracking-tight font-clash truncate">VoiceFlow</span>
-              </Link>
-              <div className="flex items-center gap-1 shrink-0">
-                <button 
-                  onClick={toggleCollapsed} 
-                  title="Collapse sidebar"
-                  className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-200/60 dark:hover:text-gray-200 dark:hover:bg-muted transition-colors"
-                >
-                  <PanelLeftClose size={18} />
-                </button>
-              </div>
-            </>
-          ) : (
-            <button 
-              onClick={toggleCollapsed} 
-              title="Expand sidebar"
-              className="p-1 rounded-lg hover:bg-gray-200/60 dark:hover:bg-muted transition-colors flex flex-col items-center gap-1"
-            >
-              <img src="/icon.svg" alt="VoiceFlow" className="w-8 h-8 rounded-lg shadow-sm" />
-              <PanelLeftOpen size={14} className="text-gray-400 hover:text-gray-700 dark:hover:text-gray-200" />
-            </button>
-          )}
+        {/* Brand Header */}
+        <div className={`p-3.5 flex items-center ${isCollapsed ? 'justify-center' : 'justify-start'} border-b border-gray-100 dark:border-border/50`}>
+          <Link href="/dashboard" className="flex items-center gap-2.5 min-w-0">
+            <img src="/icon.svg" alt="VoiceFlow" className="w-8 h-8 rounded-lg shadow-sm shrink-0" />
+            {!isCollapsed && (
+              <span className="font-bold text-voiceflow-orange text-2xl tracking-tight font-clash truncate">
+                VoiceFlow
+              </span>
+            )}
+          </Link>
         </div>
 
         {/* User Profile Area */}
@@ -155,31 +169,6 @@ export default function AppSidebar() {
               </Link>
             );
           })}
-          
-          <button
-            onClick={() => {
-              window.dispatchEvent(new CustomEvent('voiceflow-toggle-record'));
-            }}
-            title="Capture Conversation"
-            className={`w-full flex items-center ${isCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2'} rounded-xl text-sm font-medium transition-colors text-voiceflow-orange bg-orange-50 hover:bg-orange-100 dark:bg-orange-500/10 dark:hover:bg-orange-500/20`}
-          >
-            <Mic size={18} className="text-voiceflow-orange shrink-0" />
-            {!isCollapsed && <span className="font-semibold truncate">Capture Conversation</span>}
-          </button>
-
-          {auth?.currentUser?.email?.toLowerCase() === 'belloimam431@gmail.com' && (
-            <button
-              onClick={() => {
-                setSettingsTab('admin-dash');
-                setIsSettingsModalOpen(true);
-              }}
-              title="Dash Credits"
-              className={`w-full flex items-center ${isCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2'} rounded-xl text-sm font-medium transition-colors text-emerald-600 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20`}
-            >
-              <Gift size={18} className="text-emerald-500 shrink-0" />
-              {!isCollapsed && <span className="font-bold truncate">Dash Credits</span>}
-            </button>
-          )}
 
           <button
             onClick={() => {

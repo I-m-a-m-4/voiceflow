@@ -138,10 +138,14 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ id: st
   const formattedDate = date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 
   return (
-    <div className="flex-1 flex flex-col min-w-0 bg-[#0f0f0f] h-full overflow-y-auto relative text-gray-100">
+    <div className="flex-1 flex flex-col min-w-0 bg-background h-full overflow-y-auto relative text-foreground">
       {/* Top Nav */}
-      <div className="flex items-center gap-4 px-6 py-4 sticky top-0 bg-[#0f0f0f]/95 backdrop-blur z-20 border-b border-white/5">
-        <button onClick={() => router.back()} className="p-2 hover:bg-white/10 rounded-full transition-colors text-gray-300">
+      <div className="flex items-center gap-4 px-6 py-4 sticky top-0 bg-background/95 backdrop-blur z-20 border-b border-border">
+        <button 
+          onClick={() => router.back()} 
+          className="p-2 hover:bg-muted rounded-full transition-colors text-muted-foreground hover:text-foreground"
+          title="Back to meetings"
+        >
           <ArrowLeft size={20} />
         </button>
         <div className="flex-1" />
@@ -149,34 +153,46 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ id: st
 
       <div className="max-w-4xl mx-auto w-full px-6 py-8 pb-40">
         <div className="flex items-center justify-between mb-4">
-          <div className="text-sm font-medium text-gray-400">{formattedDate}</div>
-          <button className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium border border-white/10 rounded-md hover:bg-white/5 transition-colors text-white">
-            <Mail size={14} />
+          <div className="text-sm font-medium text-muted-foreground">{formattedDate}</div>
+          <button className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold border border-border bg-card hover:bg-muted rounded-lg transition-colors text-foreground shadow-sm">
+            <Mail size={14} className="text-muted-foreground" />
             Follow-up email
           </button>
         </div>
 
-        <h1 className="text-3xl font-bold font-clash tracking-tight text-white mb-8">
+        <h1 className="text-3xl font-bold font-clash tracking-tight text-foreground mb-8">
           {meeting.title || (meeting.type === 'dictation' ? 'Dictation Session' : 'Meeting Transcript')}
         </h1>
 
-        <div className="flex items-center justify-between border-b border-white/10 mb-8">
+        <div className="flex items-center justify-between border-b border-border mb-8">
           <div className="flex items-center gap-6">
             <button
               onClick={() => setActiveTab('summary')}
-              className={`py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'summary' ? 'border-voiceflow-orange text-white' : 'border-transparent text-gray-400 hover:text-gray-200'}`}
+              className={`py-3 text-sm font-semibold border-b-2 transition-colors ${
+                activeTab === 'summary' 
+                  ? 'border-voiceflow-orange text-voiceflow-orange' 
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
             >
               Summary
             </button>
             <button
               onClick={() => setActiveTab('transcript')}
-              className={`py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'transcript' ? 'border-voiceflow-orange text-white' : 'border-transparent text-gray-400 hover:text-gray-200'}`}
+              className={`py-3 text-sm font-semibold border-b-2 transition-colors ${
+                activeTab === 'transcript' 
+                  ? 'border-voiceflow-orange text-voiceflow-orange' 
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
             >
               Transcript
             </button>
             <button
               onClick={() => setActiveTab('usage')}
-              className={`py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'usage' ? 'border-voiceflow-orange text-white' : 'border-transparent text-gray-400 hover:text-gray-200'}`}
+              className={`py-3 text-sm font-semibold border-b-2 transition-colors ${
+                activeTab === 'usage' 
+                  ? 'border-voiceflow-orange text-voiceflow-orange' 
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
             >
               Usage
             </button>
@@ -184,7 +200,7 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ id: st
           <div className="flex items-center gap-4 hidden sm:flex">
             <button 
               onClick={handleCopySummary}
-              className="flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-gray-200 transition-colors"
+              className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
             >
               <Copy size={14} />
               {copied ? "Copied!" : "Copy summary"}
@@ -196,7 +212,7 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ id: st
         {activeTab === 'summary' && (
           <div className="space-y-8 animate-fade-up">
             {meeting.summary ? (
-              <div className="prose prose-invert prose-orange max-w-none bg-white/5 p-6 rounded-2xl border border-white/10 text-gray-200">
+              <div className="prose dark:prose-invert prose-orange max-w-none bg-card p-6 sm:p-8 rounded-2xl border border-border text-foreground shadow-sm">
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
                   components={{
@@ -204,10 +220,10 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ id: st
                     ol: ({ node, ...props }) => <ol {...props} className="list-decimal pl-6 mb-3 space-y-1.5 marker:text-voiceflow-orange marker:font-semibold" />,
                     ul: ({ node, ...props }) => <ul {...props} className="list-disc pl-6 mb-3 space-y-1.5 marker:text-voiceflow-orange" />,
                     li: ({ node, ...props }) => <li {...props} className="pl-1 leading-relaxed text-[15px]" />,
-                    strong: ({ node, ...props }) => <strong {...props} className="font-semibold text-white" />,
-                    h1: ({ node, ...props }) => <h1 {...props} className="text-xl font-bold text-white mb-3 mt-4 first:mt-0 font-clash" />,
-                    h2: ({ node, ...props }) => <h2 {...props} className="text-lg font-bold text-white mb-2 mt-4 first:mt-0 font-clash" />,
-                    h3: ({ node, ...props }) => <h3 {...props} className="text-base font-semibold text-white mb-2 mt-3 first:mt-0" />,
+                    strong: ({ node, ...props }) => <strong {...props} className="font-semibold text-foreground" />,
+                    h1: ({ node, ...props }) => <h1 {...props} className="text-xl font-bold text-foreground mb-3 mt-4 first:mt-0 font-clash" />,
+                    h2: ({ node, ...props }) => <h2 {...props} className="text-lg font-bold text-foreground mb-2 mt-4 first:mt-0 font-clash" />,
+                    h3: ({ node, ...props }) => <h3 {...props} className="text-base font-semibold text-foreground mb-2 mt-3 first:mt-0" />,
                   }}
                 >
                   {meeting.summary}
@@ -215,19 +231,19 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ id: st
               </div>
             ) : meeting.transcript ? (
               <div className="space-y-4">
-                <div className="flex items-center justify-between text-xs font-semibold text-gray-400 px-1">
+                <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground px-1">
                   <span>Raw Transcript</span>
                   <span className="text-voiceflow-orange">Full captured audio text</span>
                 </div>
-                <div className="bg-white/5 p-6 rounded-2xl border border-white/10 text-gray-200">
+                <div className="bg-card p-6 sm:p-8 rounded-2xl border border-border text-foreground shadow-sm">
                   <p className="text-[15px] whitespace-pre-wrap leading-relaxed font-mono">
                     {meeting.transcript}
                   </p>
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center py-20 text-gray-500 gap-4">
-                <Sparkles size={32} className="text-gray-600 mb-2" />
+              <div className="flex flex-col items-center justify-center py-20 text-muted-foreground gap-4">
+                <Sparkles size={32} className="text-muted-foreground mb-2" />
                 <p>No content recorded for this session.</p>
               </div>
             )}
@@ -236,8 +252,8 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ id: st
 
         {activeTab === 'transcript' && (
           <div className="animate-fade-up">
-            <div className="p-6 bg-white/5 rounded-2xl border border-white/10">
-               <p className="text-[15px] text-gray-300 whitespace-pre-wrap leading-relaxed font-mono">
+            <div className="p-6 sm:p-8 bg-card rounded-2xl border border-border shadow-sm">
+               <p className="text-[15px] text-foreground whitespace-pre-wrap leading-relaxed font-mono">
                  {meeting.transcript || "No transcript available."}
                </p>
             </div>
@@ -245,20 +261,20 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ id: st
         )}
 
         {activeTab === 'usage' && (
-          <div className="animate-fade-up p-6 bg-white/5 rounded-2xl border border-white/10">
-            <h3 className="text-lg font-bold text-white mb-4">Meeting Details</h3>
-            <ul className="space-y-3 text-sm text-gray-400">
-              <li className="flex justify-between border-b border-white/5 pb-2">
+          <div className="animate-fade-up p-6 sm:p-8 bg-card rounded-2xl border border-border shadow-sm">
+            <h3 className="text-lg font-bold text-foreground mb-4">Meeting Details</h3>
+            <ul className="space-y-3 text-sm text-muted-foreground">
+              <li className="flex justify-between border-b border-border pb-2">
                 <span>Duration</span>
-                <span className="text-gray-200">{meeting.durationMinutes ? `${meeting.durationMinutes} mins` : 'Recorded session'}</span>
+                <span className="text-foreground font-medium">{meeting.durationMinutes ? `${meeting.durationMinutes} mins` : 'Recorded session'}</span>
               </li>
-              <li className="flex justify-between border-b border-white/5 pb-2">
+              <li className="flex justify-between border-b border-border pb-2">
                 <span>Words spoken</span>
-                <span className="text-gray-200">{meeting.transcript?.split(/\s+/).filter(Boolean).length || 0}</span>
+                <span className="text-foreground font-medium">{meeting.transcript?.split(/\s+/).filter(Boolean).length || 0}</span>
               </li>
-              <li className="flex justify-between border-b border-white/5 pb-2">
+              <li className="flex justify-between border-b border-border pb-2">
                 <span>Type</span>
-                <span className="text-gray-200 capitalize">{meeting.type || 'Meeting'}</span>
+                <span className="text-foreground capitalize font-medium">{meeting.type || 'Meeting'}</span>
               </li>
             </ul>
           </div>
@@ -266,17 +282,17 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ id: st
 
         {/* Q&A Section */}
         {qaHistory.length > 0 && (
-          <div className="mt-10 space-y-4 pt-6 border-t border-white/10">
-            <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">Meeting Q&A</h3>
+          <div className="mt-10 space-y-4 pt-6 border-t border-border">
+            <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">Meeting Q&A</h3>
             {qaHistory.map((item, idx) => (
-              <div key={idx} className="space-y-2 bg-white/5 p-4 rounded-xl border border-white/5">
+              <div key={idx} className="space-y-2 bg-card p-4 rounded-xl border border-border shadow-sm">
                 <div className="flex items-center gap-2 text-xs font-semibold text-voiceflow-orange">
                   <User size={14} />
                   <span>{item.q}</span>
                 </div>
-                <div className="flex items-start gap-2 text-sm text-gray-200 pl-4 border-l-2 border-white/10">
-                  <Bot size={15} className="text-blue-400 shrink-0 mt-0.5" />
-                  <div className="leading-relaxed flex-1 prose prose-invert prose-sm max-w-none">
+                <div className="flex items-start gap-2 text-sm text-foreground pl-4 border-l-2 border-voiceflow-orange/40">
+                  <Bot size={15} className="text-blue-500 shrink-0 mt-0.5" />
+                  <div className="leading-relaxed flex-1 prose dark:prose-invert prose-sm max-w-none">
                     <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
                       components={{
@@ -284,7 +300,7 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ id: st
                         ol: ({ node, ...props }) => <ol {...props} className="list-decimal pl-5 mb-2 space-y-1 marker:text-voiceflow-orange" />,
                         ul: ({ node, ...props }) => <ul {...props} className="list-disc pl-5 mb-2 space-y-1 marker:text-voiceflow-orange" />,
                         li: ({ node, ...props }) => <li {...props} className="pl-1" />,
-                        strong: ({ node, ...props }) => <strong {...props} className="font-semibold text-white" />,
+                        strong: ({ node, ...props }) => <strong {...props} className="font-semibold text-foreground" />,
                       }}
                     >
                       {item.a}
@@ -298,8 +314,8 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ id: st
       </div>
 
       {/* Floating Bottom Input Bar */}
-      <div className="fixed bottom-0 left-0 right-0 lg:left-[240px] p-6 bg-gradient-to-t from-[#0f0f0f] via-[#0f0f0f]/90 to-transparent pointer-events-none flex justify-center z-30">
-        <div className="w-full max-w-2xl bg-[#1a1a1a] rounded-full border border-white/10 p-1.5 flex items-center shadow-2xl pointer-events-auto">
+      <div className="fixed bottom-0 left-0 right-0 lg:left-[240px] p-6 bg-gradient-to-t from-background via-background/90 to-transparent pointer-events-none flex justify-center z-30">
+        <div className="w-full max-w-2xl bg-card rounded-full border border-border p-1.5 flex items-center shadow-lg pointer-events-auto">
           <input
             type="text"
             value={question}
@@ -307,12 +323,12 @@ export default function MeetingDetailPage({ params }: { params: Promise<{ id: st
             onKeyDown={handleKeyDown}
             disabled={isAsking}
             placeholder="Ask about this meeting transcript..."
-            className="flex-1 bg-transparent border-none outline-none ring-0 focus:ring-0 text-sm text-white placeholder:text-gray-500 px-4 h-full min-h-[36px] disabled:opacity-50"
+            className="flex-1 bg-transparent border-none outline-none ring-0 focus:ring-0 text-sm text-foreground placeholder:text-muted-foreground px-4 h-full min-h-[36px] disabled:opacity-50"
           />
           <button 
             onClick={handleAskMeeting}
             disabled={isAsking || !question.trim()}
-            className="w-9 h-9 flex items-center justify-center rounded-full bg-voiceflow-orange hover:bg-orange-600 text-white transition-colors shrink-0 disabled:opacity-40"
+            className="w-9 h-9 flex items-center justify-center rounded-full bg-voiceflow-orange hover:bg-orange-600 text-white transition-colors shrink-0 disabled:opacity-40 shadow-sm"
           >
             {isAsking ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
           </button>

@@ -29,10 +29,27 @@ export default function MeetingsFeed() {
   useEffect(() => {
     fetchMeetings();
     
+    // Check URL query parameter on mount
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const q = params.get('q');
+      if (q) setSearchQuery(q);
+    }
+
+    const handleSearch = (e: any) => {
+      if (typeof e.detail?.query === 'string') {
+        setSearchQuery(e.detail.query);
+      }
+    };
+    window.addEventListener('voiceflow-search-query', handleSearch);
+    
     // Set up a simple interval to poll for new meetings every 10 seconds 
     // since the user might be recording in the right panel
     const interval = setInterval(() => fetchMeetings(true), 10000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('voiceflow-search-query', handleSearch);
+    };
   }, [auth?.currentUser?.uid]);
 
   const formatDate = (timestamp: any) => {
