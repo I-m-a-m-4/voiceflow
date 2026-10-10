@@ -46,6 +46,10 @@ fn set_detectable(window: tauri::Window, detectable: bool) -> Result<(), String>
     // 3. Keep floating widget levitating smoothly above meeting windows
     if detectable {
         let _ = window.set_always_on_top(true);
+    } else {
+        let _ = window.set_always_on_top(false);
+        let _ = window.show();
+        let _ = window.set_focus();
     }
     Ok(())
 }

@@ -159,7 +159,7 @@ export default function MeetingDetailClient({ id }: { id?: string }) {
           </button>
         </div>
 
-        <h1 className="text-3xl font-bold font-clash tracking-tight text-foreground mb-8">
+        <h1 className="text-3xl font-bold font-nexa tracking-tight text-foreground mb-8">
           {meeting.title || (meeting.type === 'dictation' ? 'Dictation Session' : 'Meeting Transcript')}
         </h1>
 
@@ -167,7 +167,7 @@ export default function MeetingDetailClient({ id }: { id?: string }) {
           <div className="flex items-center gap-6">
             <button
               onClick={() => setActiveTab('summary')}
-              className={`py-3 text-sm font-semibold border-b-2 transition-colors ${
+              className={`py-3 text-sm font-semibold border-b-2 transition-colors font-dm-sans ${
                 activeTab === 'summary' 
                   ? 'border-voiceflow-orange text-voiceflow-orange' 
                   : 'border-transparent text-muted-foreground hover:text-foreground'
@@ -177,7 +177,7 @@ export default function MeetingDetailClient({ id }: { id?: string }) {
             </button>
             <button
               onClick={() => setActiveTab('transcript')}
-              className={`py-3 text-sm font-semibold border-b-2 transition-colors ${
+              className={`py-3 text-sm font-semibold border-b-2 transition-colors font-dm-sans ${
                 activeTab === 'transcript' 
                   ? 'border-voiceflow-orange text-voiceflow-orange' 
                   : 'border-transparent text-muted-foreground hover:text-foreground'
@@ -187,7 +187,7 @@ export default function MeetingDetailClient({ id }: { id?: string }) {
             </button>
             <button
               onClick={() => setActiveTab('usage')}
-              className={`py-3 text-sm font-semibold border-b-2 transition-colors ${
+              className={`py-3 text-sm font-semibold border-b-2 transition-colors font-dm-sans ${
                 activeTab === 'usage' 
                   ? 'border-voiceflow-orange text-voiceflow-orange' 
                   : 'border-transparent text-muted-foreground hover:text-foreground'
@@ -199,7 +199,7 @@ export default function MeetingDetailClient({ id }: { id?: string }) {
           <div className="flex items-center gap-4 hidden sm:flex">
             <button 
               onClick={handleCopySummary}
-              className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
+              className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors font-dm-sans"
             >
               <Copy size={14} />
               {copied ? "Copied!" : "Copy summary"}
@@ -215,14 +215,14 @@ export default function MeetingDetailClient({ id }: { id?: string }) {
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
                   components={{
-                    p: ({ node, ...props }) => <p {...props} className="mb-3 last:mb-0 leading-relaxed text-[15px]" />,
-                    ol: ({ node, ...props }) => <ol {...props} className="list-decimal pl-6 mb-3 space-y-1.5 marker:text-voiceflow-orange marker:font-semibold" />,
-                    ul: ({ node, ...props }) => <ul {...props} className="list-disc pl-6 mb-3 space-y-1.5 marker:text-voiceflow-orange" />,
-                    li: ({ node, ...props }) => <li {...props} className="pl-1 leading-relaxed text-[15px]" />,
+                    p: ({ node, ...props }) => <p {...props} className="mb-3 last:mb-0 leading-relaxed text-[15px] font-dm-sans" />,
+                    ol: ({ node, ...props }) => <ol {...props} className="list-decimal pl-6 mb-3 space-y-1.5 marker:text-voiceflow-orange marker:font-semibold font-dm-sans" />,
+                    ul: ({ node, ...props }) => <ul {...props} className="list-disc pl-6 mb-3 space-y-1.5 marker:text-voiceflow-orange font-dm-sans" />,
+                    li: ({ node, ...props }) => <li {...props} className="pl-1 leading-relaxed text-[15px] font-dm-sans" />,
                     strong: ({ node, ...props }) => <strong {...props} className="font-semibold text-foreground" />,
-                    h1: ({ node, ...props }) => <h1 {...props} className="text-xl font-bold text-foreground mb-3 mt-4 first:mt-0 font-clash" />,
-                    h2: ({ node, ...props }) => <h2 {...props} className="text-lg font-bold text-foreground mb-2 mt-4 first:mt-0 font-clash" />,
-                    h3: ({ node, ...props }) => <h3 {...props} className="text-base font-semibold text-foreground mb-2 mt-3 first:mt-0" />,
+                    h1: ({ node, ...props }) => <h1 {...props} className="text-xl font-bold text-foreground mb-3 mt-4 first:mt-0 font-nexa" />,
+                    h2: ({ node, ...props }) => <h2 {...props} className="text-lg font-bold text-foreground mb-2 mt-4 first:mt-0 font-nexa" />,
+                    h3: ({ node, ...props }) => <h3 {...props} className="text-base font-semibold text-foreground mb-2 mt-3 first:mt-0 font-nexa" />,
                   }}
                 >
                   {meeting.summary}
@@ -231,11 +231,11 @@ export default function MeetingDetailClient({ id }: { id?: string }) {
             ) : meeting.transcript ? (
               <div className="space-y-4">
                 <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground px-1">
-                  <span>Raw Transcript</span>
-                  <span className="text-voiceflow-orange">Full captured audio text</span>
+                  <span className="font-nexa font-bold text-foreground">Raw Transcript</span>
+                  <span className="text-voiceflow-orange font-dm-sans">Full captured audio text</span>
                 </div>
                 <div className="bg-card p-6 sm:p-8 rounded-2xl border border-border text-foreground shadow-sm">
-                  <p className="text-[15px] whitespace-pre-wrap leading-relaxed font-mono">
+                  <p className="text-[15px] whitespace-pre-wrap leading-relaxed font-dm-sans">
                     {meeting.transcript}
                   </p>
                 </div>
@@ -243,7 +243,7 @@ export default function MeetingDetailClient({ id }: { id?: string }) {
             ) : (
               <div className="flex flex-col items-center justify-center py-20 text-muted-foreground gap-4">
                 <Sparkles size={32} className="text-muted-foreground mb-2" />
-                <p>No content recorded for this session.</p>
+                <p className="font-dm-sans">No content recorded for this session.</p>
               </div>
             )}
           </div>
@@ -252,7 +252,7 @@ export default function MeetingDetailClient({ id }: { id?: string }) {
         {activeTab === 'transcript' && (
           <div className="animate-fade-up">
             <div className="p-6 sm:p-8 bg-card rounded-2xl border border-border shadow-sm">
-               <p className="text-[15px] text-foreground whitespace-pre-wrap leading-relaxed font-mono">
+               <p className="text-[15px] text-foreground whitespace-pre-wrap leading-relaxed font-dm-sans">
                  {meeting.transcript || "No transcript available."}
                </p>
             </div>
@@ -261,7 +261,7 @@ export default function MeetingDetailClient({ id }: { id?: string }) {
 
         {activeTab === 'usage' && (
           <div className="animate-fade-up p-6 sm:p-8 bg-card rounded-2xl border border-border shadow-sm">
-            <h3 className="text-lg font-bold text-foreground mb-4">Meeting Details</h3>
+            <h3 className="text-lg font-bold text-foreground mb-4 font-nexa">Meeting Details</h3>
             <ul className="space-y-3 text-sm text-muted-foreground">
               <li className="flex justify-between border-b border-border pb-2">
                 <span>Duration</span>

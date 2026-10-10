@@ -93,8 +93,7 @@ export default function RightPanel() {
   };
 
   return (
-    <div className="w-full lg:w-[320px] h-auto lg:h-full bg-muted/30 border-t lg:border-t-0 border-l border-border flex flex-col shrink-0 overflow-y-visible lg:overflow-y-auto p-6">
-      
+    <>
       {/* Floating Undetectable Widget (visible during recording & draggable) */}
       <MeetingWidget 
         isRecording={isRecording} 
@@ -102,69 +101,54 @@ export default function RightPanel() {
         transcript={transcript} 
       />
 
-      {/* Voiceflow Co-Pilot Control */}
-      <div className="mb-8">
-        <h3 className="text-[15px] font-bold text-foreground mb-1">Voiceflow Co-Pilot</h3>
-        <p className="text-[11px] font-medium text-muted-foreground mb-3">Stealth real-time notetaker & live assistant</p>
-        
-        {!isRecording && !isProcessing ? (
-          <div className="space-y-3">
-            <button 
-              onClick={() => {
-                if (isLimitReached) {
-                  if (typeof window !== 'undefined') {
-                    window.dispatchEvent(new CustomEvent('open-billing-modal'));
-                  }
-                  return;
-                }
-                startRecording(false);
-              }} 
-              className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl transition-all font-semibold shadow-sm active:scale-[0.98] ${
-                isLimitReached 
-                  ? "bg-red-500 hover:bg-red-600 text-white shadow-red-500/10" 
-                  : "bg-voiceflow-orange hover:bg-orange-600 text-white shadow-orange-500/10"
-              }`}
-              title={isLimitReached ? "Upgrade to Pro to start a new session" : "Launch Voiceflow Floating Assistant and start live listening"}
-            >
-              <Mic size={18} className="shrink-0" />
-              <span className="text-sm font-bold tracking-tight whitespace-nowrap">
-                {isLimitReached ? "Upgrade Plan to Start" : "Start Voiceflow"}
-              </span>
-            </button>
-            {isLimitReached && (
-              <p className="text-[11px] text-center text-red-500 font-medium leading-tight">
-                Free limit reached (30 mins / 3 sessions)
-              </p>
+      {!isRecording && (
+        <div className="w-full lg:w-[320px] h-auto lg:h-full bg-muted/30 border-t lg:border-t-0 border-l border-border flex flex-col shrink-0 overflow-y-visible lg:overflow-y-auto p-6 font-dm-sans">
+          {/* Voiceflow Co-Pilot Control */}
+          <div className="mb-8">
+            <h3 className="text-[15px] font-bold text-foreground mb-1 font-nexa">Voiceflow Co-Pilot</h3>
+            <p className="text-[11px] font-medium text-muted-foreground mb-3 font-dm-sans">Stealth real-time notetaker & live assistant</p>
+            
+            {!isRecording && !isProcessing ? (
+              <div className="space-y-3">
+                <button 
+                  onClick={() => {
+                    if (isLimitReached) {
+                      if (typeof window !== 'undefined') {
+                        window.dispatchEvent(new CustomEvent('open-billing-modal'));
+                      }
+                      return;
+                    }
+                    startRecording(false);
+                  }} 
+                  className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl transition-all font-semibold shadow-sm active:scale-[0.98] ${
+                    isLimitReached 
+                      ? "bg-red-500 hover:bg-red-600 text-white shadow-red-500/10" 
+                      : "bg-voiceflow-orange hover:bg-orange-600 text-white shadow-orange-500/10"
+                  }`}
+                  title={isLimitReached ? "Upgrade to Pro to start a new session" : "Launch Voiceflow Floating Assistant and start live listening"}
+                >
+                  <Mic size={18} className="shrink-0" />
+                  <span className="text-sm font-bold tracking-tight whitespace-nowrap font-nexa">
+                    {isLimitReached ? "Upgrade Plan to Start" : "Start Voiceflow"}
+                  </span>
+                </button>
+                {isLimitReached && (
+                  <p className="text-[11px] text-center text-red-500 font-medium leading-tight font-dm-sans">
+                    Free limit reached (30 mins / 3 sessions)
+                  </p>
+                )}
+                <div className="flex items-center justify-center gap-1.5 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 py-1.5 px-3 rounded-full border border-emerald-500/20">
+                  <ShieldCheck size={14} className="text-emerald-500" />
+                  <span className="text-[11px] font-bold tracking-tight font-dm-sans">100% Undetectable • Draggable • Taskbar Hidden</span>
+                </div>
+              </div>
+            ) : (
+              <div className="w-full p-4 border border-orange-500/30 bg-orange-500/10 rounded-xl flex flex-col items-center justify-center gap-2 text-voiceflow-orange font-semibold font-dm-sans">
+                <Loader2 className="w-6 h-6 animate-spin" />
+                <span className="text-sm">Processing Meeting & Notes...</span>
+              </div>
             )}
-            <div className="flex items-center justify-center gap-1.5 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 py-1.5 px-3 rounded-full border border-emerald-500/20">
-              <ShieldCheck size={14} className="text-emerald-500" />
-              <span className="text-[11px] font-bold tracking-tight">100% Undetectable • Draggable • Taskbar Hidden</span>
-            </div>
           </div>
-        ) : isRecording ? (
-          <div className="w-full p-4 border border-red-500/30 bg-red-500/10 rounded-xl flex flex-col items-center justify-center gap-3">
-            <div className="flex items-center gap-2 text-red-500 font-semibold animate-pulse text-sm">
-              <div className="w-2.5 h-2.5 rounded-full bg-red-500"></div>
-              Session Active • {formatTime(recordingTime)}
-            </div>
-            <p className="text-[11px] text-muted-foreground text-center">
-              Floating widget active above your meeting tabs. Drag anywhere on screen.
-            </p>
-            <button 
-              onClick={stopRecording} 
-              className="w-full flex items-center justify-center gap-2 py-2.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors font-semibold shadow-sm text-sm"
-            >
-              <Square size={15} fill="currentColor" />
-              Stop & Save Meeting
-            </button>
-          </div>
-        ) : (
-          <div className="w-full p-4 border border-orange-500/30 bg-orange-500/10 rounded-xl flex flex-col items-center justify-center gap-2 text-voiceflow-orange font-semibold">
-            <Loader2 className="w-6 h-6 animate-spin" />
-            <span className="text-sm">Processing Meeting & Notes...</span>
-          </div>
-        )}
-      </div>
 
       {/* Upcoming meetings */}
       <div>
@@ -215,7 +199,9 @@ export default function RightPanel() {
           </button>
         </div>
 
-      </div>
-    </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

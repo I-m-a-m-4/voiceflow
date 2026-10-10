@@ -80,8 +80,8 @@ export default function MeetingsFeed() {
       <div className="p-8 w-full pb-32">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div>
-            <h1 className="text-2xl font-bold text-foreground font-clash">Recent Transcripts</h1>
-            <p className="text-xs text-muted-foreground mt-0.5">Browse and search your meeting recordings, dictations, and AI notes.</p>
+            <h1 className="text-2xl font-bold text-foreground font-nexa">Recent Transcripts</h1>
+            <p className="text-xs text-muted-foreground mt-0.5 font-dm-sans">Browse and search your meeting recordings, dictations, and AI notes.</p>
           </div>
           
           <div className="flex items-center gap-2">
@@ -92,10 +92,10 @@ export default function MeetingsFeed() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search transcripts or summaries..."
-                className="pl-8 pr-3 py-1.5 text-xs bg-muted/60 hover:bg-muted/80 focus:bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-voiceflow-orange transition-all w-60 sm:w-72"
+                className="pl-8 pr-3 py-1.5 text-xs bg-muted/60 hover:bg-muted/80 focus:bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-voiceflow-orange transition-all w-60 sm:w-72 font-dm-sans"
               />
             </div>
-            <button className="flex items-center gap-1 text-xs font-semibold text-foreground hover:bg-muted px-3 py-1.5 rounded-lg border border-border transition-colors shrink-0">
+            <button className="flex items-center gap-1 text-xs font-semibold text-foreground hover:bg-muted px-3 py-1.5 rounded-lg border border-border transition-colors shrink-0 font-dm-sans">
               Filter <ChevronDown size={14} className="text-muted-foreground" />
             </button>
           </div>
@@ -104,18 +104,18 @@ export default function MeetingsFeed() {
         {isLoading && meetings.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-muted-foreground gap-4">
             <Loader2 className="w-8 h-8 animate-spin text-voiceflow-orange" />
-            <p>Loading your meetings...</p>
+            <p className="font-dm-sans">Loading your meetings...</p>
           </div>
         ) : meetings.length === 0 ? (
           <div className="flex flex-col items-center justify-center min-h-[50vh] text-muted-foreground border-2 border-dashed border-border rounded-2xl bg-muted/30 p-12">
             <FileText className="w-20 h-20 text-muted-foreground/50 mb-6" />
-            <h3 className="text-2xl font-bold text-foreground mb-2">No meetings yet</h3>
-            <p className="text-base text-muted-foreground">Click "Start Voiceflow" in the right panel to capture your first meeting.</p>
+            <h3 className="text-2xl font-bold text-foreground mb-2 font-nexa">No meetings yet</h3>
+            <p className="text-base text-muted-foreground font-dm-sans">Click "Start Voiceflow" in the right panel to capture your first meeting.</p>
           </div>
         ) : filteredMeetings.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-muted-foreground border border-dashed border-border rounded-2xl bg-muted/20 p-8">
-            <p className="text-sm font-semibold text-foreground mb-1">No matching transcripts found</p>
-            <p className="text-xs text-muted-foreground">Try clearing or changing your search query "{searchQuery}".</p>
+            <p className="text-sm font-semibold text-foreground mb-1 font-nexa">No matching transcripts found</p>
+            <p className="text-xs text-muted-foreground font-dm-sans">Try clearing or changing your search query "{searchQuery}".</p>
           </div>
         ) : (
           <div className="space-y-6">
@@ -132,21 +132,21 @@ export default function MeetingsFeed() {
                        <div className="w-8 h-8 rounded-full bg-orange-500/20 flex items-center justify-center text-voiceflow-orange font-bold text-sm">
                         <FileText size={16} />
                       </div>
-                      <div className="text-xs font-semibold text-muted-foreground flex items-center gap-2">
+                      <div className="text-xs font-semibold text-muted-foreground flex items-center gap-2 font-dm-sans">
                         {formatDate(meeting.createdAt)} • {meeting.type === 'dictation' ? 'Dictation' : 'Meeting'}
                       </div>
                     </div>
                   </div>
                   
-                  <h2 className="text-xl font-bold text-card-foreground mb-3 group-hover:text-voiceflow-orange transition-colors font-clash">
+                  <h2 className="text-xl font-bold text-card-foreground mb-3 group-hover:text-voiceflow-orange transition-colors font-nexa">
                     {meeting.summary ? 'AI Summary' : 'Raw Transcript'}
                   </h2>
                   
                   <div className="bg-muted/50 p-4 rounded-xl border border-border mb-4">
-                    <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">
+                    <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 font-nexa">
                       {meeting.summary ? 'Summary' : 'Transcript'}
                     </h4>
-                    <p className="text-sm text-card-foreground leading-relaxed whitespace-pre-wrap line-clamp-4">
+                    <p className="text-sm text-card-foreground leading-relaxed whitespace-pre-wrap line-clamp-4 font-dm-sans">
                       {meeting.summary || meeting.transcript || "No transcript content recorded."}
                     </p>
                   </div>

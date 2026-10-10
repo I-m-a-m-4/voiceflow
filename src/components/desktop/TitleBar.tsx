@@ -43,7 +43,17 @@ export function DesktopTitleBar() {
     });
   }, []);
 
-  if (!isTauri) return null;
+  const [isRecording, setIsRecording] = useState(false);
+
+  useEffect(() => {
+    const handleRecordState = (e: any) => {
+      setIsRecording(Boolean(e.detail?.isRecording));
+    };
+    window.addEventListener('voiceflow-record-state', handleRecordState);
+    return () => window.removeEventListener('voiceflow-record-state', handleRecordState);
+  }, []);
+
+  if (!isTauri || isRecording) return null;
 
   const handleMinimize = async () => {
     if (!isTauri) return;

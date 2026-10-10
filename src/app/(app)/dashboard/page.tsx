@@ -70,9 +70,19 @@ export default function VoiceFlowApp() {
     }
   }, [auth, firestore, toast]);
 
+  const [isRecording, setIsRecording] = React.useState(false);
+
+  useEffect(() => {
+    const handleRecordState = (e: any) => {
+      setIsRecording(Boolean(e.detail?.isRecording));
+    };
+    window.addEventListener('voiceflow-record-state', handleRecordState);
+    return () => window.removeEventListener('voiceflow-record-state', handleRecordState);
+  }, []);
+
   return (
-    <div className="flex flex-col lg:flex-row min-h-full w-full">
-      <MeetingsFeed />
+    <div className={`flex flex-col lg:flex-row min-h-full w-full ${isRecording ? 'bg-transparent' : ''}`}>
+      {!isRecording && <MeetingsFeed />}
       <RightPanel />
     </div>
   );

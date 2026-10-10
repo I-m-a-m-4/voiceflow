@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { 
   ChevronDown, 
@@ -32,12 +33,17 @@ interface MeetingWidgetProps {
 }
 
 export default function MeetingWidget({ isRecording, stopRecording, transcript }: MeetingWidgetProps) {
+  const [mounted, setMounted] = useState(false);
   const [isHidden, setIsHidden] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [query, setQuery] = useState("");
   const [isQuerying, setIsQuerying] = useState(false);
   const [aiResponse, setAiResponse] = useState<string | null>(null);
   const [isStealth, setIsStealth] = useState<boolean>(true);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const { isPro, sessionCount, maxFreeSessions, isLimitReached } = usePlanUsage();
 
@@ -81,7 +87,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
     await applyStealth(next);
   };
   
-  if (!isRecording) return null;
+  if (!mounted || !isRecording) return null;
 
   const handleAskAI = async (customPrompt?: string, includeScreenCapture = false) => {
     if (isLimitReached) {
@@ -149,11 +155,11 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
     }
   };
 
-  return (
+  return createPortal(
     <motion.div 
       drag
       dragMomentum={false}
-      className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] w-[92%] max-w-[620px] flex flex-col items-center pointer-events-none select-none"
+      className="fixed top-6 left-1/2 -translate-x-1/2 z-[2147483647] w-[92%] max-w-[620px] flex flex-col items-center pointer-events-none select-none font-dm-sans"
     >
       {/* Top Pill Controls - Draggable Handle */}
       <div className="bg-[#222225]/95 backdrop-blur-md border border-white/10 rounded-full flex items-center p-1.5 gap-2 shadow-2xl mb-4 pointer-events-auto transition-transform hover:scale-[1.01] cursor-grab active:cursor-grabbing">
@@ -219,7 +225,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
               <span className="text-[11px] font-bold tracking-wider uppercase bg-orange-500/10 text-voiceflow-orange border border-orange-500/20 px-2.5 py-1 rounded-full mb-2">
                 Free Limit Reached ({sessionCount}/{maxFreeSessions} Sessions)
               </span>
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2 font-clash">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2 font-nexa">
                 Upgrade to Voiceflow Pro
               </h3>
               <p className="text-xs text-gray-600 dark:text-white/70 max-w-sm mb-5 leading-relaxed">
@@ -368,6 +374,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
 
         </div>
       )}
-    </motion.div>
+    </motion.div>,
+    document.body
   );
 }
