@@ -91,14 +91,23 @@ export default function AppSidebar() {
         />
       )}
 
+      {/* Desktop spacer to reserve layout width for the fixed sidebar */}
+      <div 
+        className={`hidden md:block shrink-0 transition-all duration-300 ease-in-out ${
+          isCollapsed ? 'w-[68px]' : 'w-[240px]'
+        }`}
+        aria-hidden="true"
+      />
+
       <aside 
-        className={`fixed md:sticky top-0 inset-y-0 left-0 z-50 md:z-auto h-screen bg-[#F9F9F9] border-r border-gray-200 flex flex-col shrink-0 overflow-y-auto overflow-x-hidden transition-all duration-300 ease-in-out dark:bg-muted/50 dark:border-border select-none ${
+        className={`fixed top-0 inset-y-0 left-0 z-30 h-screen bg-[#F9F9F9] border-r border-gray-200 flex flex-col shrink-0 overflow-y-auto overflow-x-hidden transition-all duration-300 ease-in-out dark:bg-muted/50 dark:border-border select-none ${
           isMobileOpen 
-            ? 'translate-x-0 w-[240px] shadow-2xl' 
+            ? 'translate-x-0 w-[240px] shadow-2xl z-50' 
             : '-translate-x-full md:translate-x-0'
         } ${
           isCollapsed ? 'md:w-[68px]' : 'md:w-[240px]'
         }`}
+        style={{ top: 'var(--tauri-title-height, 0px)', height: 'calc(100vh - var(--tauri-title-height, 0px))' }}
       >
         {/* Brand Header */}
         <div className={`p-3.5 flex items-center ${isCollapsed ? 'justify-center' : 'justify-start'} border-b border-gray-100 dark:border-border/50`}>
