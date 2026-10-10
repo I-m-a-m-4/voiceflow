@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Check, Loader2, Crown, Sparkles } from 'lucide-react';
 import { useAuth } from '@/firebase';
 import { useCurrencyGeo } from '@/hooks/use-currency-geo';
+import { apiBase, isNativeApp, openExternal } from '@/lib/platform';
 
 interface BillingModalProps {
   isOpen: boolean;
@@ -71,7 +72,8 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
     setLoadingPlanId(plan.id);
 
     try {
-      const clientOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+      const isNative = isNativeApp();
+      const clientOrigin = isNative ? 'https://voiceflow-azure.vercel.app' : (typeof window !== 'undefined' ? window.location.origin : 'https://voiceflow-azure.vercel.app');
       const redirectUrl = `${clientOrigin}/dashboard`;
       const amount = isAnnual 
         ? (currency === 'NGN' ? plan.annualNgn : plan.annualUsd) 
@@ -99,7 +101,10 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
       }
 
       // Call Flutterwave checkout endpoint with country-locked currency
-      const res = await fetch("/api/flutterwave/checkout", {
+      const base = apiBase();
+      const checkoutEndpoint = base ? `${base}/api/flutterwave/checkout` : "/api/flutterwave/checkout";
+
+      const res = await fetch(checkoutEndpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -115,8 +120,18 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
         }),
       });
 
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        const text = await res.text();
+        throw new Error(res.ok ? "Unexpected response format from payment server" : `Payment server error (${res.status})`);
+      }
+
       const data = await res.json();
       if (res.ok && data.url) {
+        if (isNative) {
+          await openExternal(data.url);
+          return;
+        }
         window.location.href = data.url;
         return;
       }

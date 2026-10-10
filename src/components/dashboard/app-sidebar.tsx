@@ -92,7 +92,7 @@ export default function AppSidebar() {
       )}
 
       <aside 
-        className={`fixed md:relative inset-y-0 left-0 z-50 md:z-auto h-screen bg-[#F9F9F9] border-r border-gray-200 flex flex-col shrink-0 overflow-y-auto overflow-x-hidden transition-all duration-300 ease-in-out dark:bg-muted/50 dark:border-border select-none ${
+        className={`fixed md:sticky top-0 inset-y-0 left-0 z-50 md:z-auto h-screen bg-[#F9F9F9] border-r border-gray-200 flex flex-col shrink-0 overflow-y-auto overflow-x-hidden transition-all duration-300 ease-in-out dark:bg-muted/50 dark:border-border select-none ${
           isMobileOpen 
             ? 'translate-x-0 w-[240px] shadow-2xl' 
             : '-translate-x-full md:translate-x-0'
@@ -110,41 +110,6 @@ export default function AppSidebar() {
               </span>
             )}
           </Link>
-        </div>
-
-        {/* User Profile Area */}
-        <div className="px-2 py-2 mb-1">
-          {!isCollapsed ? (
-            <div 
-              onClick={() => {
-                setSettingsTab('profile');
-                setIsSettingsModalOpen(true);
-              }}
-              className="flex items-center gap-2.5 p-2 rounded-xl hover:bg-gray-100 cursor-pointer dark:hover:bg-muted transition-colors"
-              title="Manage Profile"
-            >
-              <div className="w-8 h-8 rounded-full bg-voiceflow-orange flex items-center justify-center text-white font-bold text-sm shrink-0 shadow-sm">
-                {auth?.currentUser?.email?.charAt(0).toUpperCase() || 'U'}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-xs font-bold truncate text-gray-900 dark:text-gray-200">{auth?.currentUser?.displayName || 'User'}</div>
-                <div className="text-[11px] text-gray-500 truncate dark:text-gray-400">{auth?.currentUser?.email || 'user@example.com'}</div>
-              </div>
-            </div>
-          ) : (
-            <div 
-              onClick={() => {
-                setSettingsTab('profile');
-                setIsSettingsModalOpen(true);
-              }}
-              className="flex justify-center p-1 cursor-pointer"
-              title={auth?.currentUser?.email || 'User Profile'}
-            >
-              <div className="w-8 h-8 rounded-full bg-voiceflow-orange flex items-center justify-center text-white font-bold text-xs shadow-sm hover:ring-2 hover:ring-orange-400 transition-all">
-                {auth?.currentUser?.email?.charAt(0).toUpperCase() || 'U'}
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Main Navigation */}
@@ -184,7 +149,7 @@ export default function AppSidebar() {
         </nav>
 
         {/* Bottom section */}
-        <div className="mt-auto pt-4 px-2 pb-3">
+        <div className="mt-auto pt-4 px-2.5 pb-8 sm:pb-10 shrink-0">
           <div className="border-t border-gray-200 pt-3 dark:border-border">
             {!isCollapsed ? (
               <>

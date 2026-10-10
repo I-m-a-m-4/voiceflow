@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Eye, EyeOff, Loader2, ArrowRight } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import { isNativeApp, openExternal } from '@/lib/platform';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -62,6 +63,20 @@ export default function LoginPage() {
       });
       router.push('/dashboard');
     } catch (err: any) {
+      if (
+        isNativeApp() ||
+        err?.code === 'auth/internal-error' ||
+        err?.code === 'auth/operation-not-supported-in-this-environment' ||
+        err?.code === 'auth/unauthorized-domain'
+      ) {
+        console.warn('Native environment or internal-error detected for Google Auth. Launching external browser...');
+        toast({
+          title: 'Opening Browser for Google Sign-In',
+          description: 'Completing authentication in your default browser. You can also sign in with Email & Password.',
+        });
+        await openExternal('https://voiceflow-azure.vercel.app/login');
+        return;
+      }
       if (
         err?.code === 'auth/popup-blocked' ||
         err?.code === 'auth/popup-closed-by-user' ||

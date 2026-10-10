@@ -48,7 +48,7 @@ export default function AuthenticatedLayout({
   if (!user) return null; // Or a loading spinner
 
   return (
-    <div className={`flex h-screen w-full overflow-hidden font-jakarta text-foreground selection:bg-primary/20 ${
+    <div className={`flex h-full min-h-0 w-full overflow-hidden font-jakarta text-foreground selection:bg-primary/20 ${
       isRecording ? 'bg-transparent' : 'bg-background'
     }`}>
       {!isRecording && <AppSidebar />}

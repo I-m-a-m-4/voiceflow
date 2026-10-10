@@ -33,6 +33,7 @@ env:
   NEXT_PUBLIC_STORAGE_ENCRYPTION_KEY: ${{ secrets.NEXT_PUBLIC_STORAGE_ENCRYPTION_KEY }}
   NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY: ${{ secrets.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY }}
   NEXT_PUBLIC_FLUTTERWAVE_PUBLIC_KEY: ${{ secrets.NEXT_PUBLIC_FLUTTERWAVE_PUBLIC_KEY }}
+  NEXT_PUBLIC_BASE_URL: https://voiceflow-azure.vercel.app
 
 jobs:
   release:
@@ -177,6 +178,8 @@ jobs:
       - name: Android SDK setup
         id: setup-android
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
 
       - name: Setup NDK
         run: |

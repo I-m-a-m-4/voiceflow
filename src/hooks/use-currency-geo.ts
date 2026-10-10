@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { apiBase } from "@/lib/platform";
 
 export type CurrencyCode = "USD" | "NGN";
 
@@ -48,8 +49,14 @@ export function useCurrencyGeo(): GeoCurrencyInfo {
     } catch {}
 
     // Query /api/geo endpoint
-    fetch("/api/geo")
-      .then((res) => res.json())
+    const base = apiBase();
+    const geoUrl = base ? `${base}/api/geo` : "/api/geo";
+
+    fetch(geoUrl)
+      .then((res) => {
+        if (!res.ok) throw new Error("Geo fetch failed");
+        return res.json();
+      })
       .then((data) => {
         if (data.isNigeria || data.country === "NG") {
           setIsNigeria(true);

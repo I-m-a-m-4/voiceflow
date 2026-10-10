@@ -6,9 +6,11 @@ import { Input } from '@/components/ui/input';
 import { useTheme } from 'next-themes';
 import { useRouter } from 'next/navigation';
 import CommandMenu from '@/components/layout/command-menu';
+import { useAuth } from '@/firebase';
 
 export default function AppHeader() {
   const router = useRouter();
+  const auth = useAuth();
   const { theme, setTheme, resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   const [searchVal, setSearchVal] = useState('');
@@ -108,6 +110,38 @@ export default function AppHeader() {
                 {isDarkMode ? <Sun size={17} /> : <Moon size={17} />}
               </button>
             )}
+
+            {/* Top Bar User Profile Badge */}
+            <div 
+              onClick={() => {
+                if (typeof window !== 'undefined') {
+                  window.dispatchEvent(new CustomEvent('open-settings-modal', { detail: { tab: 'profile' } }));
+                }
+              }}
+              className="flex items-center gap-2.5 pl-1.5 pr-2.5 py-1 rounded-xl hover:bg-muted cursor-pointer transition-colors border border-border/40 hover:border-border"
+              title="Manage Account Settings"
+            >
+              {auth?.currentUser?.photoURL ? (
+                <img 
+                  src={auth.currentUser.photoURL} 
+                  alt={auth.currentUser.displayName || 'User'} 
+                  className="w-7 h-7 rounded-lg object-cover shadow-xs border border-border/50" 
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="w-7 h-7 rounded-lg bg-voiceflow-orange flex items-center justify-center text-white font-bold text-xs shadow-xs">
+                  {auth?.currentUser?.email?.charAt(0).toUpperCase() || 'U'}
+                </div>
+              )}
+              <div className="hidden md:flex flex-col text-left">
+                <span className="text-xs font-bold leading-tight text-foreground truncate max-w-[140px]">
+                  {auth?.currentUser?.displayName || 'User'}
+                </span>
+                <span className="text-[10px] leading-tight text-muted-foreground truncate max-w-[140px]">
+                  {auth?.currentUser?.email || 'user@example.com'}
+                </span>
+              </div>
+            </div>
           </div>
         </header>
       </div>

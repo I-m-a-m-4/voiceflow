@@ -25,6 +25,7 @@ import { captureScreenBase64 } from '@/lib/capture-screen';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { usePlanUsage } from '@/hooks/use-plan-usage';
+import { apiBase } from '@/lib/platform';
 
 interface MeetingWidgetProps {
   isRecording: boolean;
@@ -113,7 +114,10 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
 
       const customContext = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_custom_context') || '' : '';
 
-      const res = await fetch("/api/ask-screen", {
+      const base = apiBase();
+      const endpoint = base ? `${base}/api/ask-screen` : '/api/ask-screen';
+
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
@@ -123,6 +127,12 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
           customContext: customContext,
         })
       });
+      
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        const text = await res.text();
+        throw new Error(res.ok ? "Unexpected response from server" : `Server returned error (${res.status})`);
+      }
       
       const data = await res.json();
       if (!res.ok) {
@@ -159,7 +169,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
     <motion.div 
       drag
       dragMomentum={false}
-      className="fixed top-6 left-1/2 -translate-x-1/2 z-[2147483647] w-[92%] max-w-[620px] flex flex-col items-center pointer-events-none select-none font-dm-sans"
+      className="fixed top-12 sm:top-14 left-1/2 -translate-x-1/2 z-[2147483647] w-[92%] max-w-[620px] flex flex-col items-center pointer-events-none select-none font-dm-sans"
     >
       {/* Top Pill Controls - Draggable Handle */}
       <div className="bg-[#222225]/95 backdrop-blur-md border border-white/10 rounded-full flex items-center p-1.5 gap-2 shadow-2xl mb-4 pointer-events-auto transition-transform hover:scale-[1.01] cursor-grab active:cursor-grabbing">
@@ -259,13 +269,13 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
             </button>
           </div>
 
-          <div className={`mb-5 bg-white/5 p-4 rounded-xl border border-white/5 overflow-y-auto transition-all duration-300 ${isExpanded ? "h-[450px] max-h-[450px]" : "max-h-56"}`}>
+          <div className={`mb-5 bg-white/5 p-4 rounded-xl border border-white/5 overflow-y-auto transition-all duration-300 ${isExpanded ? "h-[450px] max-h-[450px]" : "max-h-56"} select-text cursor-text pointer-events-auto`}>
             {isQuerying ? (
               <div className="flex items-center gap-2 text-white/60 animate-pulse text-[14px]">
                 <Loader2 size={15} className="animate-spin text-voiceflow-orange" /> Voiceflow AI is thinking...
               </div>
             ) : (
-              <div className="text-white/95 text-[14px] leading-relaxed break-words">
+              <div className="text-white/95 text-[14px] leading-relaxed break-words select-text cursor-text pointer-events-auto selection:bg-voiceflow-orange selection:text-white">
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
                   components={{

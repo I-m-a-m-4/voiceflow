@@ -91,6 +91,7 @@ export function DesktopTitleBar() {
 
   return (
     <div 
+      id="desktop-titlebar"
       data-tauri-drag-region
       className="h-9 w-full bg-background border-b border-border/40 flex items-center justify-between select-none fixed top-0 left-0 z-[9999] no-print"
     >

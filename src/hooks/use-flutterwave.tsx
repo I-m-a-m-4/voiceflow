@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { useToast } from '@/hooks/use-toast';
+import { apiBase } from '@/lib/platform';
 
 declare global {
   interface Window {
@@ -176,7 +177,9 @@ export const useFlutterwave = () => {
         if (response.status === 'successful') {
           // Verify on server side
           try {
-            const verifyRes = await fetch('/api/flutterwave/verify', {
+            const base = apiBase();
+            const verifyUrl = base ? `${base}/api/flutterwave/verify` : '/api/flutterwave/verify';
+            const verifyRes = await fetch(verifyUrl, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ transaction_id: response.transaction_id }),

@@ -33,6 +33,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Progress } from '@/components/ui/progress';
+import { apiBase } from '@/lib/platform';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export default function VoiceflowAiInterviewDiagnostics() {
@@ -93,7 +94,9 @@ export default function VoiceflowAiInterviewDiagnostics() {
 
     const startTime = performance.now();
     try {
-      const res = await fetch('/api/ask-screen', {
+      const base = apiBase();
+      const endpoint = base ? `${base}/api/ask-screen` : '/api/ask-screen';
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

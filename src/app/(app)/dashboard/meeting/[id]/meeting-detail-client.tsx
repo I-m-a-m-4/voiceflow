@@ -8,6 +8,7 @@ import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { apiBase } from '@/lib/platform';
 
 export default function MeetingDetailClient({ id }: { id?: string }) {
   const router = useRouter();
@@ -88,7 +89,9 @@ export default function MeetingDetailClient({ id }: { id?: string }) {
     setQuestion("");
     setIsAsking(true);
     try {
-      const res = await fetch("/api/ask-screen", {
+      const base = apiBase();
+      const endpoint = base ? `${base}/api/ask-screen` : "/api/ask-screen";
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -96,6 +99,10 @@ export default function MeetingDetailClient({ id }: { id?: string }) {
           transcript: meeting?.transcript || meeting?.summary || "Meeting transcript unavailable.",
         }),
       });
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        throw new Error(res.ok ? "Unexpected response format" : `Server returned error (${res.status})`);
+      }
       const data = await res.json();
       const ans = typeof data.text === "string" 
         ? data.text 

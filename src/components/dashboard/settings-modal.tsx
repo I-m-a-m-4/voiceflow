@@ -303,11 +303,16 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
     }
   }, [auth?.currentUser?.displayName]);
 
-  // Load stealth preference on mount
+  // Load stealth and 2FA preferences on mount
   useEffect(() => {
     const saved = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_stealth_mode') : null;
     const isStealth = saved !== null ? saved === 'true' : true;
     setDetectable(isStealth);
+
+    const savedMfa = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_2fa_enabled') : null;
+    if (savedMfa !== null) {
+      setMfaEnabled(savedMfa === 'true');
+    }
   }, []);
 
   const handleDetectableChange = async (checked: boolean) => {
@@ -1040,10 +1045,24 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
                       <div className="text-sm font-bold text-gray-900 dark:text-white">Two-Factor Authentication</div>
                       <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Extra layer of security for logins.</div>
                     </div>
-                    <Switch checked={mfaEnabled} onCheckedChange={(val) => {
-                      setMfaEnabled(val);
-                      toast({ title: val ? "2FA Enabled" : "2FA Disabled", description: "Security preference saved." });
-                    }} className="data-[state=checked]:bg-voiceflow-orange" />
+                    <Switch 
+                      checked={mfaEnabled} 
+                      onCheckedChange={(val) => {
+                        setMfaEnabled(val);
+                        if (typeof window !== 'undefined') {
+                          localStorage.setItem('voiceflow_2fa_enabled', String(val));
+                        }
+                        if (auth?.currentUser?.uid) {
+                          const db = getFirestore();
+                          updateDoc(doc(db, "users", auth.currentUser.uid), { mfaEnabled: val }).catch(console.warn);
+                        }
+                        toast({ 
+                          title: val ? "2FA Security Enabled" : "2FA Security Disabled", 
+                          description: val ? "Two-Factor verification preference activated." : "Two-Factor authentication preference deactivated." 
+                        });
+                      }} 
+                      className="data-[state=checked]:bg-voiceflow-orange" 
+                    />
                   </div>
                   <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-[#1A1A1A] rounded-xl border border-gray-200 dark:border-gray-800">
                     <div>

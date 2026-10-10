@@ -10,6 +10,7 @@ import {
   addDoc, doc, setDoc, updateDoc, serverTimestamp, getDocs, where 
 } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
+import { apiBase } from "@/lib/platform";
 
 interface SupportChatWidgetProps {
   user: any;
@@ -136,8 +137,9 @@ export function SupportChatWidget({ user }: SupportChatWidgetProps) {
     try {
       // Try /api/upload
       const formData = new FormData();
-      formData.append("file", file);
-      const res = await fetch("/api/upload", { method: "POST", body: formData });
+      const base = apiBase();
+      const uploadUrl = base ? `${base}/api/upload` : "/api/upload";
+      const res = await fetch(uploadUrl, { method: "POST", body: formData });
       if (res.ok) {
         const data = await res.json();
         if (data.url) {

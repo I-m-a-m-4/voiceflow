@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useUser } from "@/firebase/provider";
 import { saveMeeting } from "@/firebase/meetings";
+import { apiBase } from "@/lib/platform";
 
 const SILENCE_THRESHOLD = 5; // Very low volume threshold (0-255 scale)
 const SILENCE_DURATION = 2000; // 2 seconds of silence before pausing
@@ -27,10 +28,22 @@ export function useAudioRecorder() {
 
   const startRecording = useCallback(async (captureSystemAudio = false) => {
     try {
-      // 1. Get Microphone Audio
-      const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      micStreamRef.current = micStream;
-      let finalStream = micStream;
+      // 1. Get Microphone Audio (reuse healthy stream if already open to prevent permission prompts)
+      let micStream = micStreamRef.current;
+      const isStreamActive = micStream && micStream.getAudioTracks().some(track => track.readyState === 'live');
+      
+      if (!isStreamActive) {
+        micStream = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          } 
+        });
+        micStreamRef.current = micStream;
+      }
+
+      let finalStream = micStream!;
 
       // 2. Combine with System Audio (if user explicitly requested and supported)
       if (captureSystemAudio && navigator.mediaDevices?.getDisplayMedia) {
@@ -44,7 +57,7 @@ export function useAudioRecorder() {
           const audioContext = new AudioContext();
           const dest = audioContext.createMediaStreamDestination();
           
-          const micSource = audioContext.createMediaStreamSource(micStream);
+          const micSource = audioContext.createMediaStreamSource(micStream!);
           micSource.connect(dest);
 
           // Check if user actually shared audio
@@ -222,22 +235,10 @@ export function useAudioRecorder() {
       audioCtxRef.current = null;
     }
     
-    // Stop all microphone tracks
-    if (micStreamRef.current) {
-      micStreamRef.current.getTracks().forEach(track => track.stop());
-      micStreamRef.current = null;
-    }
-
-    // Stop all system audio display stream tracks
+    // Stop display stream tracks
     if (displayStreamRef.current) {
       displayStreamRef.current.getTracks().forEach(track => track.stop());
       displayStreamRef.current = null;
-    }
-
-    // Stop all combined tracks
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
     }
 
     setIsRecording(false);
@@ -245,10 +246,28 @@ export function useAudioRecorder() {
   }, []);
 
   useEffect(() => {
+    // Pre-authorize audio permission once on mount so starting Voiceflow is automatic and never prompts repeatedly
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
+      navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        }
+      }).then((stream) => {
+        micStreamRef.current = stream;
+      }).catch((err) => {
+        console.info("Audio auto-access warmup:", err);
+      });
+    }
+
     return () => {
-      stopRecording();
+      if (micStreamRef.current) {
+        micStreamRef.current.getTracks().forEach(track => track.stop());
+        micStreamRef.current = null;
+      }
     };
-  }, [stopRecording]);
+  }, []);
 
   const processAudio = async (blob: Blob, type: "dictation" | "meeting") => {
     setIsProcessing(true);
@@ -256,8 +275,12 @@ export function useAudioRecorder() {
       const formData = new FormData();
       formData.append("file", blob, "audio.webm");
 
+      const base = apiBase();
+      const transcribeUrl = base ? `${base}/api/transcribe` : "/api/transcribe";
+      const summarizeUrl = base ? `${base}/api/summarize` : "/api/summarize";
+
       // 1. Transcribe
-      const transcribeRes = await fetch("/api/transcribe", {
+      const transcribeRes = await fetch(transcribeUrl, {
         method: "POST",
         body: formData,
       });
@@ -267,7 +290,7 @@ export function useAudioRecorder() {
 
       // 2. Summarize / Clean up with user's custom context if provided
       const customContext = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_custom_context') || '' : '';
-      const summarizeRes = await fetch("/api/summarize", {
+      const summarizeRes = await fetch(summarizeUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 

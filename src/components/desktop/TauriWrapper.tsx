@@ -71,20 +71,33 @@ export function TauriLayoutWrapper({ children }: { children: React.ReactNode }) 
     }
   }, [isTauri, (business?.settings as any)?.screenShareProtectionEnabled]);
 
+  const [isRecording, setIsRecording] = useState(false);
+
+  useEffect(() => {
+    const handleRecordState = (e: any) => {
+      setIsRecording(Boolean(e.detail?.isRecording));
+    };
+    window.addEventListener('voiceflow-record-state', handleRecordState);
+    return () => window.removeEventListener('voiceflow-record-state', handleRecordState);
+  }, []);
+
   return (
     <div
       className={cn(
         "flex flex-col",
-        darkTopInset ? "bg-black text-white" : "bg-background text-foreground",
+        isRecording 
+          ? "bg-transparent text-foreground pointer-events-none" 
+          : (darkTopInset ? "bg-black text-white" : "bg-background text-foreground"),
         isTauri ? "h-screen overflow-hidden" : "min-h-screen"
       )}
-      style={{ '--tauri-title-height': isTauri ? '2.25rem' : '0px' } as React.CSSProperties}
+      style={{ '--tauri-title-height': (isTauri && !isRecording) ? '2.25rem' : '0px' } as React.CSSProperties}
     >
       {/* Spacer for Tauri TitleBar (h-9 = 2.25rem) */}
-      {isTauri && <div className="h-9 w-full shrink-0" />}
+      {isTauri && !isRecording && <div className="h-9 w-full shrink-0" />}
       <div className={cn(
         "flex-1 flex flex-col relative h-full",
-        isTauri && "min-h-0"
+        isTauri && "min-h-0",
+        isRecording && "bg-transparent"
       )}>
         {children}
       </div>

@@ -955,5 +955,15 @@ a, button, select, input, [role="button"], .clickable {
   box-shadow: inset 1.899px 1.77px 8.174px 0 rgba(255, 255, 255, 0.13), 0 20px 40px -15px rgba(0, 0, 0, 0.05);
 }
 
+/* Ensure desktop custom titlebar is fully hidden when recording so it never overlaps the widget */
+body.recording-active #desktop-titlebar,
+html.recording-active #desktop-titlebar,
+.recording-active #desktop-titlebar {
+  display: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
+
 
 
