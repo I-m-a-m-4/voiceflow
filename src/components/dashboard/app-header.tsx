@@ -45,7 +45,10 @@ export default function AppHeader() {
 
   return (
     <>
-      <div className="flex flex-col border-b border-border bg-background/95 backdrop-blur z-20">
+      <div 
+        className="sticky top-0 z-30 shrink-0 flex flex-col border-b border-border bg-background/95 backdrop-blur-md"
+        style={{ top: 'var(--tauri-title-height, 0px)' }}
+      >
         <header className="flex items-center justify-between h-14 px-3 sm:px-4 gap-2 sm:gap-4">
           
           {/* Left: Sidebar Collapse/Expand Toggle Button */}
