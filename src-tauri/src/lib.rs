@@ -215,7 +215,6 @@ pub fn run() {
                 "CommandOrControl+Shift+Down"
             ];
             
-            let _ = app.app_handle().plugin(tauri_plugin_global_shortcut::Builder::new().build());
             for s in shortcuts {
                 if let Ok(shortcut) = Shortcut::from_str(s) {
                     if let Err(e) = app.app_handle().global_shortcut().register(shortcut) {
