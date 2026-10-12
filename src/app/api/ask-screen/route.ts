@@ -56,37 +56,89 @@ export async function POST(req: NextRequest) {
         if (response.ok) {
           const data = await response.json();
           const answer = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (answer) {
+          if (answer && answer.trim()) {
             return NextResponse.json({ text: answer });
           }
         }
       } catch (geminiErr: any) {
-        console.warn("Gemini vision call failed or timed out, falling back to Groq:", geminiErr?.message || geminiErr);
+        console.warn("Gemini vision call failed or timed out, trying OpenRouter / Groq:", geminiErr?.message || geminiErr);
       }
     }
 
-    // 2. Fallback to Groq API (which is configured in environment)
-    if (!process.env.GROQ_API_KEY) {
-      return NextResponse.json({ error: "No API key configured for AI assistant." }, { status: 500 });
+    const openRouterKey = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
+    const openRouterBaseUrl = (process.env.OPENAI_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/+$/, '');
+    const openRouterModel = process.env.OPENAI_MODEL || 'openrouter/free';
+
+    // 2. If OpenRouter is available and imageBase64 is provided, process via OpenRouter Vision
+    if (openRouterKey && imageBase64) {
+      try {
+        const imageUrl = imageBase64.startsWith("data:") ? imageBase64 : `data:image/jpeg;base64,${imageBase64}`;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+        const visionModels = [
+          openRouterModel,
+          "google/gemma-4-26b-a4b-it:free",
+          "meta-llama/llama-3.2-11b-vision-instruct:free",
+          "openrouter/auto"
+        ];
+
+        for (const model of visionModels) {
+          try {
+            const orRes = await fetch(`${openRouterBaseUrl}/chat/completions`, {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${openRouterKey}`,
+                "HTTP-Referer": "https://voiceflow.space",
+                "X-Title": "Voiceflow Co-Pilot",
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                model: model,
+                messages: [
+                  {
+                    role: "system",
+                    content: "You are an articulate, lightning-fast professional meeting and interview co-pilot. When provided an image of a user's screen (e.g. code problem, slides, document, question, or diagram), analyze the visual contents thoroughly and deliver the exact solution, answer, or smart speaking points requested."
+                  },
+                  {
+                    role: "user",
+                    content: [
+                      {
+                        type: "text",
+                        text: `${prompt}\n\nContext transcript: ${transcriptContext}${customContextSnippet}`
+                      },
+                      {
+                        type: "image_url",
+                        image_url: { url: imageUrl }
+                      }
+                    ]
+                  }
+                ],
+                temperature: 0.3,
+                max_tokens: 2048,
+              }),
+              signal: controller.signal
+            });
+
+            if (orRes.ok) {
+              const orData = await orRes.json();
+              const text = orData.choices?.[0]?.message?.content;
+              if (text && text.trim()) {
+                clearTimeout(timeoutId);
+                return NextResponse.json({ text });
+              }
+            }
+          } catch (mErr) {
+            // try next model
+          }
+        }
+        clearTimeout(timeoutId);
+      } catch (orErr: any) {
+        console.warn("OpenRouter vision call failed, falling back to text models:", orErr?.message || orErr);
+      }
     }
 
-    // Use a 15-second per-request timeout with 1 retry so fallback is fast and responsive
-    const groq = new Groq({ 
-      apiKey: process.env.GROQ_API_KEY,
-      timeout: 15000,
-      maxRetries: 1,
-    });
-    
-    // Official high-speed Groq models currently supported on the platform
-    const modelsToTry = [
-      "qwen/qwen3.8-27b",
-      "openai/gpt-oss-20b",
-      "openai/gpt-oss-120b"
-    ];
-
-    let completion: any = null;
-    let lastError: any = null;
-
+    // 3. Fallback to OpenRouter text or Groq API
     const fullPrompt = `You are an ultra-intelligent, real-time live meeting, job interview, and professional call co-pilot.
 SECURITY & INTEGRITY DIRECTIVES:
 - Maintain strict professionalism, safety, and confidentiality at all times.
@@ -103,36 +155,77 @@ GUIDELINES:
 - If the request is for what to say in the meeting (e.g. "What should I say next?"), provide a confident, articulate answer they can immediately say out loud.
 - If transcript context is available, ground your answer in what was discussed. If transcript is empty or irrelevant, deliver the strongest, most comprehensive answer to their request.`;
 
-    for (const model of modelsToTry) {
+    // Try OpenRouter text first if key exists
+    if (openRouterKey) {
       try {
-        const candidate = await groq.chat.completions.create({
-          messages: [
-            { role: "system", content: "You are an articulate, lightning-fast professional meeting and interview co-pilot." },
-            { role: "user", content: fullPrompt }
-          ],
-          model: model,
-          temperature: 0.3,
-          max_tokens: 2048,
+        const orRes = await fetch(`${openRouterBaseUrl}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${openRouterKey}`,
+            "HTTP-Referer": "https://voiceflow.space",
+            "X-Title": "Voiceflow Co-Pilot",
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: openRouterModel,
+            messages: [
+              { role: "system", content: "You are an articulate, lightning-fast professional meeting and interview co-pilot." },
+              { role: "user", content: fullPrompt }
+            ],
+            temperature: 0.3,
+            max_tokens: 2048,
+          })
         });
 
-        const textOutput = candidate?.choices?.[0]?.message?.content || "";
-        if (textOutput.trim()) {
-          completion = candidate;
-          break;
+        if (orRes.ok) {
+          const orData = await orRes.json();
+          const answer = orData.choices?.[0]?.message?.content;
+          if (answer && answer.trim()) {
+            return NextResponse.json({ text: answer });
+          }
         }
-      } catch (err: any) {
-        console.warn(`Groq model ${model} failed:`, err?.message || err);
-        lastError = err;
+      } catch (orTextErr: any) {
+        console.warn("OpenRouter text call failed, checking Groq:", orTextErr?.message || orTextErr);
       }
     }
 
-    if (!completion) {
-      const errMsg = lastError?.message || (typeof lastError === 'object' ? JSON.stringify(lastError) : "Failed to generate AI response from Groq.");
-      throw new Error(errMsg);
+    // 4. Try Groq API
+    if (process.env.GROQ_API_KEY) {
+      const groq = new Groq({ 
+        apiKey: process.env.GROQ_API_KEY,
+        timeout: 15000,
+        maxRetries: 1,
+      });
+      
+      const modelsToTry = [
+        "qwen/qwen3.8-27b",
+        "openai/gpt-oss-20b",
+        "openai/gpt-oss-120b"
+      ];
+
+      for (const model of modelsToTry) {
+        try {
+          const candidate = await groq.chat.completions.create({
+            messages: [
+              { role: "system", content: "You are an articulate, lightning-fast professional meeting and interview co-pilot." },
+              { role: "user", content: fullPrompt }
+            ],
+            model: model,
+            temperature: 0.3,
+            max_tokens: 2048,
+          });
+
+          const textOutput = candidate?.choices?.[0]?.message?.content || "";
+          if (textOutput.trim()) {
+            return NextResponse.json({ text: textOutput });
+          }
+        } catch (err: any) {
+          console.warn(`Groq model ${model} failed:`, err?.message || err);
+        }
+      }
     }
 
-    const answer = completion.choices[0]?.message?.content || "No response generated.";
-    return NextResponse.json({ text: answer });
+    return NextResponse.json({ text: "No response generated. Please check your AI API key and connection." });
 
   } catch (error: any) {
     console.error("Error in ask-screen route:", error);

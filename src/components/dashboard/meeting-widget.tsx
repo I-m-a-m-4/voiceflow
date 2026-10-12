@@ -22,7 +22,8 @@ import {
   Lock,
   User,
   Bot,
-  Trash2
+  Trash2,
+  Camera
 } from 'lucide-react';
 import { captureScreenBase64 } from '@/lib/capture-screen';
 import ReactMarkdown from 'react-markdown';
@@ -202,38 +203,88 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
         console.warn("Server ask-screen endpoint failed, checking client Groq fallback:", remoteErr);
       }
 
-      // If remote server has no API key or failed, execute fast client-side Groq call
+      // If remote server has no API key or failed, execute fast client-side OpenRouter or Groq call
       if (!cleanAnswer) {
-        const groqApiKey = process.env.NEXT_PUBLIC_GROQ_API_KEY || process.env.GROQ_API_KEY;
-        if (groqApiKey) {
-          const transcriptSnippet = (transcript || "").slice(-4000) || "None yet";
-          const fullPrompt = `You are an ultra-intelligent live meeting and interview co-pilot.
+        const openRouterKey = process.env.NEXT_PUBLIC_OPENROUTER_API_KEY;
+        const transcriptSnippet = (transcript || "").slice(-4000) || "None yet";
+        const fullPrompt = `You are an ultra-intelligent live meeting and interview co-pilot.
 User Request / Question: "${promptToUse}"
 Current Meeting Transcript Context: "${transcriptSnippet}"
 ${customContext ? `User Role / Custom Instructions:\n"${customContext}"\nTailor all answers directly to this profile.` : ""}
 
 Fulfill the user's request thoroughly and directly. If they request a specific format (e.g. bullet points, code, list), follow that exact structure.`;
 
-          const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${groqApiKey}`,
-            },
-            body: JSON.stringify({
-              model: "qwen/qwen3.8-27b",
-              messages: [
-                { role: "system", content: "You are an articulate, lightning-fast live meeting and interview co-pilot." },
-                { role: "user", content: fullPrompt }
-              ],
-              temperature: 0.3,
-              max_tokens: 2048,
-            })
-          });
+        if (openRouterKey) {
+          try {
+            const messagesPayload: any[] = [
+              { role: "system", content: "You are an articulate, lightning-fast live meeting and interview co-pilot. When provided an image of a user's screen, analyze it carefully and directly give the exact solution, answer, or smart speaking points." }
+            ];
 
-          if (groqRes.ok) {
-            const groqData = await groqRes.json();
-            cleanAnswer = groqData.choices?.[0]?.message?.content || "";
+            if (base64Image) {
+              const imgUrl = base64Image.startsWith("data:") ? base64Image : `data:image/jpeg;base64,${base64Image}`;
+              messagesPayload.push({
+                role: "user",
+                content: [
+                  { type: "text", text: fullPrompt },
+                  { type: "image_url", image_url: { url: imgUrl } }
+                ]
+              });
+            } else {
+              messagesPayload.push({
+                role: "user",
+                content: fullPrompt
+              });
+            }
+
+            const orRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${openRouterKey}`,
+                "HTTP-Referer": "https://voiceflow.space",
+                "X-Title": "Voiceflow Co-Pilot"
+              },
+              body: JSON.stringify({
+                model: "openrouter/free",
+                messages: messagesPayload,
+                temperature: 0.3,
+                max_tokens: 2048,
+              })
+            });
+
+            if (orRes.ok) {
+              const orData = await orRes.json();
+              cleanAnswer = orData.choices?.[0]?.message?.content || "";
+            }
+          } catch (e) {
+            console.warn("Client OpenRouter fallback skipped:", e);
+          }
+        }
+
+        if (!cleanAnswer) {
+          const groqApiKey = process.env.NEXT_PUBLIC_GROQ_API_KEY || process.env.GROQ_API_KEY;
+          if (groqApiKey) {
+            const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${groqApiKey}`,
+              },
+              body: JSON.stringify({
+                model: "qwen/qwen3.8-27b",
+                messages: [
+                  { role: "system", content: "You are an articulate, lightning-fast live meeting and interview co-pilot." },
+                  { role: "user", content: fullPrompt }
+                ],
+                temperature: 0.3,
+                max_tokens: 2048,
+              })
+            });
+
+            if (groqRes.ok) {
+              const groqData = await groqRes.json();
+              cleanAnswer = groqData.choices?.[0]?.message?.content || "";
+            }
           }
         }
       }
@@ -509,6 +560,15 @@ Fulfill the user's request thoroughly and directly. If they request a specific f
           {/* Prompt Pills */}
           <div className="flex flex-wrap items-center gap-2 mb-4 text-xs font-medium text-white/70">
             <button 
+              onClick={() => handleAskAI(query.trim() ? query : "Analyze what is on my screen right now and give me the exact answer, code, or speaking points.", true)}
+              disabled={isQuerying}
+              className="flex items-center gap-1.5 transition-all bg-gradient-to-r from-blue-600/30 to-indigo-600/30 hover:from-blue-600/50 hover:to-indigo-600/50 text-blue-200 hover:text-white px-3 py-1.5 rounded-lg border border-blue-500/40 disabled:opacity-50 font-semibold shadow-sm"
+              title="Take a screenshot of your screen and analyze with AI"
+            >
+              <Camera size={13} className="text-blue-300" />
+              Analyze This
+            </button>
+            <button 
               onClick={() => handleAskAI("Give me a smart real-time answer suggestion for the current meeting point.")}
               disabled={isQuerying}
               className="flex items-center gap-1.5 hover:text-white transition-colors bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/5 disabled:opacity-50"
@@ -545,12 +605,12 @@ Fulfill the user's request thoroughly and directly. If they request a specific f
           {/* Input Box */}
           <div className="relative flex items-center bg-[#252528] rounded-xl border border-white/10 p-1.5">
             <button 
-              onClick={() => handleAskAI("Analyze my current screen and tell me key highlights.", true)}
+              onClick={() => handleAskAI(query.trim() ? query : "Analyze what is on my screen and tell me key highlights and answers.", true)}
               disabled={isQuerying}
               className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-colors border border-white/5 disabled:opacity-50" 
-              title="Capture & Analyze Screen (Optional)"
+              title="Capture & Analyze Screen (Sends your question with a screenshot)"
             >
-              <Sparkles size={12} className="text-blue-400" />
+              <Camera size={12} className="text-blue-400" />
               Screen
             </button>
 
