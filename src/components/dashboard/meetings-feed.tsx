@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { ChevronDown, MessageSquare, Play, Video, Share, Settings2, FileText, Loader2, Calendar, RefreshCw, Search } from 'lucide-react';
+import { ChevronDown, MessageSquare, Play, Video, Share, Settings2, FileText, Loader2, Calendar, RefreshCw, Search, Trash2 } from 'lucide-react';
 import { useAuth } from '@/firebase';
 import { getUserMeetings, MeetingData } from '@/firebase/meetings';
 
@@ -12,6 +12,8 @@ export default function MeetingsFeed() {
   
   const [meetings, setMeetings] = useState<(MeetingData & { id: string })[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [meetingToDelete, setMeetingToDelete] = useState<(MeetingData & { id: string }) | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const fetchMeetings = async (silent = false) => {
     if (!auth?.currentUser?.uid) return;
@@ -51,6 +53,21 @@ export default function MeetingsFeed() {
       window.removeEventListener('voiceflow-search-query', handleSearch);
     };
   }, [auth?.currentUser?.uid]);
+
+  const handleConfirmDelete = async () => {
+    if (!meetingToDelete || isDeleting) return;
+    setIsDeleting(true);
+    try {
+      const { deleteMeeting } = await import('@/firebase/meetings');
+      await deleteMeeting(meetingToDelete.id, auth?.currentUser?.uid);
+      setMeetings((prev) => prev.filter((m) => m.id !== meetingToDelete.id));
+      setMeetingToDelete(null);
+    } catch (err) {
+      console.error("Failed to delete meeting:", err);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const formatDate = (timestamp: any) => {
     if (!timestamp) return 'Just now';
@@ -136,6 +153,18 @@ export default function MeetingsFeed() {
                         {formatDate(meeting.createdAt)} • {meeting.type === 'dictation' ? 'Dictation' : 'Meeting'}
                       </div>
                     </div>
+
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setMeetingToDelete(meeting);
+                      }}
+                      className="p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
+                      title="Delete meeting"
+                    >
+                      <Trash2 size={15} />
+                    </button>
                   </div>
                   
                   <h2 className="text-xl font-bold text-card-foreground mb-3 group-hover:text-voiceflow-orange transition-colors font-nexa">
@@ -160,6 +189,45 @@ export default function MeetingsFeed() {
           </div>
         )}
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {meetingToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-card border border-border rounded-2xl w-full max-w-sm p-6 shadow-2xl relative flex flex-col gap-4 text-foreground font-dm-sans animate-scale-in">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center shrink-0">
+                <Trash2 size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold font-nexa text-foreground">Delete Meeting</h3>
+                <p className="text-xs text-muted-foreground">Permanently remove this session?</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Are you sure you want to delete this recorded session? This action cannot be undone.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setMeetingToDelete(null)}
+                disabled={isDeleting}
+                className="px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground border border-border bg-card hover:bg-muted rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                disabled={isDeleting}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-red-500 hover:bg-red-600 rounded-lg transition-colors shadow-sm disabled:opacity-50"
+              >
+                {isDeleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                {isDeleting ? "Deleting..." : "Delete Session"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

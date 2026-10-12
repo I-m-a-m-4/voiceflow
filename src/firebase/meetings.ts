@@ -35,11 +35,26 @@ export async function getUserMeetings(userId: string) {
   }));
 }
 
-export async function deleteMeeting(meetingId: string) {
+export async function deleteMeeting(meetingId: string, userId?: string) {
   if (!firestore) throw new Error("Firestore not initialized");
   
-  const meetingRef = doc(firestore, 'meetings', meetingId);
-  await deleteDoc(meetingRef);
+  // 1. Delete from root 'meetings'
+  try {
+    const meetingRef = doc(firestore, 'meetings', meetingId);
+    await deleteDoc(meetingRef);
+  } catch (err) {
+    console.warn("Could not delete from root meetings collection:", err);
+  }
+
+  // 2. Delete from user subcollection if userId is provided
+  if (userId) {
+    try {
+      const userMeetingRef = doc(firestore, `users/${userId}/meetings/${meetingId}`);
+      await deleteDoc(userMeetingRef);
+    } catch (err) {
+      console.warn("Could not delete from user meetings subcollection:", err);
+    }
+  }
 }
 
 export interface MeetingCheckInData {

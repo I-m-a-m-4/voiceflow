@@ -54,6 +54,11 @@ fn set_detectable(window: tauri::Window, detectable: bool) -> Result<(), String>
     Ok(())
 }
 
+#[tauri::command]
+fn set_ignore_cursor_events(window: tauri::Window, ignore: bool) -> Result<(), String> {
+    window.set_ignore_cursor_events(ignore).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   #[cfg(target_os = "android")]
@@ -71,6 +76,7 @@ pub fn run() {
         calculate_royalty, 
         validate_subscription,
         set_detectable,
+        set_ignore_cursor_events,
         win_grid::list_desktop_windows,
         win_grid::read_desktop_grid
     ])

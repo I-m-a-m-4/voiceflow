@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { X, Minus, Square, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AppConfig } from '@/lib/config';
@@ -8,6 +9,7 @@ import { CachedImage } from '@/components/shared/cached-image';
 import { usePOS } from '@/context/pos-context';
 
 export function DesktopTitleBar() {
+  const pathname = usePathname();
   const { business } = usePOS();
   const [isTauri, setIsTauri] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
@@ -53,7 +55,7 @@ export function DesktopTitleBar() {
     return () => window.removeEventListener('voiceflow-record-state', handleRecordState);
   }, []);
 
-  if (!isTauri || isRecording) return null;
+  if (!isTauri || isRecording || pathname?.startsWith('/widget')) return null;
 
   const handleMinimize = async () => {
     if (!isTauri) return;
@@ -93,7 +95,7 @@ export function DesktopTitleBar() {
     <div 
       id="desktop-titlebar"
       data-tauri-drag-region
-      className="h-9 w-full bg-background border-b border-border/40 flex items-center justify-between select-none fixed top-0 left-0 z-[9999] no-print"
+      className="h-9 w-full bg-background border-b border-border/40 flex items-center justify-between select-none shrink-0 z-50 no-print"
     >
       <div className="flex items-center gap-2.5 px-4" data-tauri-drag-region>
          {/* Premium Logo Container */}

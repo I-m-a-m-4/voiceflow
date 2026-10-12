@@ -111,8 +111,22 @@ export default function LoginPage() {
       const userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
       const user = userCredential.user;
       
-      const userDoc = await getDoc(doc(db, 'users', user.uid));
-      const userName = userDoc.exists() ? userDoc.data()?.name : (formData.email.split('@')[0] || 'User');
+      const userDocRef = doc(db, 'users', user.uid);
+      const userDoc = await getDoc(userDocRef);
+      let userName = user.displayName || (formData.email.split('@')[0] || 'User');
+      
+      if (!userDoc.exists()) {
+        await setDoc(userDocRef, {
+          name: userName,
+          email: user.email,
+          createdAt: new Date().toISOString(),
+          role: 'admin',
+          isPro: false,
+          status: 'active'
+        }, { merge: true });
+      } else {
+        userName = userDoc.data()?.name || userName;
+      }
       
       localStorage.setItem('userEmail', formData.email.toLowerCase());
       localStorage.setItem('userName', userName);

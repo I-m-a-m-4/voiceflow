@@ -23,9 +23,12 @@
 
 /* Stealth Overlay Mode: Transparent window background when Voiceflow is actively recording */
 html.recording-active,
+html.recording-active body,
 body.recording-active,
 body.recording-active #__next,
-body.recording-active main {
+body.recording-active main,
+body.recording-active [data-tauri-drag-region]:not(#meeting-widget-root *),
+.recording-active {
   background-color: transparent !important;
   background: transparent !important;
 }

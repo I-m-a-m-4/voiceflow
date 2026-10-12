@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
       maxRetries: 1,
     });
 
-    const { text, type, customContext } = await req.json();
+    const { text, type, customContext, prompt } = await req.json();
 
     if (!text || typeof text !== 'string') {
       return NextResponse.json(
@@ -29,18 +29,37 @@ export async function POST(req: NextRequest) {
     }
 
     let systemPrompt = "You are a helpful assistant.";
-    if (type === "dictation") {
+    if (prompt && typeof prompt === 'string' && prompt.trim()) {
+      systemPrompt = prompt.trim();
+    } else if (type === "dictation") {
       systemPrompt = "You are an AI that cleans up dictation transcripts. Remove filler words (ums, ahs), fix stuttering, and ensure proper punctuation and formatting. Output ONLY the cleaned text, without any conversational preamble or markdown code blocks.";
     } else if (type === "meeting") {
-      systemPrompt = "You are an AI assistant specialized in structuring meeting transcripts. Your task is to extract:\n1. Executive Summary (3-5 bullets)\n2. Action Items (with owners if specified)\n3. Key Decisions.\nFormat the output in clean Markdown.";
+      systemPrompt = `You are an AI assistant specialized in structuring meeting and interview transcripts.
+Extract and format with clean Markdown headers and bullet points:
+
+## Action Items
+• [Person / Role]: [Specific action item, next step, or follow-up]
+
+## Interview Background
+• [Topic or key background point discussed]
+• [Specific technologies, algorithms, or points mentioned]
+
+## Key Takeaways
+• [Main conclusions or observations]
+
+Do NOT include any conversational preamble or markdown code fence blocks. Use clean bullet points.`;
     }
 
     if (customContext && typeof customContext === 'string' && customContext.trim()) {
       systemPrompt += `\n\nUser Profile & Custom Context:\n"${customContext.trim()}"\nTailor the summary and action items to specifically address the priorities, role, and industry mentioned above.`;
     }
 
-    // Official lightning-fast Groq models: llama-3.1-8b-instant consumes minimal quota & sub-300ms latency
-    const modelsToTry = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "mixtral-8x7b-32768"];
+    // Official lightning-fast Groq models currently supported on the platform
+    const modelsToTry = [
+      "openai/gpt-oss-20b",
+      "qwen/qwen3.8-27b",
+      "openai/gpt-oss-120b"
+    ];
     let completion = null;
     let lastError = null;
 

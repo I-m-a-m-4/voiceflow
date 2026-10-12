@@ -39,9 +39,22 @@ export function TauriLayoutWrapper({ children }: { children: React.ReactNode }) 
   const { business } = usePOS();
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
-      setIsTauri(true);
-    }
+    const checkTauri = async () => {
+      try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        if (getCurrentWindow()) {
+          const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+          if (!isMobile) {
+            setIsTauri(true);
+          }
+        }
+      } catch {
+        if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
+          setIsTauri(true);
+        }
+      }
+    };
+    checkTauri();
   }, []);
 
   useEffect(() => {
@@ -84,19 +97,14 @@ export function TauriLayoutWrapper({ children }: { children: React.ReactNode }) 
   return (
     <div
       className={cn(
-        "flex flex-col",
+        "flex flex-col h-screen max-h-screen w-full overflow-hidden",
         isRecording 
           ? "bg-transparent text-foreground pointer-events-none" 
-          : (darkTopInset ? "bg-black text-white" : "bg-background text-foreground"),
-        isTauri ? "h-screen overflow-hidden" : "min-h-screen"
+          : (darkTopInset ? "bg-black text-white" : "bg-background text-foreground")
       )}
-      style={{ '--tauri-title-height': (isTauri && !isRecording) ? '2.25rem' : '0px' } as React.CSSProperties}
     >
-      {/* Spacer for Tauri TitleBar (h-9 = 2.25rem) */}
-      {isTauri && !isRecording && <div className="h-9 w-full shrink-0" />}
       <div className={cn(
-        "flex-1 flex flex-col relative h-full",
-        isTauri && "min-h-0",
+        "flex-1 flex flex-col relative h-full min-h-0 overflow-hidden",
         isRecording && "bg-transparent"
       )}>
         {children}
