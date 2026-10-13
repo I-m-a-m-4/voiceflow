@@ -17,6 +17,17 @@ export function DesktopLauncher() {
       const updateBackground = () => {
         const root = document.documentElement;
         const body = document.body;
+
+        // If recording mode is active, background MUST be 100% transparent for floating overlay
+        if (
+          root.classList.contains('tauri-recording-mode') || 
+          body.classList.contains('tauri-recording-mode')
+        ) {
+          body.style.backgroundColor = 'transparent';
+          root.style.backgroundColor = 'transparent';
+          return;
+        }
+
         // Get the actual computed HSL background from CSS variables
         const bgValue = getComputedStyle(root).getPropertyValue('--background').trim();
         
@@ -24,16 +35,23 @@ export function DesktopLauncher() {
           const hslColor = `hsl(${bgValue})`;
           body.style.backgroundColor = hslColor;
           root.style.backgroundColor = hslColor;
-          
-          // Debugging log for Tauri console
-          console.log(`[Voiceflow Desktop] Syncing background: ${hslColor} (Theme: ${root.classList.contains('dark') ? 'Dark' : 'Light'})`);
         }
       };
 
       updateBackground();
 
+      const handleRecordState = (e: any) => {
+        if (e.detail?.isRecording) {
+          document.body.style.backgroundColor = 'transparent';
+          document.documentElement.style.backgroundColor = 'transparent';
+        } else {
+          updateBackground();
+        }
+      };
+      window.addEventListener('voiceflow-record-state', handleRecordState);
+
       // Observe BOTH class changes (theme) and style changes
-      const observer = new MutationObserver((mutations) => {
+      const observer = new MutationObserver(() => {
         updateBackground();
       });
       
@@ -43,6 +61,7 @@ export function DesktopLauncher() {
       });
 
       return () => {
+        window.removeEventListener('voiceflow-record-state', handleRecordState);
         observer.disconnect();
       };
     }

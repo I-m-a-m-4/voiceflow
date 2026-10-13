@@ -949,10 +949,13 @@ a, button, select, input, [role="button"], .clickable {
 
 html.tauri-recording-mode,
 body.tauri-recording-mode,
-html.tauri-recording-mode body {
+html.tauri-recording-mode body,
+html.tauri-recording-mode #__next,
+html.tauri-recording-mode main,
+html.tauri-recording-mode #meeting-widget-root {
   background: transparent !important;
   background-color: transparent !important;
-  overflow: hidden !important;
+  box-shadow: none !important;
 }
 
 

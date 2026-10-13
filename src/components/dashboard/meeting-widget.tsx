@@ -10,7 +10,6 @@ import {
   Wand2, 
   MessageSquare, 
   RotateCcw, 
-  MoreHorizontal, 
   Play, 
   Send, 
   Loader2, 
@@ -24,7 +23,9 @@ import {
   Bot,
   Trash2,
   Camera,
-  Minus
+  Minus,
+  X,
+  Mic
 } from 'lucide-react';
 import { captureScreenBase64 } from '@/lib/capture-screen';
 import ReactMarkdown from 'react-markdown';
@@ -51,6 +52,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
   const [isExpanded, setIsExpanded] = useState(false);
   const [query, setQuery] = useState("");
   const [isQuerying, setIsQuerying] = useState(false);
+  const [secondsElapsed, setSecondsElapsed] = useState(0);
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -65,6 +67,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
   const [isStealth, setIsStealth] = useState<boolean>(true);
   const [isTauri, setIsTauri] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const lastImageBase64Ref = useRef<string | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -84,22 +87,36 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
     checkTauri();
   }, []);
 
-  // Manage Tauri Floating Desktop Window Size & Position (Clueless by Roy Lee mode)
+  // Live session timer
+  useEffect(() => {
+    if (!isRecording) {
+      setSecondsElapsed(0);
+      return;
+    }
+    const interval = setInterval(() => {
+      setSecondsElapsed((s) => s + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isRecording]);
+
+  const formattedTimer = `${String(Math.floor(secondsElapsed / 60)).padStart(2, '0')}:${String(secondsElapsed % 60).padStart(2, '0')}`;
+
+  // Manage Tauri Floating Desktop Window Size & Position (HUD Overlay Mode)
   useEffect(() => {
     if (!isTauri || !isRecording) return;
 
     let isCancelled = false;
     const adjustWindow = async () => {
       try {
-        const { getCurrentWindow, LogicalSize, LogicalPosition, currentMonitor } = await import('@tauri-apps/api/window');
+        const { getCurrentWindow, LogicalSize } = await import('@tauri-apps/api/window');
         const win = getCurrentWindow();
         if (!win || isCancelled) return;
 
         await win.setAlwaysOnTop(true);
         await win.setSkipTaskbar(true);
 
-        const targetW = isExpanded ? 700 : 640;
-        const targetH = isHidden ? 70 : (isExpanded ? 640 : 540);
+        const targetW = 580;
+        const targetH = isHidden ? 58 : (isExpanded ? 640 : 490);
 
         await win.setSize(new LogicalSize(targetW, targetH));
       } catch (err) {
@@ -125,6 +142,14 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
       }
     }
     stopRecording();
+  };
+
+  const handleStartOver = () => {
+    setMessages([]);
+    lastImageBase64Ref.current = null;
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('voiceflow_widget_messages');
+    }
   };
 
   // Persist chat history across requests and re-renders
@@ -189,6 +214,27 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
     }
     await applyStealth(next);
   };
+
+  // Global hotkeys (Cmd/Ctrl + Enter: Ask screen, Cmd/Ctrl + R: Reset, Cmd/Ctrl + \: Show/Hide)
+  useEffect(() => {
+    const handleKeyDownGlobal = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        handleAskAI(query.trim() || "Analyze what is on my screen right now and give me the exact answer, code, or speaking points.", true);
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'r') {
+        e.preventDefault();
+        handleStartOver();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
+        e.preventDefault();
+        setIsHidden(prev => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDownGlobal);
+    return () => window.removeEventListener('keydown', handleKeyDownGlobal);
+  }, [query]);
   
   if (!mounted || !isRecording) return null;
 
@@ -203,18 +249,33 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
     const promptToUse = customPrompt || query;
     if (!promptToUse.trim() || isQuerying) return;
     
+    // Automatically make response card visible when asking
+    if (isHidden) setIsHidden(false);
+
     setIsQuerying(true);
     try {
       let base64Image: string | null = null;
       if (includeScreenCapture) {
         try {
           base64Image = await captureScreenBase64();
+          if (base64Image) {
+            lastImageBase64Ref.current = base64Image;
+          }
         } catch (e) {
           console.warn("Screen capture skipped, proceeding with transcript context:", e);
         }
       }
 
+      // If no fresh screenshot captured, re-use cached screenshot so follow-ups have full visual context
+      const effectiveImage = base64Image || lastImageBase64Ref.current || "";
+
       const customContext = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_custom_context') || '' : '';
+
+      // Lightweight conversation history (last 6 messages) for token economy and low latency
+      const historyPayload = messages.slice(-6).map(m => ({
+        role: m.sender === 'user' ? 'user' : 'assistant',
+        content: m.text
+      }));
 
       const base = apiBase();
       const endpoint = base ? `${base}/api/ask-screen` : '/api/ask-screen';
@@ -225,10 +286,11 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ 
-            imageBase64: base64Image || "", 
+            imageBase64: effectiveImage, 
             prompt: promptToUse,
             transcript: transcript || "",
             customContext: customContext,
+            history: historyPayload
           })
         });
         
@@ -248,50 +310,56 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
         !cleanAnswer || 
         cleanAnswer.includes("No response generated") || 
         cleanAnswer.includes("check your AI API key") ||
+        cleanAnswer.includes("User Safety: safe") ||
         cleanAnswer.trim() === ""
       ) {
         cleanAnswer = "";
       }
 
-      // If remote server returned empty/error, execute resilient client-side OpenRouter or Groq call
+      // Resilient client-side OpenRouter / Groq fallback
       if (!cleanAnswer) {
         const openRouterKey = process.env.NEXT_PUBLIC_OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY;
-        const transcriptSnippet = (transcript || "").slice(-4000) || "None yet";
-        const fullPrompt = `You are an ultra-intelligent live meeting and interview co-pilot.
-User Request / Question: "${promptToUse}"
-Current Meeting Transcript Context: "${transcriptSnippet}"
-${customContext ? `User Role / Custom Instructions:\n"${customContext}"\nTailor all answers directly to this profile.` : ""}
-
-Fulfill the user's request thoroughly and directly. If they request a specific format (e.g. bullet points, code, list), follow that exact structure.`;
+        const transcriptSnippet = (transcript || "").slice(-3000) || "None yet";
+        const systemPrompt = "You are an elite, ultra-fast meeting, exam, and interview co-pilot. When answering questions or analyzing screens: Direct Answer first, followed by concise Reasoning and Summary.";
 
         if (openRouterKey) {
           try {
             const messagesPayload: any[] = [
-              { role: "system", content: "You are an articulate, lightning-fast live meeting and interview co-pilot. Deliver precise, high-impact responses." }
+              { role: "system", content: systemPrompt },
+              ...historyPayload
             ];
 
-            if (base64Image) {
-              const imgUrl = base64Image.startsWith("data:") ? base64Image : `data:image/jpeg;base64,${base64Image}`;
+            if (effectiveImage) {
+              const imgUrl = effectiveImage.startsWith("data:") ? effectiveImage : `data:image/jpeg;base64,${effectiveImage}`;
               messagesPayload.push({
                 role: "user",
                 content: [
-                  { type: "text", text: fullPrompt },
+                  { type: "text", text: `${promptToUse}\n\nContext transcript: ${transcriptSnippet}` },
                   { type: "image_url", image_url: { url: imgUrl } }
                 ]
               });
             } else {
               messagesPayload.push({
                 role: "user",
-                content: fullPrompt
+                content: `${promptToUse}\n\nContext transcript: ${transcriptSnippet}`
               });
             }
 
-            const clientModels = [
-              "openrouter/free",
-              "meta-llama/llama-3.3-70b-instruct:free",
+            const clientVisionModels = [
+              "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+              "dots-studio/dots-3-note-preview:free",
               "google/gemma-4-26b-a4b-it:free",
+              "meta-llama/llama-3.2-11b-vision-instruct:free",
               "openrouter/auto"
             ];
+            const clientTextModels = [
+              "meta-llama/llama-3.3-70b-instruct:free",
+              "google/gemma-4-26b-a4b-it:free",
+              "qwen/qwen-2.5-72b-instruct:free",
+              "openrouter/free",
+              "openrouter/auto"
+            ];
+            const clientModels = effectiveImage ? clientVisionModels : clientTextModels;
 
             for (const model of clientModels) {
               try {
@@ -314,7 +382,7 @@ Fulfill the user's request thoroughly and directly. If they request a specific f
                 if (orRes.ok) {
                   const orData = await orRes.json();
                   const text = orData.choices?.[0]?.message?.content;
-                  if (text && text.trim()) {
+                  if (text && text.trim() && !text.includes("User Safety: safe")) {
                     cleanAnswer = text;
                     break;
                   }
@@ -349,7 +417,8 @@ Fulfill the user's request thoroughly and directly. If they request a specific f
                     model: gModel,
                     messages: [
                       { role: "system", content: "You are an articulate, lightning-fast live meeting and interview co-pilot." },
-                      { role: "user", content: fullPrompt }
+                      ...historyPayload,
+                      { role: "user", content: `${promptToUse}\n\nContext transcript: ${transcriptSnippet}` }
                     ],
                     temperature: 0.3,
                     max_tokens: 2048,
@@ -372,7 +441,7 @@ Fulfill the user's request thoroughly and directly. If they request a specific f
         }
 
         if (!cleanAnswer) {
-          cleanAnswer = "I'm listening and tracking your live meeting! Ask anything or click Assist/What should I say for instant guidance.";
+          cleanAnswer = "I'm listening and tracking your live screen and audio! Ask anything or click 'Analyze This' for instant guidance.";
         }
       }
 
@@ -391,7 +460,7 @@ Fulfill the user's request thoroughly and directly. If they request a specific f
       };
 
       setMessages((prev) => [...prev, userMsg, aiMsg]);
-      if (!customPrompt) setQuery(""); // Clear text input if user typed it
+      if (!customPrompt) setQuery("");
     } catch (err: any) {
       console.error("AI Error:", err);
       const displayErr = typeof err === 'string' 
@@ -422,11 +491,11 @@ Fulfill the user's request thoroughly and directly. If they request a specific f
       drag={!isTauri}
       dragMomentum={false}
       className={isTauri 
-        ? `w-full h-full flex flex-col items-center justify-start p-2 pointer-events-auto select-none font-dm-sans`
-        : `fixed top-12 sm:top-14 inset-x-0 mx-auto z-[2147483647] w-[92%] ${isExpanded ? "max-w-[700px]" : "max-w-[620px]"} flex flex-col items-center pointer-events-none select-none font-dm-sans`
+        ? `w-full h-full flex flex-col items-center justify-start p-1 pointer-events-none select-none font-dm-sans bg-transparent`
+        : `fixed top-3 inset-x-0 mx-auto z-[2147483647] w-[95%] max-w-[580px] flex flex-col items-center pointer-events-none select-none font-dm-sans`
       }
     >
-      {/* Top Pill Controls - Draggable Handle */}
+      {/* Floating Top Pill Bar - Matches Image 2 layout */}
       <div 
         data-tauri-drag-region
         onMouseDown={async (e) => {
@@ -438,48 +507,70 @@ Fulfill the user's request thoroughly and directly. If they request a specific f
             } catch {}
           }
         }}
-        className="bg-[#222225]/95 backdrop-blur-md border border-white/10 rounded-full flex items-center p-1.5 gap-2 shadow-2xl mb-3 pointer-events-auto transition-transform hover:scale-[1.01] cursor-grab active:cursor-grabbing"
+        className="bg-[#18181b]/95 backdrop-blur-xl border border-white/10 rounded-full flex items-center px-3 py-1.5 gap-2 shadow-2xl mb-2 pointer-events-auto transition-transform cursor-grab active:cursor-grabbing text-xs text-white"
       >
-        <div className="pl-2 pr-1 text-white/40 hover:text-white/80" title="Drag to reposition widget">
-          <GripHorizontal size={16} />
+        <div className="pl-1 pr-0.5 text-white/30 hover:text-white/70" title="Drag to reposition">
+          <GripHorizontal size={14} />
         </div>
 
-        <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
-          <Send size={15} className="text-white transform -rotate-45 ml-0.5" />
-        </div>
-        
-        {/* Toggleable Undetectable Mode button */}
+        {/* Ask Follow-Up Button */}
         <button 
-          onClick={toggleStealth}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
-            isStealth 
-              ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30" 
-              : "bg-white/10 text-white/70 hover:text-white hover:bg-white/20 border border-white/10"
-          }`}
-          title={isStealth ? "Undetectable Mode ON: Window excluded from Zoom/Meet capture & hidden from taskbar" : "Undetectable Mode OFF: Click to enable"}
+          onClick={() => handleAskAI(query.trim() || "Analyze what is on my screen right now and give me the exact answer, code, or speaking points.", true)}
+          disabled={isQuerying}
+          className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 transition-all font-medium text-white/90 hover:text-white disabled:opacity-50"
+          title="Analyze current screen & ask question (Cmd/Ctrl + Enter)"
         >
-          {isStealth ? <ShieldCheck size={14} className="text-emerald-400" /> : <ShieldAlert size={14} className="text-amber-400" />}
-          <span>{isStealth ? "Undetectable: ON" : "Undetectable: OFF"}</span>
+          <span>Ask Follow-Up</span>
+          <kbd className="text-[10px] bg-black/40 px-1.5 py-0.5 rounded text-white/60 font-mono">⌘ ↵</kbd>
         </button>
 
-        {/* Expand / Collapse Height Toggle */}
+        {/* Start Over Button */}
         <button 
-          onClick={() => setIsExpanded(!isExpanded)}
-          className="flex items-center gap-1 px-3 py-1.5 rounded-full hover:bg-white/10 text-white/80 hover:text-white transition-colors text-xs font-semibold"
-          title={isExpanded ? "Collapse height (Compact)" : "Expand height (Expanded)"}
+          onClick={handleStartOver}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-full hover:bg-white/10 transition-all text-white/80 hover:text-white font-medium"
+          title="Reset conversation context & clear screen cache (Cmd/Ctrl + R)"
         >
-          {isExpanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-          <span>{isExpanded ? "Compact" : "Expand"}</span>
+          <span>Start Over</span>
+          <kbd className="text-[10px] bg-black/40 px-1.5 py-0.5 rounded text-white/60 font-mono">⌘ R</kbd>
         </button>
 
+        {/* Show/Hide Button */}
         <button 
           onClick={() => setIsHidden(!isHidden)}
-          className="flex items-center gap-1 px-3 py-1.5 rounded-full hover:bg-white/10 text-white/80 hover:text-white transition-colors text-xs font-semibold"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-full hover:bg-white/10 transition-all text-white/80 hover:text-white font-medium"
+          title="Toggle visibility (Cmd/Ctrl + \)"
         >
-          <ChevronDown size={14} className={isHidden ? "rotate-180 transition-transform" : "transition-transform"} />
-          {isHidden ? "Show" : "Hide"}
+          <span>{isHidden ? "Show" : "Hide"}</span>
+          <kbd className="text-[10px] bg-black/40 px-1.5 py-0.5 rounded text-white/60 font-mono">⌘ \</kbd>
         </button>
-        
+
+        <div className="h-4 w-[1px] bg-white/10 mx-0.5" />
+
+        {/* Live Timer */}
+        <div className="font-mono text-xs text-white/80 px-1 tracking-wider" title="Session duration">
+          {formattedTimer}
+        </div>
+
+        {/* Mic Indicator */}
+        <div className="flex items-center px-1 text-emerald-400" title="Live audio active">
+          <Mic size={14} className="text-emerald-400 animate-pulse" />
+        </div>
+
+        <div className="h-4 w-[1px] bg-white/10 mx-0.5" />
+
+        {/* Undetectable Stealth Mode */}
+        <button 
+          onClick={toggleStealth}
+          className={`p-1.5 rounded-full transition-all ${
+            isStealth 
+              ? "text-emerald-400 hover:bg-emerald-500/20" 
+              : "text-white/50 hover:bg-white/10 hover:text-white"
+          }`}
+          title={isStealth ? "Undetectable ON (Hidden from Zoom/Meet capture)" : "Undetectable OFF"}
+        >
+          {isStealth ? <ShieldCheck size={14} /> : <ShieldAlert size={14} />}
+        </button>
+
         {/* Minimize Button */}
         <button 
           onClick={async () => {
@@ -492,39 +583,40 @@ Fulfill the user's request thoroughly and directly. If they request a specific f
               setIsHidden(true);
             }
           }}
-          className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors text-white/70 hover:text-white"
-          title="Minimize floating assistant"
+          className="p-1.5 rounded-full text-white/50 hover:text-white hover:bg-white/10 transition-colors"
+          title="Minimize to taskbar"
         >
           <Minus size={13} />
         </button>
-        
+
+        {/* Stop Button */}
         <button 
           onClick={handleStop}
-          className="w-8 h-8 rounded-full bg-white/10 hover:bg-red-500/30 flex items-center justify-center transition-colors group"
+          className="p-1.5 rounded-full text-white/60 hover:text-red-400 hover:bg-red-500/20 transition-colors"
           title="Stop & Save Meeting"
         >
-          <Square size={12} fill="currentColor" className="text-white group-hover:text-red-400 transition-colors" />
+          <Square size={12} fill="currentColor" />
         </button>
       </div>
 
-      {/* Main Floating Card */}
+      {/* Main Floating Response Card - Matches Image 2 */}
       {!isHidden && (
-        <div className={`w-full bg-[#18181b]/95 backdrop-blur-xl border border-white/10 rounded-2xl p-5 shadow-2xl pointer-events-auto animate-in fade-in slide-in-from-top-4 duration-300 relative overflow-hidden transition-all duration-300 ${isExpanded ? "max-w-[700px]" : "max-w-[620px]"}`}>
+        <div className={`w-full max-w-[560px] bg-[#18181b]/95 backdrop-blur-2xl border border-white/15 rounded-2xl p-4 shadow-2xl pointer-events-auto animate-in fade-in slide-in-from-top-3 duration-200 relative overflow-hidden transition-all text-white flex flex-col ${isExpanded ? "max-h-[580px]" : "max-h-[440px]"}`}>
           
           {/* Blurred Background Overlay When Basic Limit is Reached */}
           {isLimitReached && (
-            <div className="absolute inset-0 z-50 rounded-2xl flex flex-col items-center justify-center p-6 text-center backdrop-blur-xl bg-white/85 dark:bg-black/90 border border-voiceflow-orange/30 shadow-2xl animate-in fade-in duration-300">
+            <div className="absolute inset-0 z-50 rounded-2xl flex flex-col items-center justify-center p-6 text-center backdrop-blur-xl bg-black/90 border border-voiceflow-orange/30 shadow-2xl animate-in fade-in duration-300">
               <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-voiceflow-orange to-orange-600 flex items-center justify-center shadow-lg shadow-orange-500/25 mb-3 text-white">
                 <Lock size={22} />
               </div>
               <span className="text-[11px] font-bold tracking-wider uppercase bg-orange-500/10 text-voiceflow-orange border border-orange-500/20 px-2.5 py-1 rounded-full mb-2">
                 Free Limit Reached ({sessionCount}/{maxFreeSessions} Sessions)
               </span>
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2 font-nexa">
+              <h3 className="text-lg font-bold text-white mb-2 font-nexa">
                 Upgrade to Voiceflow Pro
               </h3>
-              <p className="text-xs text-gray-600 dark:text-white/70 max-w-sm mb-5 leading-relaxed">
-                You have used your 3 free meeting sessions on the Basic Plan. Upgrade to Pro for unlimited AI notetaking, live stealth co-pilot, and custom instructions.
+              <p className="text-xs text-white/70 max-w-sm mb-5 leading-relaxed">
+                You have used your 3 free meeting sessions on the Basic Plan. Upgrade to Pro for unlimited AI notetaking and live stealth co-pilot.
               </p>
               <button
                 onClick={() => {
@@ -539,57 +631,59 @@ Fulfill the user's request thoroughly and directly. If they request a specific f
             </div>
           )}
 
-          <div className="flex justify-between items-center mb-4">
+          {/* Header Bar */}
+          <div className="flex items-center justify-between pb-2.5 border-b border-white/10 mb-3">
             <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
-              <span className="text-xs font-semibold text-white/70">Listening live...</span>
+              <button 
+                onClick={() => setIsHidden(true)}
+                className="text-white/40 hover:text-white transition-colors p-0.5 rounded"
+                title="Close response card"
+              >
+                <X size={15} />
+              </button>
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-white/95">
+                <Bot size={13} className="text-voiceflow-orange" />
+                <span>AI Response</span>
+              </div>
             </div>
-            <button 
-              onClick={() => handleAskAI("What should I say next in this meeting?")}
-              disabled={isQuerying}
-              className="bg-voiceflow-orange hover:bg-orange-600 text-white text-xs font-bold py-1.5 px-4 rounded-full shadow-lg transition-colors flex items-center gap-1.5 disabled:opacity-50"
-            >
-              {isQuerying ? <Loader2 size={13} className="animate-spin" /> : null}
-              What should I say?
-            </button>
-          </div>
 
-          <div className="flex justify-between items-center mb-2 px-1">
             <div className="flex items-center gap-2">
-              <span className="text-[11px] font-semibold text-white/50 uppercase tracking-wider">Chat Flow & Responses</span>
+              <button 
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="text-white/50 hover:text-white transition-colors p-1"
+                title={isExpanded ? "Compact view" : "Expand view"}
+              >
+                {isExpanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+              </button>
               {messages.length > 0 && (
-                <span className="text-[10px] bg-white/10 text-white/70 px-1.5 py-0.5 rounded-full font-mono">
-                  {messages.length}
-                </span>
+                <button 
+                  onClick={handleStartOver}
+                  className="text-[11px] text-white/50 hover:text-red-400 flex items-center gap-1 transition-colors px-1.5 py-0.5 rounded hover:bg-white/5"
+                  title="Clear chat and start over"
+                >
+                  <RotateCcw size={11} />
+                  <span>Start Over</span>
+                </button>
               )}
             </div>
-            {messages.length > 0 && (
-              <button 
-                onClick={() => {
-                  setMessages([]);
-                  if (typeof window !== 'undefined') {
-                    localStorage.removeItem('voiceflow_widget_messages');
-                  }
-                }}
-                className="text-[11px] text-white/40 hover:text-red-400 flex items-center gap-1 transition-colors"
-                title="Clear chat history"
-              >
-                <Trash2 size={12} />
-                <span>Clear chat</span>
-              </button>
-            )}
           </div>
 
+          {/* Chat / Response Body */}
           <div 
             ref={chatContainerRef}
-            className={`mb-5 bg-white/5 p-4 rounded-xl border border-white/5 overflow-y-auto space-y-3.5 transition-all duration-300 ${isExpanded ? "h-[450px] max-h-[450px]" : "h-72 max-h-72"} select-text cursor-text pointer-events-auto scrollbar-thin scrollbar-thumb-white/20 hover:scrollbar-thumb-white/30 scrollbar-track-transparent pr-1.5`}
+            className={`flex-1 overflow-y-auto space-y-3 pr-1 text-[13px] leading-relaxed select-text cursor-text scrollbar-thin scrollbar-thumb-white/20 hover:scrollbar-thumb-white/30 ${isExpanded ? "min-h-[380px]" : "min-h-[220px]"}`}
           >
             {messages.length === 0 ? (
-              <div className="text-white/70 text-[13px] leading-relaxed py-2">
-                <p className="font-medium text-white/90 mb-1">Live Meeting Co-Pilot Ready</p>
-                <p className="text-white/60 text-xs">
-                  {transcript || "Listening to conversation... Click 'What should I say?' or ask anything below. Your questions and AI responses will appear here as a live chat thread."}
-                </p>
+              <div className="flex flex-col items-center justify-center py-6 text-center text-white/70 space-y-3">
+                <div className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center border border-white/10 text-white/60">
+                  <Camera size={18} />
+                </div>
+                <div>
+                  <p className="font-semibold text-white/90 text-sm">Ready to Assist</p>
+                  <p className="text-white/50 text-xs mt-0.5 max-w-xs">
+                    Click <strong>Analyze This</strong> below or press <kbd className="bg-white/10 px-1 py-0.5 rounded text-[10px] font-mono">⌘ ↵</kbd> to solve questions, code, or slides on your screen.
+                  </p>
+                </div>
               </div>
             ) : (
               messages.map((msg) => (
@@ -615,10 +709,10 @@ Fulfill the user's request thoroughly and directly. If they request a specific f
                     )}
                   </div>
                   <div 
-                    className={`max-w-[92%] break-words selection:bg-white selection:text-voiceflow-orange ${
+                    className={`max-w-[95%] break-words selection:bg-white selection:text-voiceflow-orange ${
                       msg.sender === 'user' 
-                        ? 'bg-voiceflow-orange text-white font-medium text-xs sm:text-[13px] py-1.5 px-3.5 rounded-2xl rounded-tr-sm shadow-md leading-normal' 
-                        : 'rounded-xl p-3 text-[13px] leading-relaxed bg-[#212124] border border-white/10 text-white/95 shadow-sm'
+                        ? 'bg-voiceflow-orange text-white font-medium text-xs py-1.5 px-3.5 rounded-2xl rounded-tr-sm shadow-md' 
+                        : 'rounded-xl p-3.5 text-[13px] leading-relaxed bg-[#202024] border border-white/10 text-white/95 shadow-sm w-full'
                     }`}
                   >
                     {msg.sender === 'user' ? (
@@ -627,14 +721,15 @@ Fulfill the user's request thoroughly and directly. If they request a specific f
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm]}
                         components={{
-                          p: ({ node, ...props }) => <p {...props} className="mb-2 last:mb-0 leading-relaxed" />,
-                          ol: ({ node, ...props }) => <ol {...props} className="list-decimal pl-5 mb-2 space-y-1 marker:text-voiceflow-orange" />,
-                          ul: ({ node, ...props }) => <ul {...props} className="list-disc pl-5 mb-2 space-y-1 marker:text-voiceflow-orange" />,
+                          p: ({ node, ...props }) => <p {...props} className="mb-2 last:mb-0 leading-relaxed text-white/95" />,
+                          ol: ({ node, ...props }) => <ol {...props} className="list-decimal pl-5 mb-2 space-y-1 marker:text-voiceflow-orange text-white/90" />,
+                          ul: ({ node, ...props }) => <ul {...props} className="list-disc pl-5 mb-2 space-y-1 marker:text-voiceflow-orange text-white/90" />,
                           li: ({ node, ...props }) => <li {...props} className="pl-0.5 leading-snug" />,
-                          strong: ({ node, ...props }) => <strong {...props} className="font-semibold text-white" />,
+                          strong: ({ node, ...props }) => <strong {...props} className="font-bold text-white text-orange-200" />,
                           em: ({ node, ...props }) => <em {...props} className="italic text-white/90" />,
-                          h1: ({ node, ...props }) => <h1 {...props} className="text-sm font-bold text-white mb-1.5 mt-2 first:mt-0" />,
-                          h2: ({ node, ...props }) => <h2 {...props} className="text-xs font-bold text-white mb-1 mt-2 first:mt-0" />,
+                          h1: ({ node, ...props }) => <h1 {...props} className="text-sm font-bold text-white mb-1.5 mt-2 first:mt-0 text-voiceflow-orange" />,
+                          h2: ({ node, ...props }) => <h2 {...props} className="text-xs font-bold text-white mb-1 mt-2 first:mt-0 text-orange-300" />,
+                          h3: ({ node, ...props }) => <h3 {...props} className="text-xs font-semibold text-white/95 mb-1 mt-2 first:mt-0 underline underline-offset-2" />,
                           code: ({ node, className, children, ...props }: any) => {
                             const isInline = !className;
                             return isInline ? (
@@ -642,7 +737,7 @@ Fulfill the user's request thoroughly and directly. If they request a specific f
                                 {children}
                               </code>
                             ) : (
-                              <pre className="p-2.5 rounded-lg bg-black/40 text-orange-200 font-mono text-[11px] overflow-x-auto my-1.5 border border-white/10">
+                              <pre className="p-2.5 rounded-lg bg-black/50 text-orange-200 font-mono text-[11px] overflow-x-auto my-1.5 border border-white/10">
                                 <code {...props}>{children}</code>
                               </pre>
                             );
@@ -667,61 +762,60 @@ Fulfill the user's request thoroughly and directly. If they request a specific f
                     <Bot size={11} /> Voiceflow AI
                   </span>
                 </div>
-                <div className="rounded-xl p-3 bg-[#212124] border border-white/10 text-white/70 text-[13px] flex items-center gap-2">
-                  <Loader2 size={14} className="animate-spin text-voiceflow-orange" />
-                  <span>Generating...</span>
+                <div className="rounded-xl p-3 bg-[#202024] border border-white/10 text-white/70 text-xs flex items-center gap-2">
+                  <Loader2 size={13} className="animate-spin text-voiceflow-orange" />
+                  <span>Analyzing screen and generating direct answer...</span>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Prompt Pills */}
-          <div className="flex flex-wrap items-center gap-2 mb-4 text-xs font-medium text-white/70">
+          {/* Quick Action Pills */}
+          <div className="flex items-center gap-1.5 my-2.5 overflow-x-auto pb-1 text-xs font-medium scrollbar-none">
             <button 
               onClick={() => handleAskAI(query.trim() ? query : "Analyze what is on my screen right now and give me the exact answer, code, or speaking points.", true)}
               disabled={isQuerying}
-              className="flex items-center gap-1.5 transition-all bg-gradient-to-r from-blue-600/30 to-indigo-600/30 hover:from-blue-600/50 hover:to-indigo-600/50 text-blue-200 hover:text-white px-3 py-1.5 rounded-lg border border-blue-500/40 disabled:opacity-50 font-semibold shadow-sm"
-              title="Take a screenshot of your screen and analyze with AI"
+              className="flex items-center gap-1.5 bg-blue-600/30 hover:bg-blue-600/50 text-blue-200 hover:text-white px-3 py-1 rounded-lg border border-blue-500/40 font-semibold shadow-sm shrink-0 disabled:opacity-50 transition-colors"
             >
-              <Camera size={13} className="text-blue-300" />
+              <Camera size={12} className="text-blue-300" />
               Analyze This
             </button>
             <button 
-              onClick={() => handleAskAI("Give me a smart real-time answer suggestion for the current meeting point.")}
+              onClick={() => handleAskAI("Give me a smart real-time answer suggestion for the current point.")}
               disabled={isQuerying}
-              className="flex items-center gap-1.5 hover:text-white transition-colors bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/5 disabled:opacity-50"
+              className="flex items-center gap-1.5 bg-white/5 hover:bg-white/10 text-white/80 hover:text-white px-2.5 py-1 rounded-lg border border-white/5 shrink-0 disabled:opacity-50 transition-colors"
             >
-              <Sparkles size={13} className="text-amber-400" />
+              <Sparkles size={12} className="text-amber-400" />
               Assist
             </button>
             <button 
               onClick={() => handleAskAI("What should I say next?")}
               disabled={isQuerying}
-              className="flex items-center gap-1.5 hover:text-white transition-colors bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/5 disabled:opacity-50"
+              className="flex items-center gap-1.5 bg-white/5 hover:bg-white/10 text-white/80 hover:text-white px-2.5 py-1 rounded-lg border border-white/5 shrink-0 disabled:opacity-50 transition-colors"
             >
-              <Wand2 size={13} className="text-purple-400" />
-              What should I say?
+              <Wand2 size={12} className="text-purple-400" />
+              What to say?
             </button>
             <button 
               onClick={() => handleAskAI("Suggest 3 follow-up questions I can ask right now.")}
               disabled={isQuerying}
-              className="flex items-center gap-1.5 hover:text-white transition-colors bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/5 disabled:opacity-50"
+              className="flex items-center gap-1.5 bg-white/5 hover:bg-white/10 text-white/80 hover:text-white px-2.5 py-1 rounded-lg border border-white/5 shrink-0 disabled:opacity-50 transition-colors"
             >
-              <MessageSquare size={13} className="text-orange-400" />
+              <MessageSquare size={12} className="text-orange-400" />
               Follow-ups
             </button>
             <button 
-              onClick={() => handleAskAI("Give me a 2-bullet point quick recap of what was just said.")}
+              onClick={() => handleAskAI("Give me a 2-bullet point quick recap.")}
               disabled={isQuerying}
-              className="flex items-center gap-1.5 hover:text-white transition-colors bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/5 disabled:opacity-50"
+              className="flex items-center gap-1.5 bg-white/5 hover:bg-white/10 text-white/80 hover:text-white px-2.5 py-1 rounded-lg border border-white/5 shrink-0 disabled:opacity-50 transition-colors"
             >
-              <RotateCcw size={13} className="text-green-400" />
+              <RotateCcw size={12} className="text-green-400" />
               Recap
             </button>
           </div>
 
-          {/* Input Box */}
-          <div className="relative flex items-center bg-[#252528] rounded-xl border border-white/10 p-1.5">
+          {/* Bottom Follow-Up Input */}
+          <div className="relative flex items-center bg-[#232327] rounded-xl border border-white/10 p-1.5">
             <button 
               onClick={() => handleAskAI(query.trim() ? query : "Analyze what is on my screen and tell me key highlights and answers.", true)}
               disabled={isQuerying}
@@ -729,7 +823,7 @@ Fulfill the user's request thoroughly and directly. If they request a specific f
               title="Capture & Analyze Screen (Sends your question with a screenshot)"
             >
               <Camera size={12} className="text-blue-400" />
-              Screen
+              <span>Screen</span>
             </button>
 
             <input 
@@ -738,19 +832,20 @@ Fulfill the user's request thoroughly and directly. If they request a specific f
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={handleKeyDown}
               disabled={isQuerying}
-              placeholder="Ask about the conversation or question..."
+              placeholder="Ask a follow-up or custom question..."
               className="flex-1 bg-transparent border-none outline-none text-white text-xs px-3 placeholder:text-white/40 disabled:opacity-50"
             />
 
             <button 
               onClick={() => handleAskAI()}
               disabled={isQuerying || !query.trim()}
-              className="w-8 h-8 rounded-full bg-voiceflow-orange hover:bg-orange-600 flex items-center justify-center transition-colors shadow-md disabled:opacity-40"
+              className="w-7 h-7 rounded-full bg-voiceflow-orange hover:bg-orange-600 flex items-center justify-center transition-colors shadow-md disabled:opacity-40"
+              title="Send question"
             >
               {isQuerying ? (
-                <Loader2 size={13} className="text-white animate-spin" />
+                <Loader2 size={12} className="text-white animate-spin" />
               ) : (
-                <Play size={13} fill="currentColor" className="text-white ml-0.5" />
+                <Play size={11} fill="currentColor" className="text-white ml-0.5" />
               )}
             </button>
           </div>
