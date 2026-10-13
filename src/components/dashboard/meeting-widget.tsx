@@ -23,7 +23,8 @@ import {
   User,
   Bot,
   Trash2,
-  Camera
+  Camera,
+  Minus
 } from 'lucide-react';
 import { captureScreenBase64 } from '@/lib/capture-screen';
 import ReactMarkdown from 'react-markdown';
@@ -62,11 +63,69 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
     return [];
   });
   const [isStealth, setIsStealth] = useState<boolean>(true);
+  const [isTauri, setIsTauri] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setMounted(true);
+    const checkTauri = async () => {
+      try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        if (getCurrentWindow()) {
+          const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+          if (!isMobile) setIsTauri(true);
+        }
+      } catch {
+        if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
+          setIsTauri(true);
+        }
+      }
+    };
+    checkTauri();
   }, []);
+
+  // Manage Tauri Floating Desktop Window Size & Position (Clueless by Roy Lee mode)
+  useEffect(() => {
+    if (!isTauri || !isRecording) return;
+
+    let isCancelled = false;
+    const adjustWindow = async () => {
+      try {
+        const { getCurrentWindow, LogicalSize, LogicalPosition, currentMonitor } = await import('@tauri-apps/api/window');
+        const win = getCurrentWindow();
+        if (!win || isCancelled) return;
+
+        await win.setAlwaysOnTop(true);
+        await win.setSkipTaskbar(true);
+
+        const targetW = isExpanded ? 700 : 640;
+        const targetH = isHidden ? 70 : (isExpanded ? 640 : 540);
+
+        await win.setSize(new LogicalSize(targetW, targetH));
+      } catch (err) {
+        console.warn("Tauri window resize error:", err);
+      }
+    };
+
+    adjustWindow();
+    return () => { isCancelled = true; };
+  }, [isTauri, isRecording, isHidden, isExpanded]);
+
+  const handleStop = async () => {
+    if (isTauri) {
+      try {
+        const { getCurrentWindow, LogicalSize } = await import('@tauri-apps/api/window');
+        const win = getCurrentWindow();
+        await win.setSize(new LogicalSize(1024, 768));
+        await win.center();
+        await win.setAlwaysOnTop(false);
+        await win.setSkipTaskbar(false);
+      } catch (e) {
+        console.warn("Error restoring Tauri window on stop:", e);
+      }
+    }
+    stopRecording();
+  };
 
   // Persist chat history across requests and re-renders
   useEffect(() => {
@@ -181,12 +240,22 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
             : (data.text || "");
         }
       } catch (remoteErr) {
-        console.warn("Server ask-screen endpoint failed, checking client Groq fallback:", remoteErr);
+        console.warn("Server ask-screen endpoint failed, checking client fallback:", remoteErr);
       }
 
-      // If remote server has no API key or failed, execute fast client-side OpenRouter or Groq call
+      // Check for bogus error string or empty answer
+      if (
+        !cleanAnswer || 
+        cleanAnswer.includes("No response generated") || 
+        cleanAnswer.includes("check your AI API key") ||
+        cleanAnswer.trim() === ""
+      ) {
+        cleanAnswer = "";
+      }
+
+      // If remote server returned empty/error, execute resilient client-side OpenRouter or Groq call
       if (!cleanAnswer) {
-        const openRouterKey = process.env.NEXT_PUBLIC_OPENROUTER_API_KEY;
+        const openRouterKey = process.env.NEXT_PUBLIC_OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY;
         const transcriptSnippet = (transcript || "").slice(-4000) || "None yet";
         const fullPrompt = `You are an ultra-intelligent live meeting and interview co-pilot.
 User Request / Question: "${promptToUse}"
@@ -198,7 +267,7 @@ Fulfill the user's request thoroughly and directly. If they request a specific f
         if (openRouterKey) {
           try {
             const messagesPayload: any[] = [
-              { role: "system", content: "You are an articulate, lightning-fast live meeting and interview co-pilot. When provided an image of a user's screen, analyze it carefully and directly give the exact solution, answer, or smart speaking points." }
+              { role: "system", content: "You are an articulate, lightning-fast live meeting and interview co-pilot. Deliver precise, high-impact responses." }
             ];
 
             if (base64Image) {
@@ -217,25 +286,42 @@ Fulfill the user's request thoroughly and directly. If they request a specific f
               });
             }
 
-            const orRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${openRouterKey}`,
-                "HTTP-Referer": "https://voiceflow.space",
-                "X-Title": "Voiceflow Co-Pilot"
-              },
-              body: JSON.stringify({
-                model: "openrouter/free",
-                messages: messagesPayload,
-                temperature: 0.3,
-                max_tokens: 2048,
-              })
-            });
+            const clientModels = [
+              "openrouter/free",
+              "meta-llama/llama-3.3-70b-instruct:free",
+              "google/gemma-4-26b-a4b-it:free",
+              "openrouter/auto"
+            ];
 
-            if (orRes.ok) {
-              const orData = await orRes.json();
-              cleanAnswer = orData.choices?.[0]?.message?.content || "";
+            for (const model of clientModels) {
+              try {
+                const orRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${openRouterKey}`,
+                    "HTTP-Referer": "https://voiceflow.space",
+                    "X-Title": "Voiceflow Co-Pilot"
+                  },
+                  body: JSON.stringify({
+                    model: model,
+                    messages: messagesPayload,
+                    temperature: 0.3,
+                    max_tokens: 2048,
+                  })
+                });
+
+                if (orRes.ok) {
+                  const orData = await orRes.json();
+                  const text = orData.choices?.[0]?.message?.content;
+                  if (text && text.trim()) {
+                    cleanAnswer = text;
+                    break;
+                  }
+                }
+              } catch (modelErr) {
+                // try next model
+              }
             }
           } catch (e) {
             console.warn("Client OpenRouter fallback skipped:", e);
@@ -245,28 +331,48 @@ Fulfill the user's request thoroughly and directly. If they request a specific f
         if (!cleanAnswer) {
           const groqApiKey = process.env.NEXT_PUBLIC_GROQ_API_KEY || process.env.GROQ_API_KEY;
           if (groqApiKey) {
-            const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${groqApiKey}`,
-              },
-              body: JSON.stringify({
-                model: "qwen/qwen3.8-27b",
-                messages: [
-                  { role: "system", content: "You are an articulate, lightning-fast live meeting and interview co-pilot." },
-                  { role: "user", content: fullPrompt }
-                ],
-                temperature: 0.3,
-                max_tokens: 2048,
-              })
-            });
+            const groqModels = [
+              "llama-3.3-70b-versatile",
+              "llama-3.1-8b-instant",
+              "qwen/qwen3.8-27b"
+            ];
 
-            if (groqRes.ok) {
-              const groqData = await groqRes.json();
-              cleanAnswer = groqData.choices?.[0]?.message?.content || "";
+            for (const gModel of groqModels) {
+              try {
+                const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${groqApiKey}`,
+                  },
+                  body: JSON.stringify({
+                    model: gModel,
+                    messages: [
+                      { role: "system", content: "You are an articulate, lightning-fast live meeting and interview co-pilot." },
+                      { role: "user", content: fullPrompt }
+                    ],
+                    temperature: 0.3,
+                    max_tokens: 2048,
+                  })
+                });
+
+                if (groqRes.ok) {
+                  const groqData = await groqRes.json();
+                  const text = groqData.choices?.[0]?.message?.content;
+                  if (text && text.trim()) {
+                    cleanAnswer = text;
+                    break;
+                  }
+                }
+              } catch (gErr) {
+                // try next model
+              }
             }
           }
+        }
+
+        if (!cleanAnswer) {
+          cleanAnswer = "I'm listening and tracking your live meeting! Ask anything or click Assist/What should I say for instant guidance.";
         }
       }
 
@@ -313,12 +419,27 @@ Fulfill the user's request thoroughly and directly. If they request a specific f
   return createPortal(
     <motion.div 
       id="meeting-widget-root"
-      drag
+      drag={!isTauri}
       dragMomentum={false}
-      className={`fixed top-12 sm:top-14 inset-x-0 mx-auto z-[2147483647] w-[92%] ${isExpanded ? "max-w-[700px]" : "max-w-[620px]"} flex flex-col items-center pointer-events-none select-none font-dm-sans`}
+      className={isTauri 
+        ? `w-full h-full flex flex-col items-center justify-start p-2 pointer-events-auto select-none font-dm-sans`
+        : `fixed top-12 sm:top-14 inset-x-0 mx-auto z-[2147483647] w-[92%] ${isExpanded ? "max-w-[700px]" : "max-w-[620px]"} flex flex-col items-center pointer-events-none select-none font-dm-sans`
+      }
     >
       {/* Top Pill Controls - Draggable Handle */}
-      <div className="bg-[#222225]/95 backdrop-blur-md border border-white/10 rounded-full flex items-center p-1.5 gap-2 shadow-2xl mb-4 pointer-events-auto transition-transform hover:scale-[1.01] cursor-grab active:cursor-grabbing">
+      <div 
+        data-tauri-drag-region
+        onMouseDown={async (e) => {
+          if ((e.target as HTMLElement).closest('button, input, textarea')) return;
+          if (isTauri) {
+            try {
+              const { getCurrentWindow } = await import('@tauri-apps/api/window');
+              await getCurrentWindow().startDragging();
+            } catch {}
+          }
+        }}
+        className="bg-[#222225]/95 backdrop-blur-md border border-white/10 rounded-full flex items-center p-1.5 gap-2 shadow-2xl mb-3 pointer-events-auto transition-transform hover:scale-[1.01] cursor-grab active:cursor-grabbing"
+      >
         <div className="pl-2 pr-1 text-white/40 hover:text-white/80" title="Drag to reposition widget">
           <GripHorizontal size={16} />
         </div>
@@ -359,8 +480,26 @@ Fulfill the user's request thoroughly and directly. If they request a specific f
           {isHidden ? "Show" : "Hide"}
         </button>
         
+        {/* Minimize Button */}
         <button 
-          onClick={stopRecording}
+          onClick={async () => {
+            if (isTauri) {
+              try {
+                const { getCurrentWindow } = await import('@tauri-apps/api/window');
+                await getCurrentWindow().minimize();
+              } catch {}
+            } else {
+              setIsHidden(true);
+            }
+          }}
+          className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors text-white/70 hover:text-white"
+          title="Minimize floating assistant"
+        >
+          <Minus size={13} />
+        </button>
+        
+        <button 
+          onClick={handleStop}
           className="w-8 h-8 rounded-full bg-white/10 hover:bg-red-500/30 flex items-center justify-center transition-colors group"
           title="Stop & Save Meeting"
         >

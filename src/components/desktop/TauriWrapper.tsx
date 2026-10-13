@@ -94,11 +94,23 @@ export function TauriLayoutWrapper({ children }: { children: React.ReactNode }) 
     return () => window.removeEventListener('voiceflow-record-state', handleRecordState);
   }, []);
 
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      if (isRecording) {
+        document.documentElement.classList.add('tauri-recording-mode');
+        document.body.classList.add('tauri-recording-mode');
+      } else {
+        document.documentElement.classList.remove('tauri-recording-mode');
+        document.body.classList.remove('tauri-recording-mode');
+      }
+    }
+  }, [isRecording]);
+
   return (
     <div
       className={cn(
         "flex flex-col h-screen max-h-screen w-full overflow-hidden",
-        darkTopInset ? "bg-black text-white" : "bg-background text-foreground"
+        isRecording ? "bg-transparent" : (darkTopInset ? "bg-black text-white" : "bg-background text-foreground")
       )}
     >
       <div className="flex-1 flex flex-col relative h-full min-h-0 overflow-hidden">

@@ -213,6 +213,7 @@ import ProductIntelligence from '@/components/admin/usage/product-intelligence';
 import NotificationEngagement from '@/components/admin/usage/notification-engagement';
 import VoiceflowSessionAnalytics from '@/components/admin/voiceflow-session-analytics';
 import VoiceflowAiInterviewDiagnostics from '@/components/admin/voiceflow-ai-interview-diagnostics';
+import AiProviderQuotaMonitor from '@/components/admin/ai-provider-quota-monitor';
 
 const CustomTooltipContent = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
@@ -4195,6 +4196,9 @@ function AdminDashboardContent({
                 <TabsContent value="overview" className="space-y-6">
                     {/* Voiceflow Core Session & Time Spent Analytics */}
                     <VoiceflowSessionAnalytics meetings={meetings || []} users={users || []} purchases={purchases || []} />
+
+                    {/* AI Provider Quotas & Free Tier Monitor (Groq & OpenRouter) */}
+                    <AiProviderQuotaMonitor totalMeetingsCount={(meetings || []).length} />
                     <Card>
                         <CardHeader>
                             <CardTitle className="flex items-center gap-2">

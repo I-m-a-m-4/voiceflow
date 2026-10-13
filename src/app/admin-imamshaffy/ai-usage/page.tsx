@@ -41,6 +41,7 @@ import {
   CartesianGrid, Legend, Tooltip as ReTooltip, ResponsiveContainer,
 } from 'recharts';
 import VoiceflowAiInterviewDiagnostics from '@/components/admin/voiceflow-ai-interview-diagnostics';
+import AiProviderQuotaMonitor from '@/components/admin/ai-provider-quota-monitor';
 
 /**
  * Admin AI board.
@@ -795,6 +796,9 @@ export default function AdminAIUsage() {
           </Button>
         </div>
       </div>
+
+      {/* AI Provider Quotas & Free Tier Monitor (Groq & OpenRouter) */}
+      <AiProviderQuotaMonitor />
 
       {/* Voiceflow Shadow AI & Interview Diagnostics Engine */}
       <VoiceflowAiInterviewDiagnostics />

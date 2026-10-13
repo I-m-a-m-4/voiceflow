@@ -947,5 +947,14 @@ a, button, select, input, [role="button"], .clickable {
   box-shadow: inset 1.899px 1.77px 8.174px 0 rgba(255, 255, 255, 0.13), 0 20px 40px -15px rgba(0, 0, 0, 0.05);
 }
 
+html.tauri-recording-mode,
+body.tauri-recording-mode,
+html.tauri-recording-mode body {
+  background: transparent !important;
+  background-color: transparent !important;
+  overflow: hidden !important;
+}
+
+
 
 
