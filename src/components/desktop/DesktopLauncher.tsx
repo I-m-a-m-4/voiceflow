@@ -17,14 +17,6 @@ export function DesktopLauncher() {
       const updateBackground = () => {
         const root = document.documentElement;
         const body = document.body;
-        
-        // If recording / stealth overlay is active, keep background 100% transparent so other desktop windows remain visible
-        if (root.classList.contains('recording-active') || body.classList.contains('recording-active')) {
-          body.style.backgroundColor = 'transparent';
-          root.style.backgroundColor = 'transparent';
-          return;
-        }
-
         // Get the actual computed HSL background from CSS variables
         const bgValue = getComputedStyle(root).getPropertyValue('--background').trim();
         
@@ -40,20 +32,6 @@ export function DesktopLauncher() {
 
       updateBackground();
 
-      // Listen for recording state changes to instantly make background transparent
-      const handleRecordState = (e: any) => {
-        const active = Boolean(e.detail?.isRecording);
-        const root = document.documentElement;
-        const body = document.body;
-        if (active) {
-          body.style.backgroundColor = 'transparent';
-          root.style.backgroundColor = 'transparent';
-        } else {
-          updateBackground();
-        }
-      };
-      window.addEventListener('voiceflow-record-state', handleRecordState);
-
       // Observe BOTH class changes (theme) and style changes
       const observer = new MutationObserver((mutations) => {
         updateBackground();
@@ -65,7 +43,6 @@ export function DesktopLauncher() {
       });
 
       return () => {
-        window.removeEventListener('voiceflow-record-state', handleRecordState);
         observer.disconnect();
       };
     }

@@ -110,35 +110,16 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
     }
   };
 
-  const setClickThrough = async (ignore: boolean) => {
-    try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('set_ignore_cursor_events', { ignore });
-    } catch {
-      try {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window');
-        await getCurrentWindow().setIgnoreCursorEvents(ignore);
-      } catch {
-        // Web browser environment
-      }
-    }
-  };
-
-  // Sync stealth mode and click-through when recording starts or on mount
+  // Sync stealth mode when recording starts or on mount
   useEffect(() => {
     const saved = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_stealth_mode') : null;
     const shouldBeStealth = saved !== null ? saved === 'true' : true;
     setIsStealth(shouldBeStealth);
     if (isRecording) {
       applyStealth(shouldBeStealth);
-      setClickThrough(true);
     } else {
       applyStealth(false);
-      setClickThrough(false);
     }
-    return () => {
-      setClickThrough(false);
-    };
   }, [isRecording]);
 
   const toggleStealth = async () => {
@@ -334,8 +315,6 @@ Fulfill the user's request thoroughly and directly. If they request a specific f
       id="meeting-widget-root"
       drag
       dragMomentum={false}
-      onMouseEnter={() => setClickThrough(false)}
-      onMouseLeave={() => setClickThrough(true)}
       className={`fixed top-12 sm:top-14 inset-x-0 mx-auto z-[2147483647] w-[92%] ${isExpanded ? "max-w-[700px]" : "max-w-[620px]"} flex flex-col items-center pointer-events-none select-none font-dm-sans`}
     >
       {/* Top Pill Controls - Draggable Handle */}

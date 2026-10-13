@@ -21,17 +21,6 @@
        url('https://fonts.cdnfonts.com/s/16221/NexaBold.woff') format('woff');
 }
 
-/* Stealth Overlay Mode: Transparent window background when Voiceflow is actively recording */
-html.recording-active,
-html.recording-active body,
-body.recording-active,
-body.recording-active #__next,
-body.recording-active main,
-body.recording-active [data-tauri-drag-region]:not(#meeting-widget-root *),
-.recording-active {
-  background-color: transparent !important;
-  background: transparent !important;
-}
 
 /* Self-hosted Plus Jakarta Sans local WOFF2 (weights 200 through 800) */
 @font-face {
@@ -956,16 +945,6 @@ a, button, select, input, [role="button"], .clickable {
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: radial-gradient(92.09% 126.39% at 50% 100%, #DDE2EE 58.91%, #BBC5DD 100%);
   box-shadow: inset 1.899px 1.77px 8.174px 0 rgba(255, 255, 255, 0.13), 0 20px 40px -15px rgba(0, 0, 0, 0.05);
-}
-
-/* Ensure desktop custom titlebar is fully hidden when recording so it never overlaps the widget */
-body.recording-active #desktop-titlebar,
-html.recording-active #desktop-titlebar,
-.recording-active #desktop-titlebar {
-  display: none !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
-  visibility: hidden !important;
 }
 
 
