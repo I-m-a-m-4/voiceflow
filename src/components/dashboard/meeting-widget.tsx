@@ -108,9 +108,14 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
 
   const formattedTimer = `${String(Math.floor(secondsElapsed / 60)).padStart(2, '0')}:${String(secondsElapsed % 60).padStart(2, '0')}`;
 
+  const hasPositionedRef = useRef(false);
+
   // Manage Tauri Floating Desktop Window Size & Position (HUD Overlay Mode)
   useEffect(() => {
-    if (!isTauri || !isRecording) return;
+    if (!isTauri || !isRecording) {
+      hasPositionedRef.current = false;
+      return;
+    }
 
     let isCancelled = false;
     const adjustWindow = async () => {
@@ -119,13 +124,39 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
         const win = getCurrentWindow();
         if (!win || isCancelled) return;
 
-        await win.setAlwaysOnTop(true);
-        await win.setSkipTaskbar(true);
+        // If the window was maximized by the user, Windows OS refuses to resize it.
+        // Calling unmaximize() first frees the window to shrink into the floating widget.
+        if (await win.isMaximized()) {
+          await win.unmaximize();
+        }
 
         const targetW = isExpanded ? 700 : 640;
         const targetH = isHidden ? 70 : (isExpanded ? 640 : 540);
 
         await win.setSize(new LogicalSize(targetW, targetH));
+
+        // Position widget nicely at top center of screen on initial recording start
+        if (!hasPositionedRef.current) {
+          hasPositionedRef.current = true;
+          try {
+            const { currentMonitor, LogicalPosition } = await import('@tauri-apps/api/window');
+            const monitor = await currentMonitor();
+            if (monitor) {
+              const scaleFactor = monitor.scaleFactor || 1;
+              const screenLogicalW = monitor.size.width / scaleFactor;
+              const posX = Math.max(0, Math.round((screenLogicalW - targetW) / 2));
+              const posY = 35; // 35px from top
+              await win.setPosition(new LogicalPosition(posX, posY));
+            } else {
+              await win.center();
+            }
+          } catch (posErr) {
+            console.warn("Could not set top position:", posErr);
+          }
+        }
+
+        await win.setAlwaysOnTop(true);
+        await win.setSkipTaskbar(true);
       } catch (err) {
         console.warn("Tauri window resize error:", err);
       }
@@ -136,6 +167,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
   }, [isTauri, isRecording, isHidden, isExpanded]);
 
   const handleStop = async () => {
+    hasPositionedRef.current = false;
     if (isTauri) {
       try {
         const { getCurrentWindow, LogicalSize } = await import('@tauri-apps/api/window');

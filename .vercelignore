@@ -1,0 +1,9 @@
+.git
+node_modules
+.next
+out
+src-tauri/target
+src-tauri/gen
+dist
+*.log
+.vercel
