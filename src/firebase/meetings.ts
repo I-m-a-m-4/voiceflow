@@ -1,13 +1,17 @@
 import { firestore } from './instance';
-import { collection, addDoc, serverTimestamp, doc, getDoc, getDocs, query, where, orderBy, deleteDoc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, getDoc, getDocs, query, where, orderBy, deleteDoc, updateDoc } from 'firebase/firestore';
 
 export interface MeetingData {
   userId: string;
   transcript: string;
   summary?: string;
+  title?: string;
+  durationSeconds?: number;
+  durationMinutes?: number;
   audioUrl?: string; // We can add audio storage later
   type: 'meeting' | 'dictation';
   createdAt?: any;
+  updatedAt?: any;
 }
 
 export async function saveMeeting(data: Omit<MeetingData, 'createdAt'>) {
@@ -20,6 +24,28 @@ export async function saveMeeting(data: Omit<MeetingData, 'createdAt'>) {
   });
   
   return docRef.id;
+}
+
+export async function updateMeeting(meetingId: string, data: Partial<MeetingData>, userId?: string) {
+  if (!firestore) throw new Error("Firestore not initialized");
+
+  const meetingRef = doc(firestore, 'meetings', meetingId);
+  await updateDoc(meetingRef, {
+    ...data,
+    updatedAt: serverTimestamp(),
+  });
+
+  if (userId) {
+    try {
+      const userMeetingRef = doc(firestore, `users/${userId}/meetings/${meetingId}`);
+      await updateDoc(userMeetingRef, {
+        ...data,
+        updatedAt: serverTimestamp(),
+      });
+    } catch {
+      // Subcollection might not exist, ignore
+    }
+  }
 }
 
 export async function getUserMeetings(userId: string) {

@@ -25,9 +25,11 @@ export function useAudioRecorder() {
   const recognitionRef = useRef<any>(null);
   const isRecordingRef = useRef<boolean>(false);
   const shouldRestartRecognitionRef = useRef<boolean>(true);
+  const startTimeRef = useRef<number>(0);
 
   const startRecording = useCallback(async (captureSystemAudio = false) => {
     try {
+      startTimeRef.current = Date.now();
       // 1. Get Microphone Audio (reuse healthy stream if already open to prevent permission prompts)
       let micStream = micStreamRef.current;
       const isStreamActive = micStream && micStream.getAudioTracks().some(track => track.readyState === 'live');
@@ -98,7 +100,8 @@ export function useAudioRecorder() {
 
       mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(chunksRef.current, { type: "audio/webm" });
-        await processAudio(audioBlob, captureSystemAudio ? "meeting" : "dictation");
+        const elapsedSecs = Math.max(1, Math.round((Date.now() - (startTimeRef.current || Date.now())) / 1000));
+        await processAudio(audioBlob, captureSystemAudio ? "meeting" : "dictation", elapsedSecs);
       };
 
       mediaRecorder.start(1000); // chunk every second
@@ -269,7 +272,7 @@ export function useAudioRecorder() {
     };
   }, []);
 
-  const processAudio = async (blob: Blob, type: "dictation" | "meeting") => {
+  const processAudio = async (blob: Blob, type: "dictation" | "meeting", elapsedSecs = 0) => {
     setIsProcessing(true);
     try {
       const formData = new FormData();
@@ -288,13 +291,27 @@ export function useAudioRecorder() {
 
       if (!transcribeRes.ok) throw new Error(transcribeData.error);
 
+      // Check if resuming an existing meeting session
+      const resumeMeetingId = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_resume_meeting_id') : null;
+      const prevTranscript = typeof window !== 'undefined' ? (localStorage.getItem('voiceflow_resume_previous_transcript') || '') : '';
+      const prevDuration = typeof window !== 'undefined' ? parseInt(localStorage.getItem('voiceflow_resume_previous_duration') || '0', 10) : 0;
+
+      const newTranscript = transcribeData.formattedTranscript || transcribeData.text || "";
+      const combinedTranscript = resumeMeetingId && prevTranscript
+        ? `${prevTranscript}\n\n${newTranscript}`
+        : newTranscript;
+
+      const sessionDuration = elapsedSecs || (typeof transcribeData.duration === 'number' ? transcribeData.duration : 0);
+      const totalDurationSeconds = resumeMeetingId ? (prevDuration + sessionDuration) : sessionDuration;
+      const totalDurationMinutes = Math.max(1, Math.round(totalDurationSeconds / 60));
+
       // 2. Summarize / Clean up with user's custom context if provided
       const customContext = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_custom_context') || '' : '';
       const summarizeRes = await fetch(summarizeUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          text: transcribeData.text, 
+          text: combinedTranscript, 
           type, 
           customContext 
         }),
@@ -306,22 +323,34 @@ export function useAudioRecorder() {
       const finalOutput = summarizeData.text;
       setTranscript(finalOutput);
 
-      // 3. Save to Firestore
+      // 3. Save or Update in Firestore
       if (user?.uid) {
-        await saveMeeting({
-          userId: user.uid,
-          transcript: transcribeData.text,
-          summary: finalOutput,
-          type
-        });
+        if (resumeMeetingId) {
+          const { updateMeeting } = await import("@/firebase/meetings");
+          await updateMeeting(resumeMeetingId, {
+            transcript: combinedTranscript,
+            summary: finalOutput,
+            durationSeconds: totalDurationSeconds,
+            durationMinutes: totalDurationMinutes,
+          }, user.uid);
+        } else {
+          await saveMeeting({
+            userId: user.uid,
+            transcript: combinedTranscript,
+            summary: finalOutput,
+            durationSeconds: totalDurationSeconds,
+            durationMinutes: totalDurationMinutes,
+            type
+          });
+        }
 
         // Also persist user plan usage directly to Firestore (anti-cheating)
         try {
           const { getFirestore, doc, updateDoc, increment } = await import("firebase/firestore");
           const db = getFirestore();
           await updateDoc(doc(db, "users", user.uid), {
-            sessionCount: increment(1),
-            usedMinutes: increment(2)
+            sessionCount: increment(resumeMeetingId ? 0 : 1),
+            usedMinutes: increment(Math.max(1, Math.round(sessionDuration / 60)))
           });
         } catch (planErr) {
           console.warn("Could not increment user usage in firestore:", planErr);
@@ -332,9 +361,23 @@ export function useAudioRecorder() {
       if (typeof window !== 'undefined') {
         const curSessions = parseInt(localStorage.getItem('voiceflow_session_count') || '0', 10);
         const curMins = parseInt(localStorage.getItem('voiceflow_used_minutes') || '0', 10);
-        localStorage.setItem('voiceflow_session_count', String(curSessions + 1));
-        localStorage.setItem('voiceflow_used_minutes', String(curMins + 2)); // Add 2 minutes per session
+        if (!resumeMeetingId) {
+          localStorage.setItem('voiceflow_session_count', String(curSessions + 1));
+        }
+        localStorage.setItem('voiceflow_used_minutes', String(curMins + Math.max(1, Math.round(sessionDuration / 60))));
         window.dispatchEvent(new CustomEvent('voiceflow-usage-updated'));
+      }
+
+      // Clean up resumption state & redirect if resumed
+      if (resumeMeetingId && typeof window !== 'undefined') {
+        localStorage.removeItem('voiceflow_resume_meeting_id');
+        localStorage.removeItem('voiceflow_resume_meeting_title');
+        localStorage.removeItem('voiceflow_resume_previous_transcript');
+        localStorage.removeItem('voiceflow_resume_previous_duration');
+        localStorage.removeItem('voiceflow_auto_start_record');
+
+        // Redirect back to meeting details page so user sees resumed transcript immediately
+        window.location.href = `/dashboard/meeting/${resumeMeetingId}`;
       }
 
       // 4. Auto Copy to Clipboard

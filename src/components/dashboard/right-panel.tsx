@@ -16,6 +16,28 @@ export default function RightPanel() {
   const { isPro, sessionCount, maxFreeSessions, isLimitReached } = usePlanUsage();
   
   const [recordingTime, setRecordingTime] = useState(0);
+  const [resumingInfo, setResumingInfo] = useState<{ id: string; title: string; prevDuration: number } | null>(null);
+
+  // Check for session resumption on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const resumeId = localStorage.getItem('voiceflow_resume_meeting_id');
+      const resumeTitle = localStorage.getItem('voiceflow_resume_meeting_title') || 'Meeting Session';
+      const prevDur = parseInt(localStorage.getItem('voiceflow_resume_previous_duration') || '0', 10);
+      const autoStart = localStorage.getItem('voiceflow_auto_start_record');
+
+      if (resumeId) {
+        setResumingInfo({ id: resumeId, title: resumeTitle, prevDuration: prevDur });
+      }
+
+      if (autoStart === 'true') {
+        localStorage.removeItem('voiceflow_auto_start_record');
+        setTimeout(() => {
+          startRecording(false);
+        }, 350);
+      }
+    }
+  }, [startRecording]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -110,6 +132,30 @@ export default function RightPanel() {
           
           {!isRecording && !isProcessing ? (
             <div className="space-y-3">
+              {resumingInfo && (
+                <div className="p-3 bg-voiceflow-orange/10 border border-voiceflow-orange/30 rounded-xl flex items-center justify-between animate-fade-in">
+                  <div className="flex items-center gap-2 overflow-hidden">
+                    <span className="w-2 h-2 rounded-full bg-voiceflow-orange animate-ping shrink-0" />
+                    <span className="text-xs font-semibold text-voiceflow-orange truncate">
+                      Resuming: {resumingInfo.title}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      localStorage.removeItem('voiceflow_resume_meeting_id');
+                      localStorage.removeItem('voiceflow_resume_meeting_title');
+                      localStorage.removeItem('voiceflow_resume_previous_transcript');
+                      localStorage.removeItem('voiceflow_resume_previous_duration');
+                      localStorage.removeItem('voiceflow_auto_start_record');
+                      setResumingInfo(null);
+                    }}
+                    className="text-[11px] font-semibold text-muted-foreground hover:text-red-500 shrink-0 ml-2"
+                    title="Cancel session resumption"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
               <button 
                 onClick={() => {
                   if (isLimitReached) {
@@ -129,7 +175,7 @@ export default function RightPanel() {
               >
                 <Mic size={18} className="shrink-0" />
                 <span className="text-sm font-bold tracking-tight whitespace-nowrap font-nexa">
-                  {isLimitReached ? "Upgrade Plan to Start" : "Start Voiceflow"}
+                  {isLimitReached ? "Upgrade Plan to Start" : resumingInfo ? "Resume Recording" : "Start Voiceflow"}
                 </span>
               </button>
               {isLimitReached && (
@@ -146,7 +192,7 @@ export default function RightPanel() {
             <div className="w-full p-4 border border-red-500/30 bg-red-500/10 rounded-xl flex flex-col items-center justify-center gap-3">
               <div className="flex items-center gap-2 text-red-500 font-semibold animate-pulse text-sm">
                 <div className="w-2.5 h-2.5 rounded-full bg-red-500"></div>
-                Session Active • {formatTime(recordingTime)}
+                {resumingInfo ? 'Resumed Session' : 'Session Active'} • {formatTime(recordingTime + (resumingInfo?.prevDuration || 0))}
               </div>
               <p className="text-[11px] text-muted-foreground text-center font-dm-sans">
                 Floating co-pilot active above your meeting tabs. Drag anywhere on screen.

@@ -15,13 +15,18 @@ export async function POST(req: NextRequest) {
       ? `\nUser Role & Custom Instructions:\n"${customContext.trim()}"\nTailor all answers directly to this profile.`
       : "";
 
-    const systemPrompt = `You are an elite, ultra-fast meeting, exam, and interview co-pilot.
-When answering questions or analyzing screens (e.g. quiz/exam questions, technical problems, slides, code, or live discussions):
-- Direct & Decisive: Give the direct, correct answer immediately at the very beginning. For multiple-choice questions, clearly specify the correct option (e.g., "**Correct Answer:** B) Inca").
-- Reasoning: Provide concise, clear explanation explaining why this answer is correct.
-- Why other options are incorrect: If choices or alternatives exist, briefly explain why each other option is wrong.
-- Summary: Provide a 1-sentence quick recap.
-Format cleanly with Markdown headers and bullet points. Be clear, concise, and articulate.`;
+    const systemPrompt = `You are Voiceflow AI, an intelligent, articulate, real-time live meeting assistant and conversational co-pilot.
+You assist the user discreetly, naturally, and intelligently during live meetings, interviews, discussions, and presentations.
+
+Rules:
+- Natural Conversation: Speak naturally, warmly, and directly. If the user greets you (e.g. "hello", "hi"), greet them warmly and concisely, and ask how you can assist with their meeting or call.
+- Meeting Co-Pilot Guidance:
+  * When asked "What should I say next?", "Suggest follow-ups", or "Recap": use the live transcript context to provide crisp, articulate, high-value speaking points or questions relevant to what was just discussed.
+  * If the live transcript context is empty or minimal, politely let the user know you are actively listening to the audio and ready to suggest points as soon as dialogue begins.
+- Screen & Visual Questions:
+  * If a screen image is provided or the user asks to analyze what is on screen: inspect the visible slide, code, or document and provide direct, practical answers or speaking points.
+  * ONLY format as an exam/quiz solution (with correct option and explanation) if the screen or prompt is explicitly a multiple-choice quiz or test question. NEVER force normal conversations, greetings, or meetings into exam formats.
+- High Impact & Brevity: Keep replies concise, easily scannable in real time with markdown bullet points or short paragraphs. Avoid robotic disclaimers, repetition, or unnecessary meta-commentary.`;
 
     // Extract prior conversation history (limited to last 6 turns for optimal token economy and low latency)
     const cleanHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
@@ -32,6 +37,11 @@ Format cleanly with Markdown headers and bullet points. Be clear, concise, and a
         }
       }
     }
+
+    const openRouterKey = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENROUTER_API_KEY;
+    const openRouterBaseUrl = (process.env.OPENAI_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/+$/, '');
+    const openRouterModel = process.env.OPENAI_MODEL;
+    const groqKey = process.env.GROQ_API_KEY || process.env.NEXT_PUBLIC_GROQ_API_KEY;
 
     // 1. If GEMINI_API_KEY is available and imageBase64 is provided, try Gemini Vision with a strict timeout
     if (process.env.GEMINI_API_KEY && imageBase64) {
@@ -84,23 +94,15 @@ Format cleanly with Markdown headers and bullet points. Be clear, concise, and a
       }
     }
 
-    const openRouterKey = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENROUTER_API_KEY;
-    const openRouterBaseUrl = (process.env.OPENAI_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/+$/, '');
-    const openRouterModel = process.env.OPENAI_MODEL;
-
-    // 2. If OpenRouter is available and imageBase64 is provided, process via OpenRouter Vision
+    // 2. If imageBase64 is provided, process via OpenRouter Vision with per-model timeouts
     if (openRouterKey && imageBase64) {
       try {
         const imageUrl = imageBase64.startsWith("data:") ? imageBase64 : `data:image/jpeg;base64,${imageBase64}`;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-        // DO NOT include openrouter/free in visionModels as it routes to safety classifiers!
         const visionModels = [
-          "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
-          "dots-studio/dots-3-note-preview:free",
-          "google/gemma-4-26b-a4b-it:free",
           "meta-llama/llama-3.2-11b-vision-instruct:free",
+          "google/gemma-4-26b-a4b-it:free",
+          "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
           "openrouter/auto"
         ];
         if (openRouterModel && !visionModels.includes(openRouterModel) && openRouterModel !== "openrouter/free") {
@@ -126,6 +128,8 @@ Format cleanly with Markdown headers and bullet points. Be clear, concise, and a
         ];
 
         for (const model of visionModels) {
+          const modelController = new AbortController();
+          const timeoutId = setTimeout(() => modelController.abort(), 9000);
           try {
             const orRes = await fetch(`${openRouterBaseUrl}/chat/completions`, {
               method: "POST",
@@ -141,29 +145,29 @@ Format cleanly with Markdown headers and bullet points. Be clear, concise, and a
                 temperature: 0.3,
                 max_tokens: 2048,
               }),
-              signal: controller.signal
+              signal: modelController.signal
             });
+            clearTimeout(timeoutId);
 
             if (orRes.ok) {
               const orData = await orRes.json();
               const text = orData.choices?.[0]?.message?.content;
-              if (text && text.trim()) {
-                clearTimeout(timeoutId);
+              if (text && text.trim() && !text.includes("User Safety: safe")) {
                 recordUsage('openrouter', model);
                 return NextResponse.json({ text });
               }
             }
           } catch (mErr) {
+            clearTimeout(timeoutId);
             // try next model
           }
         }
-        clearTimeout(timeoutId);
       } catch (orErr: any) {
         console.warn("OpenRouter vision call failed, falling back to text models:", orErr?.message || orErr);
       }
     }
 
-    // 3. Fallback to OpenRouter text or Groq API (includes history context for follow-ups)
+    // 3. Ultra-fast Groq text execution (primary for pure conversation, questions, and recaps)
     const textMessages: any[] = [
       { role: "system", content: systemPrompt },
       ...cleanHistory,
@@ -173,20 +177,58 @@ Format cleanly with Markdown headers and bullet points. Be clear, concise, and a
       }
     ];
 
-    // Try OpenRouter text
+    if (groqKey) {
+      try {
+        const groq = new Groq({ 
+          apiKey: groqKey,
+          timeout: 10000,
+          maxRetries: 1,
+        });
+        
+        const groqModels = [
+          "openai/gpt-oss-120b",
+          "qwen/qwen3.8-27b",
+          "openai/gpt-oss-20b"
+        ];
+
+        for (const model of groqModels) {
+          try {
+            const candidate = await groq.chat.completions.create({
+              messages: textMessages,
+              model: model,
+              temperature: 0.3,
+              max_tokens: 2048,
+            });
+
+            const textOutput = candidate?.choices?.[0]?.message?.content || "";
+            if (textOutput.trim()) {
+              recordUsage('groq', model);
+              return NextResponse.json({ text: textOutput });
+            }
+          } catch (err: any) {
+            console.warn(`Groq model ${model} failed:`, err?.message || err);
+          }
+        }
+      } catch (groqErr) {
+        console.warn("Groq initialization/execution failed:", groqErr);
+      }
+    }
+
+    // 4. Fallback to OpenRouter text models if Groq was unavailable
     if (openRouterKey) {
       const textModels = [
         "meta-llama/llama-3.3-70b-instruct:free",
         "google/gemma-4-26b-a4b-it:free",
         "qwen/qwen-2.5-72b-instruct:free",
-        "openrouter/free",
         "openrouter/auto"
       ];
-      if (openRouterModel && !textModels.includes(openRouterModel)) {
+      if (openRouterModel && !textModels.includes(openRouterModel) && openRouterModel !== "openrouter/free") {
         textModels.unshift(openRouterModel);
       }
 
       for (const model of textModels) {
+        const textController = new AbortController();
+        const timeoutId = setTimeout(() => textController.abort(), 8000);
         try {
           const orRes = await fetch(`${openRouterBaseUrl}/chat/completions`, {
             method: "POST",
@@ -201,55 +243,22 @@ Format cleanly with Markdown headers and bullet points. Be clear, concise, and a
               messages: textMessages,
               temperature: 0.3,
               max_tokens: 2048,
-            })
+            }),
+            signal: textController.signal
           });
+          clearTimeout(timeoutId);
 
           if (orRes.ok) {
             const orData = await orRes.json();
             const answer = orData.choices?.[0]?.message?.content;
-            if (answer && answer.trim()) {
+            if (answer && answer.trim() && !answer.includes("User Safety: safe")) {
               recordUsage('openrouter', model);
               return NextResponse.json({ text: answer });
             }
           }
         } catch (orTextErr: any) {
+          clearTimeout(timeoutId);
           console.warn(`OpenRouter text call ${model} failed, checking next:`, orTextErr?.message || orTextErr);
-        }
-      }
-    }
-
-    // 4. Try Groq API
-    const groqKey = process.env.GROQ_API_KEY || process.env.NEXT_PUBLIC_GROQ_API_KEY;
-    if (groqKey) {
-      const groq = new Groq({ 
-        apiKey: groqKey,
-        timeout: 15000,
-        maxRetries: 1,
-      });
-      
-      const groqModels = [
-        "llama-3.3-70b-versatile",
-        "llama-3.1-8b-instant",
-        "qwen/qwen3.8-27b",
-        "openai/gpt-oss-120b"
-      ];
-
-      for (const model of groqModels) {
-        try {
-          const candidate = await groq.chat.completions.create({
-            messages: textMessages,
-            model: model,
-            temperature: 0.3,
-            max_tokens: 2048,
-          });
-
-          const textOutput = candidate?.choices?.[0]?.message?.content || "";
-          if (textOutput.trim()) {
-            recordUsage('groq', model);
-            return NextResponse.json({ text: textOutput });
-          }
-        } catch (err: any) {
-          console.warn(`Groq model ${model} failed:`, err?.message || err);
         }
       }
     }

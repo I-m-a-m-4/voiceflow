@@ -50,31 +50,73 @@ export async function POST(req: NextRequest) {
     });
 
     let transcriptionText = "";
+    let durationSeconds = 0;
+    let formattedTranscript = "";
+    let segments: any[] = [];
+
+    const formatTimestamp = (secs: number) => {
+      const m = Math.floor(secs / 60);
+      const s = Math.floor(secs % 60);
+      return `${m}:${s.toString().padStart(2, '0')}`;
+    };
+
     try {
-      const transcription = await groq.audio.transcriptions.create({
+      const transcription: any = await groq.audio.transcriptions.create({
         file: file,
         model: "whisper-large-v3-turbo",
-        prompt: "Meeting conversation transcription",
-        response_format: "json",
+        prompt: "Meeting and interview conversation transcription",
+        response_format: "verbose_json",
         language: "en",
         temperature: 0.0,
       });
-      transcriptionText = transcription.text;
+      transcriptionText = transcription.text || "";
+      durationSeconds = typeof transcription.duration === 'number' ? transcription.duration : 0;
+      segments = Array.isArray(transcription.segments) ? transcription.segments : [];
     } catch (turboErr: any) {
-      console.warn("whisper-large-v3-turbo failed, falling back to whisper-large-v3:", turboErr?.message || turboErr);
-      const fallbackTranscription = await groq.audio.transcriptions.create({
-        file: file,
-        model: "whisper-large-v3",
-        prompt: "Meeting conversation transcription",
-        response_format: "json",
-        language: "en",
-        temperature: 0.0,
-      });
-      transcriptionText = fallbackTranscription.text;
+      console.warn("whisper-large-v3-turbo verbose_json failed, falling back to whisper-large-v3:", turboErr?.message || turboErr);
+      try {
+        const fallbackTranscription: any = await groq.audio.transcriptions.create({
+          file: file,
+          model: "whisper-large-v3",
+          prompt: "Meeting and interview conversation transcription",
+          response_format: "verbose_json",
+          language: "en",
+          temperature: 0.0,
+        });
+        transcriptionText = fallbackTranscription.text || "";
+        durationSeconds = typeof fallbackTranscription.duration === 'number' ? fallbackTranscription.duration : 0;
+        segments = Array.isArray(fallbackTranscription.segments) ? fallbackTranscription.segments : [];
+      } catch (fallbackErr: any) {
+        console.warn("verbose_json failed, retrying with standard json:", fallbackErr?.message || fallbackErr);
+        const basicTranscription: any = await groq.audio.transcriptions.create({
+          file: file,
+          model: "whisper-large-v3-turbo",
+          response_format: "json",
+          language: "en",
+          temperature: 0.0,
+        });
+        transcriptionText = basicTranscription.text || "";
+      }
+    }
+
+    // Format segments into timestamped speaker turns
+    if (segments.length > 0) {
+      formattedTranscript = segments.map((seg: any) => {
+        const time = formatTimestamp(seg.start || 0);
+        const text = (seg.text || "").trim();
+        return `Speaker ${time}\n${text}`;
+      }).filter((block: string) => block.length > 0).join("\n\n");
+    } else {
+      formattedTranscript = transcriptionText;
     }
 
     return NextResponse.json(
-      { text: transcriptionText },
+      { 
+        text: transcriptionText,
+        formattedTranscript: formattedTranscript,
+        duration: Math.round(durationSeconds),
+        segments: segments
+      },
       {
         headers: {
           "Access-Control-Allow-Origin": "*",

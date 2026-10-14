@@ -2,9 +2,10 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { ChevronDown, MessageSquare, Play, Video, Share, Settings2, FileText, Loader2, Calendar, RefreshCw, Search, Trash2 } from 'lucide-react';
+import { ChevronDown, MessageSquare, Play, Video, Share, Settings2, FileText, Loader2, Calendar, RefreshCw, Search, Trash2, Clock } from 'lucide-react';
 import { useAuth } from '@/firebase';
 import { getUserMeetings, MeetingData } from '@/firebase/meetings';
+import { formatDuration, estimateDurationFromTranscript } from '@/lib/utils';
 
 export default function MeetingsFeed() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -143,47 +144,85 @@ export default function MeetingsFeed() {
                 className="bg-card border border-border rounded-2xl overflow-hidden hover:shadow-lg dark:hover:shadow-none transition-all cursor-pointer flex flex-col group"
               >
                 
-                <div className="p-6 flex-1 flex flex-col">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                       <div className="w-8 h-8 rounded-full bg-orange-500/20 flex items-center justify-center text-voiceflow-orange font-bold text-sm">
-                        <FileText size={16} />
+                {(() => {
+                  const durationText = (meeting as any).durationSeconds 
+                    ? formatDuration((meeting as any).durationSeconds, true) 
+                    : ((meeting as any).durationMinutes 
+                      ? formatDuration((meeting as any).durationMinutes, false) 
+                      : estimateDurationFromTranscript(meeting.transcript));
+
+                  const cardTitle = (meeting as any).title || (() => {
+                    const text = (meeting.summary || meeting.transcript || '').toLowerCase();
+                    if (text.includes('algorithm') || text.includes('leetcode') || text.includes('interview')) {
+                      return 'Computer Science Algorithm Interview';
+                    }
+                    if (text.includes('video') || text.includes('engineering') || text.includes('connect')) {
+                      return 'Technical Sync & Video Session';
+                    }
+                    return meeting.type === 'dictation' ? 'Dictation Session' : 'Meeting Transcript';
+                  })();
+
+                  const cleanSummary = (meeting.summary || meeting.transcript || "No transcript content recorded.")
+                    .replace(/^SUMMARY:\s*/i, '')
+                    .replace(/^##\s+/gm, '')
+                    .trim();
+
+                  return (
+                    <div className="p-6 flex-1 flex flex-col">
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                           <div className="w-8 h-8 rounded-full bg-orange-500/20 flex items-center justify-center text-voiceflow-orange font-bold text-sm">
+                            <FileText size={16} />
+                          </div>
+                          <div className="text-xs font-semibold text-muted-foreground flex items-center flex-wrap gap-2 font-dm-sans">
+                            <span>{formatDate(meeting.createdAt)}</span>
+                            <span>•</span>
+                            <span className="capitalize">{meeting.type === 'dictation' ? 'Dictation' : 'Meeting'}</span>
+                            <span>•</span>
+                            <span className="inline-flex items-center gap-1 font-mono text-voiceflow-orange font-medium bg-orange-500/10 px-2 py-0.5 rounded-full border border-orange-500/20">
+                              <Clock size={11} className="text-voiceflow-orange" />
+                              {durationText}
+                            </span>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setMeetingToDelete(meeting);
+                          }}
+                          className="p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
+                          title="Delete meeting"
+                        >
+                          <Trash2 size={15} />
+                        </button>
                       </div>
-                      <div className="text-xs font-semibold text-muted-foreground flex items-center gap-2 font-dm-sans">
-                        {formatDate(meeting.createdAt)} • {meeting.type === 'dictation' ? 'Dictation' : 'Meeting'}
+                      
+                      <h2 className="text-xl font-bold text-card-foreground mb-3 group-hover:text-voiceflow-orange transition-colors font-nexa">
+                        {cardTitle}
+                      </h2>
+                      
+                      <div className="bg-muted/50 p-4 rounded-xl border border-border mb-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-wider font-nexa">
+                            {meeting.summary ? 'AI Summary' : 'Transcript Excerpt'}
+                          </h4>
+                          <span className="text-[11px] font-mono text-muted-foreground font-medium">
+                            {durationText}
+                          </span>
+                        </div>
+                        <p className="text-sm text-card-foreground leading-relaxed whitespace-pre-wrap line-clamp-3 font-dm-sans">
+                          {cleanSummary}
+                        </p>
+                      </div>
+                      
+                      <div className="text-sm text-voiceflow-orange font-semibold flex items-center gap-1 mt-2">
+                        View full details →
                       </div>
                     </div>
-
-                    <button
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setMeetingToDelete(meeting);
-                      }}
-                      className="p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
-                      title="Delete meeting"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                  
-                  <h2 className="text-xl font-bold text-card-foreground mb-3 group-hover:text-voiceflow-orange transition-colors font-nexa">
-                    {meeting.summary ? 'AI Summary' : 'Raw Transcript'}
-                  </h2>
-                  
-                  <div className="bg-muted/50 p-4 rounded-xl border border-border mb-4">
-                    <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 font-nexa">
-                      {meeting.summary ? 'Summary' : 'Transcript'}
-                    </h4>
-                    <p className="text-sm text-card-foreground leading-relaxed whitespace-pre-wrap line-clamp-4 font-dm-sans">
-                      {meeting.summary || meeting.transcript || "No transcript content recorded."}
-                    </p>
-                  </div>
-                  
-                  <div className="text-sm text-voiceflow-orange font-semibold flex items-center gap-1 mt-2">
-                    View full details
-                  </div>
-                </div>
+                  );
+                })()}
               </Link>
             ))}
           </div>

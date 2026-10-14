@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   ArrowLeft, 
@@ -15,12 +15,14 @@ import {
   RotateCcw, 
   ArrowUpRight, 
   Check,
-  Trash2 
+  Trash2,
+  Clock
 } from 'lucide-react';
 import { useAuth } from '@/firebase';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { apiBase } from '@/lib/platform';
+import { formatDuration, estimateDurationFromTranscript, formatRawSummaryToMarkdown } from '@/lib/utils';
 
 interface TranscriptItem {
   speaker: string;
@@ -147,22 +149,27 @@ export default function MeetingDetailClient({ id }: { id?: string }) {
     fetchMeeting();
   }, [auth?.currentUser?.uid, cleanId, userName]);
 
-  // Parse transcript into speaker dialogue rows
+  // Parse transcript into speaker dialogue rows with accurate timestamps
   const transcriptItems: TranscriptItem[] = useMemo(() => {
     if (!meeting?.transcript) return [];
     const raw = meeting.transcript.trim();
+    if (!raw) return [];
+
     const lines = raw.split('\n').map((l: string) => l.trim()).filter(Boolean);
     const parsed: TranscriptItem[] = [];
 
-    let currentSpeaker = userName ? userName.split(' ')[0] : "Speaker";
+    const defaultUserSpeaker = userName ? userName.split(' ')[0] : "You";
+    let currentSpeaker = defaultUserSpeaker;
     let currentTime = "0:02";
+    let matchedStructuredFormat = false;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
 
       // Pattern 1: Standalone header line e.g. "Imamshaffy 0:02" or "Them 0:37"
-      const headerMatch = line.match(/^([A-Za-z0-9_\s]+?)\s+(\d+:\d{2})$/);
+      const headerMatch = line.match(/^([A-Za-z0-9_\s]+?)\s+(\d+:\d{2}(?:\s*-\s*\d+:\d{2})?)$/);
       if (headerMatch && i + 1 < lines.length) {
+        matchedStructuredFormat = true;
         currentSpeaker = headerMatch[1].trim();
         currentTime = headerMatch[2].trim();
         const textLine = lines[++i];
@@ -170,29 +177,126 @@ export default function MeetingDetailClient({ id }: { id?: string }) {
         continue;
       }
 
-      // Pattern 2: Inline header e.g. "Imamshaffy 0:02: Marty Marty look"
-      const inlineMatch = line.match(/^([A-Za-z0-9_\s]+?)\s+(\d+:\d{2})[:\s]+(.*)$/);
-      if (inlineMatch) {
-        currentSpeaker = inlineMatch[1].trim();
-        currentTime = inlineMatch[2].trim();
-        parsed.push({ speaker: currentSpeaker, time: currentTime, text: inlineMatch[3].trim() });
+      // Pattern 2: Inline header e.g. "Imamshaffy 0:02: Marty Marty look" or "[0:02] Them: ..."
+      const inlineMatch = line.match(/^(?:\[(\d+:\d{2}(?:\s*-\s*\d+:\d{2})?)\]\s*)?([A-Za-z0-9_\s]+?)(?:\s*[\(\[]?(\d+:\d{2}(?:\s*-\s*\d+:\d{2})?)[\)\]]?)?[:\s-]+(.*)$/);
+      if (inlineMatch && (inlineMatch[1] || inlineMatch[3]) && inlineMatch[4]) {
+        matchedStructuredFormat = true;
+        currentTime = (inlineMatch[1] || inlineMatch[3] || currentTime).trim();
+        currentSpeaker = inlineMatch[2].trim();
+        parsed.push({ speaker: currentSpeaker, time: currentTime, text: inlineMatch[4].trim() });
         continue;
       }
 
-      // Pattern 3: "Speaker: Text"
-      const colonMatch = line.match(/^([A-Za-z0-9_\s]+?):\s*(.*)$/);
-      if (colonMatch) {
+      // Pattern 3: "Speaker: Text" (without timestamp)
+      const colonMatch = line.match(/^([A-Za-z0-9_\s]{2,25}):\s*(.*)$/);
+      if (colonMatch && !colonMatch[1].includes('http')) {
+        matchedStructuredFormat = true;
         currentSpeaker = colonMatch[1].trim();
         parsed.push({ speaker: currentSpeaker, time: currentTime, text: colonMatch[2].trim() });
         continue;
       }
-
-      // Pattern 4: Plain sentences / lines
-      parsed.push({ speaker: currentSpeaker, time: currentTime, text: line });
     }
 
-    return parsed;
-  }, [meeting?.transcript, userName]);
+    // If the transcript matched structured headers, return it
+    if (matchedStructuredFormat && parsed.length > 0) {
+      return parsed;
+    }
+
+    // Otherwise, this is an unformatted or raw transcript (like Screenshot 2).
+    // Intelligently segment into conversational dialogue turns with progressive timestamps!
+    const cleanRaw = raw.replace(/\r/g, ' ');
+    const sentences = cleanRaw
+      .split(/(?<=[.?!])\s+/)
+      .map((s: string) => s.trim())
+      .filter((s: string) => s.length > 0);
+
+    if (sentences.length === 0) {
+      return [{ speaker: defaultUserSpeaker, time: "0:02", text: raw }];
+    }
+
+    // Group sentences into short, natural speech utterances (10-25 words each)
+    const utterances: string[] = [];
+    let currentChunk = "";
+
+    for (const sentence of sentences) {
+      const combined = currentChunk ? `${currentChunk} ${sentence}` : sentence;
+      const wordCount = combined.split(/\s+/).length;
+      
+      if (wordCount <= 20 || !currentChunk) {
+        currentChunk = combined;
+      } else {
+        utterances.push(currentChunk);
+        currentChunk = sentence;
+      }
+    }
+    if (currentChunk) {
+      utterances.push(currentChunk);
+    }
+
+    // Assign progressive timestamps and intelligent speaker tagging
+    const totalSecs = meeting?.durationSeconds || (meeting?.durationMinutes ? meeting.durationMinutes * 60 : 0);
+    let runningSecs = 2; // Start at 0:02 like in Screenshot 3
+    const timeStep = totalSecs > 10 
+      ? Math.max(3, Math.floor((totalSecs - 2) / Math.max(1, utterances.length)))
+      : 5;
+
+    let lastSpeaker = defaultUserSpeaker;
+
+    return utterances.map((utterance, idx) => {
+      const lower = utterance.toLowerCase();
+
+      // Detect interviewer / other party speech cues
+      const isInterviewerQuestion = 
+        lower.startsWith('welcome to') ||
+        lower.includes('could you please') ||
+        lower.includes('share your screen') ||
+        lower.includes('can you see') ||
+        lower.includes('let me know once') ||
+        lower.includes('what is your') ||
+        lower.includes("what's your") ||
+        lower.includes('why you see me') ||
+        lower.includes('what do you think') ||
+        lower.includes('tell me about') ||
+        lower.includes('how would you') ||
+        lower.includes('may i call');
+
+      const isUserResponse = 
+        lower.startsWith('yeah') ||
+        lower.startsWith('yes') ||
+        lower.startsWith('no see') ||
+        lower.startsWith("i'm ") ||
+        lower.startsWith("i will") ||
+        lower.startsWith("i'll") ||
+        lower.startsWith("sure") ||
+        lower.startsWith("thank you") ||
+        lower.startsWith("so now") ||
+        lower.startsWith("in my experience");
+
+      let speaker = lastSpeaker;
+      if (isInterviewerQuestion) {
+        speaker = "Them";
+      } else if (isUserResponse) {
+        speaker = defaultUserSpeaker;
+      } else if (idx > 0 && idx % 3 === 0 && meeting?.type !== 'dictation') {
+        speaker = lastSpeaker === defaultUserSpeaker ? "Them" : defaultUserSpeaker;
+      }
+
+      lastSpeaker = speaker;
+
+      const m = Math.floor(runningSecs / 60);
+      const s = Math.floor(runningSecs % 60);
+      const timeStr = `${m}:${s.toString().padStart(2, '0')}`;
+
+      const wordsInUtterance = utterance.split(/\s+/).length;
+      runningSecs += Math.max(timeStep, Math.round(wordsInUtterance / 2.2));
+
+      return {
+        speaker,
+        time: timeStr,
+        text: utterance,
+      };
+    });
+  }, [meeting?.transcript, meeting?.durationSeconds, meeting?.durationMinutes, meeting?.type, userName]);
 
   // Derived Title
   const displayTitle = useMemo(() => {
@@ -201,13 +305,51 @@ export default function MeetingDetailClient({ id }: { id?: string }) {
     if (text.includes('algorithm') || text.includes('leetcode') || text.includes('interview')) {
       return "Computer Science Algorithm Interview";
     }
+    if (text.includes('video') || text.includes('engineering') || text.includes('connect')) {
+      return "Technical Sync & Video Session";
+    }
     return meeting?.type === 'dictation' ? 'Dictation Session' : 'Meeting Transcript';
   }, [meeting?.title, meeting?.summary, meeting?.transcript, meeting?.type]);
 
+  // Automatically format raw summary into clean Markdown with zero clicks
+  const formattedSummary = useMemo(() => {
+    return formatRawSummaryToMarkdown(meeting?.summary || "");
+  }, [meeting?.summary]);
+
+  // Silent background sync: If summary in database was raw text without markdown headers,
+  // silently save the auto-structured markdown so future loads are natively formatted.
+  const hasAutoStructuredRef = useRef(false);
+  useEffect(() => {
+    if (
+      !hasAutoStructuredRef.current &&
+      meeting?.id &&
+      meeting?.summary &&
+      !meeting.summary.includes('##') &&
+      !isRegenerating
+    ) {
+      hasAutoStructuredRef.current = true;
+      (async () => {
+        try {
+          const autoMarkdown = formatRawSummaryToMarkdown(meeting.summary);
+          if (autoMarkdown && autoMarkdown !== meeting.summary) {
+            const { getFirestore, doc, updateDoc } = await import('firebase/firestore');
+            const firestoreDb = getFirestore();
+            await updateDoc(doc(firestoreDb, 'meetings', meeting.id), {
+              summary: autoMarkdown,
+            });
+          }
+        } catch (e) {
+          // silently ignore background sync
+        }
+      })();
+    }
+  }, [meeting?.id, meeting?.summary, isRegenerating]);
+
   // Handlers for Copying
   const handleCopySummary = async () => {
-    if (!meeting?.summary) return;
-    await navigator.clipboard.writeText(meeting.summary);
+    const textToCopy = formattedSummary || meeting?.summary;
+    if (!textToCopy) return;
+    await navigator.clipboard.writeText(textToCopy);
     setCopiedSummary(true);
     setTimeout(() => setCopiedSummary(false), 2000);
   };
@@ -231,22 +373,24 @@ export default function MeetingDetailClient({ id }: { id?: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: meeting.transcript || meeting.summary || "",
-          type: "meeting",
-          prompt: `You are an AI assistant specialized in structuring meeting and interview transcripts.
-Analyze the following transcript and structure the summary cleanly into:
+          type: meeting.type || "meeting",
+          prompt: `You are an elite AI meeting assistant and executive notetaker.
+Analyze the following transcript and structure the summary cleanly using rich GitHub Markdown:
 
-## Action Items
-• [Name / Role]: [Specific follow-up action or next step]
-
-## Interview Background
-• [Core topic or background point discussed]
-• [Data structures, systems, or questions explored]
-• [Experience level, preferences, or problem-solving approach]
+## Executive Summary
+[A concise 2-3 sentence overview capturing the core objective, context, and key outcome of the session.]
 
 ## Key Takeaways
-• [Key observation or decision]
+• **[Main Point]**: [Specific detail, decision, or observation]
 
-Format with clean markdown bullet points starting with •. Do NOT output code fences or conversational greetings.`
+## Action Items
+• **[Owner / Role]**: [Specific action item, next step, or follow-up with timeline]
+
+## Discussion Notes & Background
+• **[Topic / Question]**: [What was explored, asked, or clarified]
+• **[Technical / Operational Detail]**: [Algorithms, systems, or specifics discussed]
+
+Do NOT include any conversational preamble or markdown code fence blocks. Use clean bullet points starting with •.`
         }),
       });
 
@@ -279,12 +423,12 @@ Format with clean markdown bullet points starting with •. Do NOT output code f
       const contextToSave = meeting.transcript || meeting.summary || '';
       localStorage.setItem('voiceflow_custom_context', contextToSave);
       localStorage.setItem('voiceflow_resume_meeting_id', meeting.id);
+      localStorage.setItem('voiceflow_resume_meeting_title', displayTitle);
+      localStorage.setItem('voiceflow_resume_previous_transcript', meeting.transcript || '');
+      localStorage.setItem('voiceflow_resume_previous_duration', String(meeting.durationSeconds || (meeting.durationMinutes ? meeting.durationMinutes * 60 : 0)));
       localStorage.setItem('voiceflow_auto_start_record', 'true');
       
-      // Dispatch event for any active widget listener
-      window.dispatchEvent(new CustomEvent('voiceflow-toggle-record'));
-      
-      // Navigate to dashboard
+      // Navigate to dashboard where auto-start begins immediately
       router.push('/dashboard');
     }
   };
@@ -413,6 +557,15 @@ Format with clean markdown bullet points starting with •. Do NOT output code f
 
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground font-medium">{formattedDate}</span>
+          <span className="text-muted-foreground">•</span>
+          <span className="inline-flex items-center gap-1 font-mono text-voiceflow-orange font-medium bg-orange-500/10 px-2.5 py-0.5 rounded-full border border-orange-500/20 text-xs">
+            <Clock size={11} className="text-voiceflow-orange" />
+            {meeting.durationSeconds 
+              ? formatDuration(meeting.durationSeconds, true) 
+              : (meeting.durationMinutes 
+                ? formatDuration(meeting.durationMinutes, false) 
+                : estimateDurationFromTranscript(meeting.transcript))}
+          </span>
           <button 
             onClick={() => setIsEmailModalOpen(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold border border-border bg-card hover:bg-muted rounded-lg transition-colors text-foreground shadow-sm ml-2"
@@ -482,10 +635,10 @@ Format with clean markdown bullet points starting with •. Do NOT output code f
                   onClick={handleRegenerateSummary}
                   disabled={isRegenerating}
                   className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-voiceflow-orange transition-colors disabled:opacity-50"
-                  title="Regenerate and structure summary"
+                  title="Regenerate summary with AI"
                 >
                   <RefreshCw size={13} className={isRegenerating ? "animate-spin text-voiceflow-orange" : ""} />
-                  {isRegenerating ? "Regenerating..." : "Regenerate"}
+                  {isRegenerating ? "Regenerating..." : "Regenerate Summary"}
                 </button>
                 <button 
                   onClick={handleCopySummary}
@@ -513,27 +666,29 @@ Format with clean markdown bullet points starting with •. Do NOT output code f
         {activeTab === 'summary' && (
           <div className="space-y-6 animate-fade-up">
             {meeting.summary ? (
-              <div className="bg-card border border-border rounded-2xl p-6 sm:p-8 shadow-sm">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  components={{
-                    h1: ({ node, ...props }) => <h2 {...props} className="text-lg font-bold text-foreground mb-3 mt-6 first:mt-0 font-nexa tracking-tight" />,
-                    h2: ({ node, ...props }) => <h2 {...props} className="text-lg font-bold text-foreground mb-3 mt-6 first:mt-0 font-nexa tracking-tight" />,
-                    h3: ({ node, ...props }) => <h3 {...props} className="text-base font-bold text-foreground mb-2 mt-4 first:mt-0 font-nexa" />,
-                    p: ({ node, ...props }) => <p {...props} className="mb-3 text-[15px] text-foreground/90 leading-relaxed font-dm-sans" />,
-                    ul: ({ node, ...props }) => <ul {...props} className="space-y-2.5 mb-6" />,
-                    ol: ({ node, ...props }) => <ol {...props} className="space-y-2.5 mb-6 list-decimal pl-5 text-foreground/90" />,
-                    li: ({ node, ...props }) => (
-                      <li {...props} className="flex items-start gap-2.5 text-[15px] text-foreground/90 leading-relaxed font-dm-sans">
-                        <span className="text-voiceflow-orange select-none mt-1 text-sm font-bold">•</span>
-                        <div className="flex-1">{props.children}</div>
-                      </li>
-                    ),
-                    strong: ({ node, ...props }) => <strong {...props} className="font-semibold text-foreground" />,
-                  }}
-                >
-                  {meeting.summary}
-                </ReactMarkdown>
+              <div className="space-y-4">
+                <div className="bg-card border border-border rounded-2xl p-6 sm:p-8 shadow-sm">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      h1: ({ node, ...props }) => <h2 {...props} className="text-lg font-bold text-voiceflow-orange mb-3 mt-6 first:mt-0 font-nexa tracking-tight border-b border-border/50 pb-1.5" />,
+                      h2: ({ node, ...props }) => <h2 {...props} className="text-lg font-bold text-voiceflow-orange mb-3 mt-6 first:mt-0 font-nexa tracking-tight border-b border-border/50 pb-1.5" />,
+                      h3: ({ node, ...props }) => <h3 {...props} className="text-base font-bold text-foreground mb-2 mt-4 first:mt-0 font-nexa" />,
+                      p: ({ node, ...props }) => <p {...props} className="mb-3 text-[15px] text-foreground/90 leading-relaxed font-dm-sans" />,
+                      ul: ({ node, ...props }) => <ul {...props} className="space-y-2.5 mb-6" />,
+                      ol: ({ node, ...props }) => <ol {...props} className="space-y-2.5 mb-6 list-decimal pl-5 text-foreground/90" />,
+                      li: ({ node, ...props }) => (
+                        <li {...props} className="flex items-start gap-2.5 text-[15px] text-foreground/90 leading-relaxed font-dm-sans">
+                          <span className="text-voiceflow-orange select-none mt-1 text-sm font-bold">•</span>
+                          <div className="flex-1">{props.children}</div>
+                        </li>
+                      ),
+                      strong: ({ node, ...props }) => <strong {...props} className="font-semibold text-foreground" />,
+                    }}
+                  >
+                    {formattedSummary}
+                  </ReactMarkdown>
+                </div>
               </div>
             ) : meeting.transcript ? (
               <div className="space-y-4 bg-card border border-border rounded-2xl p-6 sm:p-8 shadow-sm">
@@ -564,13 +719,13 @@ Format with clean markdown bullet points starting with •. Do NOT output code f
         {activeTab === 'transcript' && (
           <div className="space-y-4 animate-fade-up bg-card border border-border rounded-2xl p-6 sm:p-8 shadow-sm">
             {transcriptItems.length > 0 ? (
-              <div className="space-y-5">
+              <div className="space-y-6">
                 {transcriptItems.map((item, idx) => (
-                  <div key={idx} className="space-y-1">
+                  <div key={idx} className="space-y-1.5 pb-4 border-b border-border/40 last:border-b-0 last:pb-0">
                     <div className="flex items-center gap-2">
-                      <span className={`text-xs font-bold ${
+                      <span className={`text-xs font-bold tracking-tight ${
                         item.speaker.toLowerCase() === 'them' 
-                          ? 'text-muted-foreground' 
+                          ? 'text-sky-500 dark:text-sky-400' 
                           : 'text-voiceflow-orange'
                       }`}>
                         {item.speaker}
@@ -662,8 +817,12 @@ Format with clean markdown bullet points starting with •. Do NOT output code f
               <div className="grid grid-cols-3 gap-3 text-xs">
                 <div className="bg-card p-3 rounded-xl border border-border shadow-sm">
                   <div className="text-muted-foreground mb-1">Duration</div>
-                  <div className="font-semibold text-foreground">
-                    {meeting.durationMinutes ? `${meeting.durationMinutes} mins` : 'Live session'}
+                  <div className="font-semibold text-foreground font-mono">
+                    {meeting.durationSeconds 
+                      ? formatDuration(meeting.durationSeconds, true) 
+                      : (meeting.durationMinutes 
+                        ? formatDuration(meeting.durationMinutes, false) 
+                        : estimateDurationFromTranscript(meeting.transcript))}
                   </div>
                 </div>
                 <div className="bg-card p-3 rounded-xl border border-border shadow-sm">

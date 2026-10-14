@@ -28,26 +28,48 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ text: trimmed });
     }
 
-    let systemPrompt = "You are a helpful assistant.";
+    let systemPrompt = "You are an elite AI meeting assistant and executive notetaker.";
     if (prompt && typeof prompt === 'string' && prompt.trim()) {
       systemPrompt = prompt.trim();
     } else if (type === "dictation") {
-      systemPrompt = "You are an AI that cleans up dictation transcripts. Remove filler words (ums, ahs), fix stuttering, and ensure proper punctuation and formatting. Output ONLY the cleaned text, without any conversational preamble or markdown code blocks.";
-    } else if (type === "meeting") {
-      systemPrompt = `You are an AI assistant specialized in structuring meeting and interview transcripts.
-Extract and format with clean Markdown headers and bullet points:
+      systemPrompt = `You are an elite AI notetaker and speech editor.
+Transform the spoken dictation into a polished, beautifully structured document with rich GitHub Markdown. Never output a raw unformatted blob or conversational preamble.
 
-## Action Items
-• [Person / Role]: [Specific action item, next step, or follow-up]
+Structure your response with clean Markdown:
 
-## Interview Background
-• [Topic or key background point discussed]
-• [Specific technologies, algorithms, or points mentioned]
+## Executive Summary
+[A concise 2-3 sentence overview of the core subject, main thoughts, and intent.]
+
+## Key Points & Ideas
+• **[Main Idea]**: [Clear elaboration without filler words or stutters]
+• **[Detail/Context]**: [Specific insight, thought, or reference mentioned]
+
+## Action Items & Next Steps
+• **[Action]**: [Any follow-up, task, or decision that should be taken]
+
+## Cleaned Dictation Notes
+[Refined, coherent paragraphs of the spoken content with proper punctuation and natural flow.]`;
+    } else {
+      systemPrompt = `You are an elite AI assistant specialized in structuring meeting and interview transcripts.
+Transform the transcript into a polished, structured executive document using rich GitHub Markdown. Never output a raw unformatted blob or conversational preamble.
+
+Structure your response with clean Markdown:
+
+## Executive Summary
+[A concise 2-3 sentence overview capturing the core objective, context, and key outcome of the session.]
 
 ## Key Takeaways
-• [Main conclusions or observations]
+• **[Core Observation]**: [Specific detail or takeaway]
+• **[Key Decision/Metric]**: [Specific outcome or decision]
 
-Do NOT include any conversational preamble or markdown code fence blocks. Use clean bullet points.`;
+## Action Items
+• **[Person / Role]**: [Specific action item, next step, or follow-up with clear context]
+
+## Discussion Highlights & Background
+• **[Topic / Question]**: [What was explored, asked, or clarified]
+• **[Technical / Operational Detail]**: [Algorithms, systems, or specifics discussed]
+
+Do NOT include any conversational preamble or markdown code fence blocks. Use clean bullet points starting with •.`;
     }
 
     if (customContext && typeof customContext === 'string' && customContext.trim()) {
@@ -56,9 +78,11 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
 
     // Official lightning-fast Groq models currently supported on the platform
     const modelsToTry = [
-      "openai/gpt-oss-20b",
+      "openai/gpt-oss-120b",
       "qwen/qwen3.8-27b",
-      "openai/gpt-oss-120b"
+      "openai/gpt-oss-20b",
+      "llama-3.3-70b-versatile",
+      "llama-3.1-8b-instant"
     ];
     let completion = null;
     let lastError = null;
