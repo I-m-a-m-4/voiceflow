@@ -117,9 +117,26 @@ export default function MeetingDetailClient({ id }: { id?: string }) {
             : `Thank You for the ${title}`;
           setEmailSubject(cleanSubject);
 
-          // Seed sample assist if no assists exist
-          if (docData.assists && Array.isArray(docData.assists)) {
+          // Load assists or reconstruct from chatMessages
+          if (docData.assists && Array.isArray(docData.assists) && docData.assists.length > 0) {
             setAssists(docData.assists);
+          } else if (docData.chatMessages && Array.isArray(docData.chatMessages) && docData.chatMessages.length > 0) {
+            const reconstructedAssists: AssistItem[] = [];
+            for (let i = 0; i < docData.chatMessages.length; i += 2) {
+              const u = docData.chatMessages[i];
+              const a = docData.chatMessages[i + 1];
+              if (u && a && u.sender === 'user' && a.sender === 'ai') {
+                reconstructedAssists.push({
+                  prompt: u.text,
+                  type: "Assist",
+                  response: a.text,
+                  timestamp: u.timestamp || a.timestamp
+                });
+              }
+            }
+            if (reconstructedAssists.length > 0) {
+              setAssists(reconstructedAssists);
+            }
           } else {
             setAssists([
               {
@@ -428,6 +445,34 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
       localStorage.setItem('voiceflow_resume_previous_duration', String(meeting.durationSeconds || (meeting.durationMinutes ? meeting.durationMinutes * 60 : 0)));
       localStorage.setItem('voiceflow_auto_start_record', 'true');
       
+      // Load and convert chat history for this specific meeting so the floating chatbox shows it immediately
+      const messagesToLoad: Array<{ id: string; sender: 'user' | 'ai'; text: string; timestamp: string }> = [];
+      if (meeting.chatMessages && Array.isArray(meeting.chatMessages) && meeting.chatMessages.length > 0) {
+        messagesToLoad.push(...meeting.chatMessages);
+      } else if (assists && Array.isArray(assists) && assists.length > 0) {
+        assists.forEach((ast, idx) => {
+          // Exclude default placeholder if it's the only one
+          if (assists.length === 1 && ast.prompt === "What should I say?" && !meeting.assists) {
+            return;
+          }
+          messagesToLoad.push({
+            id: `user-ast-${idx}`,
+            sender: 'user',
+            text: ast.prompt,
+            timestamp: ast.timestamp || 'Earlier',
+          });
+          messagesToLoad.push({
+            id: `ai-ast-${idx}`,
+            sender: 'ai',
+            text: ast.response,
+            timestamp: ast.timestamp || 'Earlier',
+          });
+        });
+      }
+
+      localStorage.setItem('voiceflow_widget_messages', JSON.stringify(messagesToLoad));
+      localStorage.setItem('voiceflow_resume_chat_messages', JSON.stringify(messagesToLoad));
+
       // Navigate to dashboard where auto-start begins immediately
       router.push('/dashboard');
     }
@@ -459,9 +504,42 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
         prompt: q,
         type: "Assist",
         response: ans,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
 
-      setAssists((prev) => [...prev, newAssist]);
+      const updatedAssists = [...assists, newAssist];
+      setAssists(updatedAssists);
+
+      // Convert assists to chatMessages format
+      const updatedChatMessages: Array<{ id: string; sender: 'user' | 'ai'; text: string; timestamp: string }> = [];
+      updatedAssists.forEach((ast, idx) => {
+        updatedChatMessages.push({
+          id: `user-ast-${idx}`,
+          sender: 'user',
+          text: ast.prompt,
+          timestamp: ast.timestamp || 'Earlier',
+        });
+        updatedChatMessages.push({
+          id: `ai-ast-${idx}`,
+          sender: 'ai',
+          text: ast.response,
+          timestamp: ast.timestamp || 'Earlier',
+        });
+      });
+
+      // Update local meeting state
+      setMeeting((prev: any) => prev ? { ...prev, assists: updatedAssists, chatMessages: updatedChatMessages } : prev);
+
+      // Persist to Firestore
+      try {
+        const { updateMeeting } = await import('@/firebase/meetings');
+        await updateMeeting(meeting.id, {
+          assists: updatedAssists,
+          chatMessages: updatedChatMessages,
+        }, auth?.currentUser?.uid);
+      } catch (err) {
+        console.warn("Could not save new assist to firestore:", err);
+      }
 
       // If user is on another tab, switch to usage tab to show response
       if (activeTab !== 'usage') {

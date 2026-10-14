@@ -325,6 +325,32 @@ export function useAudioRecorder() {
 
       // 3. Save or Update in Firestore
       if (user?.uid) {
+        // Read current widget chat messages from localStorage so they are persisted to Firestore
+        let currentChatMessages: any[] = [];
+        let currentAssists: any[] = [];
+        try {
+          const rawChat = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_widget_messages') : null;
+          if (rawChat) {
+            currentChatMessages = JSON.parse(rawChat);
+            if (Array.isArray(currentChatMessages)) {
+              for (let i = 0; i < currentChatMessages.length; i += 2) {
+                const u = currentChatMessages[i];
+                const a = currentChatMessages[i + 1];
+                if (u && a && u.sender === 'user' && a.sender === 'ai') {
+                  currentAssists.push({
+                    prompt: u.text,
+                    type: 'Assist',
+                    response: a.text,
+                    timestamp: u.timestamp || a.timestamp,
+                  });
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("Could not parse widget messages for meeting save:", e);
+        }
+
         if (resumeMeetingId) {
           const { updateMeeting } = await import("@/firebase/meetings");
           await updateMeeting(resumeMeetingId, {
@@ -332,6 +358,8 @@ export function useAudioRecorder() {
             summary: finalOutput,
             durationSeconds: totalDurationSeconds,
             durationMinutes: totalDurationMinutes,
+            chatMessages: currentChatMessages,
+            assists: currentAssists,
           }, user.uid);
         } else {
           await saveMeeting({
@@ -340,7 +368,9 @@ export function useAudioRecorder() {
             summary: finalOutput,
             durationSeconds: totalDurationSeconds,
             durationMinutes: totalDurationMinutes,
-            type
+            type,
+            chatMessages: currentChatMessages,
+            assists: currentAssists,
           });
         }
 
@@ -374,6 +404,7 @@ export function useAudioRecorder() {
         localStorage.removeItem('voiceflow_resume_meeting_title');
         localStorage.removeItem('voiceflow_resume_previous_transcript');
         localStorage.removeItem('voiceflow_resume_previous_duration');
+        localStorage.removeItem('voiceflow_resume_chat_messages');
         localStorage.removeItem('voiceflow_auto_start_record');
 
         // Redirect back to meeting details page so user sees resumed transcript immediately

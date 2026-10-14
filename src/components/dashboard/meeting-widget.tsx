@@ -54,6 +54,15 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     if (typeof window !== 'undefined') {
       try {
+        const resumeMeetingId = localStorage.getItem('voiceflow_resume_meeting_id');
+        if (resumeMeetingId) {
+          const resumeChat = localStorage.getItem('voiceflow_resume_chat_messages');
+          if (resumeChat) {
+            const parsed = JSON.parse(resumeChat);
+            if (Array.isArray(parsed)) return parsed;
+          }
+          return [];
+        }
         const saved = localStorage.getItem('voiceflow_widget_messages');
         if (saved) return JSON.parse(saved);
       } catch (e) {
@@ -147,14 +156,52 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
     lastImageBase64Ref.current = null;
     if (typeof window !== 'undefined') {
       localStorage.removeItem('voiceflow_widget_messages');
+      localStorage.removeItem('voiceflow_resume_chat_messages');
     }
   };
+
+  // Ensure resumed chat history is synchronized into state when recording starts
+  useEffect(() => {
+    if (!isRecording || typeof window === 'undefined') return;
+    try {
+      const resumeMeetingId = localStorage.getItem('voiceflow_resume_meeting_id');
+      if (resumeMeetingId) {
+        const resumeChat = localStorage.getItem('voiceflow_resume_chat_messages');
+        if (resumeChat) {
+          const parsed = JSON.parse(resumeChat);
+          if (Array.isArray(parsed)) {
+            setMessages(parsed);
+            return;
+          }
+        }
+        setMessages([]);
+        return;
+      }
+
+      const saved = localStorage.getItem('voiceflow_widget_messages');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          setMessages(parsed);
+          return;
+        }
+      }
+      setMessages([]);
+    } catch (e) {
+      console.warn("Could not synchronize resumed messages:", e);
+    }
+  }, [isRecording]);
 
   // Persist chat history across requests and re-renders
   useEffect(() => {
     if (typeof window !== 'undefined' && messages.length > 0) {
       try {
-        localStorage.setItem('voiceflow_widget_messages', JSON.stringify(messages.slice(-30)));
+        const serialized = JSON.stringify(messages.slice(-30));
+        localStorage.setItem('voiceflow_widget_messages', serialized);
+        const resumeMeetingId = localStorage.getItem('voiceflow_resume_meeting_id');
+        if (resumeMeetingId) {
+          localStorage.setItem('voiceflow_resume_chat_messages', serialized);
+        }
       } catch (e) {
         // ignore
       }

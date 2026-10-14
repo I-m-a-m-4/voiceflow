@@ -69,12 +69,16 @@ export default function RightPanel() {
           }
           return;
         }
+        if (!resumingInfo && typeof window !== 'undefined') {
+          localStorage.removeItem('voiceflow_widget_messages');
+          localStorage.removeItem('voiceflow_resume_chat_messages');
+        }
         startRecording(false);
       }
     };
     window.addEventListener('voiceflow-toggle-record', handleToggle);
     return () => window.removeEventListener('voiceflow-toggle-record', handleToggle);
-  }, [isRecording, stopRecording, startRecording, isLimitReached]);
+  }, [isRecording, stopRecording, startRecording, isLimitReached, resumingInfo]);
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60).toString().padStart(2, '0');
@@ -146,6 +150,8 @@ export default function RightPanel() {
                       localStorage.removeItem('voiceflow_resume_meeting_title');
                       localStorage.removeItem('voiceflow_resume_previous_transcript');
                       localStorage.removeItem('voiceflow_resume_previous_duration');
+                      localStorage.removeItem('voiceflow_resume_chat_messages');
+                      localStorage.removeItem('voiceflow_widget_messages');
                       localStorage.removeItem('voiceflow_auto_start_record');
                       setResumingInfo(null);
                     }}
@@ -163,6 +169,10 @@ export default function RightPanel() {
                       window.dispatchEvent(new CustomEvent('open-billing-modal'));
                     }
                     return;
+                  }
+                  if (!resumingInfo && typeof window !== 'undefined') {
+                    localStorage.removeItem('voiceflow_widget_messages');
+                    localStorage.removeItem('voiceflow_resume_chat_messages');
                   }
                   startRecording(false);
                 }} 

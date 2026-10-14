@@ -1,6 +1,20 @@
 import { firestore } from './instance';
 import { collection, addDoc, serverTimestamp, doc, getDoc, getDocs, query, where, orderBy, deleteDoc, updateDoc } from 'firebase/firestore';
 
+export interface ChatMessageItem {
+  id: string;
+  sender: 'user' | 'ai';
+  text: string;
+  timestamp: string;
+}
+
+export interface AssistItemData {
+  prompt: string;
+  type?: string;
+  response: string;
+  timestamp?: string;
+}
+
 export interface MeetingData {
   userId: string;
   transcript: string;
@@ -10,6 +24,8 @@ export interface MeetingData {
   durationMinutes?: number;
   audioUrl?: string; // We can add audio storage later
   type: 'meeting' | 'dictation';
+  chatMessages?: ChatMessageItem[];
+  assists?: AssistItemData[];
   createdAt?: any;
   updatedAt?: any;
 }
