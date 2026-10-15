@@ -106,16 +106,28 @@ export function TauriLayoutWrapper({ children }: { children: React.ReactNode }) 
     }
   }, [isRecording]);
 
+  // On the web (browser), render normal scrollable page layout without desktop frame locking
+  if (!isTauri) {
+    return (
+      <div className="flex flex-col min-h-screen w-full bg-background text-foreground">
+        {children}
+      </div>
+    );
+  }
+
+  // Inside desktop Tauri shell
   return (
     <div
       className={cn(
-        "flex flex-col w-full overflow-hidden",
+        "flex flex-col w-full",
         isRecording 
           ? "h-0 max-h-0 bg-transparent overflow-hidden pointer-events-none" 
-          : (darkTopInset ? "h-screen max-h-screen bg-black text-white" : "h-screen max-h-screen bg-background text-foreground")
+          : (darkTopInset 
+              ? "h-screen max-h-screen overflow-hidden bg-black text-white" 
+              : "h-screen max-h-screen overflow-hidden bg-background text-foreground")
       )}
     >
-      <div className={cn("flex-1 flex flex-col relative min-h-0 overflow-hidden", isRecording && "hidden")}>
+      <div className={cn("flex-1 flex flex-col relative min-h-0 overflow-y-auto", isRecording && "hidden")}>
         {children}
       </div>
     </div>

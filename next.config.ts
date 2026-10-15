@@ -30,6 +30,16 @@ const nextConfig: NextConfig = {
   redirects: isTauri ? undefined : async () => {
     return [
       {
+        source: '/privacy',
+        destination: '/legal/privacy-policy',
+        permanent: true,
+      },
+      {
+        source: '/privacy-policy',
+        destination: '/legal/privacy-policy',
+        permanent: true,
+      },
+      {
         source: '/industries/:path*',
         destination: '/use-cases',
         permanent: true,
