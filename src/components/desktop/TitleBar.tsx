@@ -55,7 +55,7 @@ export function DesktopTitleBar() {
     return () => window.removeEventListener('voiceflow-record-state', handleRecordState);
   }, []);
 
-  if (!isTauri || pathname?.startsWith('/widget') || isRecording) return null;
+  if (!isTauri || isRecording) return null;
 
   const handleMinimize = async () => {
     if (!isTauri) return;

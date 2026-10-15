@@ -88,6 +88,39 @@ export function estimateDurationFromTranscript(transcript?: string): string {
   return formatDuration(estimatedSecs, true);
 }
 
+export function cleanSummaryForCard(raw?: string): string {
+  if (!raw || typeof raw !== 'string') return "No transcript content recorded.";
+  let text = raw.replace(/^SUMMARY:\s*/i, '').trim();
+
+  // Strip Markdown code fences if any
+  text = text.replace(/```[a-z]*\n[\s\S]*?```/gi, '');
+
+  // Strip duplicated or initial section headers like:
+  // "## Executive Summary", "**Executive Summary**", "Executive Summary:"
+  // repeatedly until we reach the actual body text
+  text = text
+    .replace(/^(?:#+\s*)?(?:\*\*)?(?:Executive Summary|Summary|Key Takeaways|Overview|Meeting Summary)(?:\*\*)?:?\s*/i, '')
+    .replace(/^(?:#+\s*)?(?:\*\*)?(?:Executive Summary|Summary|Key Takeaways|Overview|Meeting Summary)(?:\*\*)?:?\s*/i, '')
+    .trim();
+
+  // Strip remaining markdown headers (e.g. ## Key Points, ### Action Items)
+  text = text.replace(/^#+\s+/gm, '');
+
+  // Strip markdown bold / italic symbols (**bold** -> bold, *italic* -> italic)
+  text = text.replace(/\*\*([^*]+)\*\*/g, '$1');
+  text = text.replace(/\*([^*]+)\*/g, '$1');
+  text = text.replace(/__([^_]+)__/g, '$1');
+  text = text.replace(/_([^_]+)_/g, '$1');
+
+  // Clean bullet points
+  text = text.replace(/^[•\-\*]\s+/gm, '• ');
+
+  // Collapse 3+ linebreaks into 2
+  text = text.replace(/\n{3,}/g, '\n\n').trim();
+
+  return text || "No transcript content recorded.";
+}
+
 /**
  * Automatically converts raw or unformatted session summary text into
  * clean GitHub Markdown with executive sections and bullet points.
@@ -95,6 +128,9 @@ export function estimateDurationFromTranscript(transcript?: string): string {
 export function formatRawSummaryToMarkdown(raw?: string): string {
   if (!raw || typeof raw !== 'string') return '';
   let text = raw.replace(/^SUMMARY:\s*/i, '').trim();
+
+  // Clean redundant bold duplicate headers right after markdown header (e.g. "## Executive Summary\n**Executive Summary**")
+  text = text.replace(/(##\s*Executive Summary\s*\n+)\*\*Executive Summary\*\*[:\s]*/gi, '$1');
 
   // If already structured with Markdown headers and bullet points, return cleanly
   if (/^##\s+/m.test(text)) {

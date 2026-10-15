@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { ChevronDown, MessageSquare, Play, Video, Share, Settings2, FileText, Loader2, Calendar, RefreshCw, Search, Trash2, Clock } from 'lucide-react';
 import { useAuth } from '@/firebase';
 import { getUserMeetings, MeetingData } from '@/firebase/meetings';
-import { formatDuration, estimateDurationFromTranscript } from '@/lib/utils';
+import { formatDuration, estimateDurationFromTranscript, cleanSummaryForCard } from '@/lib/utils';
 
 export default function MeetingsFeed() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -162,10 +162,7 @@ export default function MeetingsFeed() {
                     return meeting.type === 'dictation' ? 'Dictation Session' : 'Meeting Transcript';
                   })();
 
-                  const cleanSummary = (meeting.summary || meeting.transcript || "No transcript content recorded.")
-                    .replace(/^SUMMARY:\s*/i, '')
-                    .replace(/^##\s+/gm, '')
-                    .trim();
+                  const cleanSummary = cleanSummaryForCard(meeting.summary || meeting.transcript);
 
                   return (
                     <div className="p-6 flex-1 flex flex-col">
