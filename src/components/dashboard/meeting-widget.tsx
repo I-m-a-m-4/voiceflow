@@ -80,6 +80,13 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
     setMounted(true);
     const checkTauri = async () => {
       try {
+        if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
+          const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+          if (!isMobile) {
+            setIsTauri(true);
+            return;
+          }
+        }
         const { getCurrentWindow } = await import('@tauri-apps/api/window');
         if (getCurrentWindow()) {
           const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -120,45 +127,52 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
     let isCancelled = false;
     const adjustWindow = async () => {
       try {
-        const { getCurrentWindow, LogicalSize } = await import('@tauri-apps/api/window');
-        const win = getCurrentWindow();
-        if (!win || isCancelled) return;
+        // 1. Native Rust Command: executes with full privileges without capability hurdles
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('enter_hud_mode', { isExpanded, isHidden });
+      } catch (invokeErr) {
+        console.warn("enter_hud_mode invoke failed, trying JS API fallback:", invokeErr);
+        try {
+          const { getCurrentWindow, LogicalSize, LogicalPosition, currentMonitor } = await import('@tauri-apps/api/window');
+          const win = getCurrentWindow();
+          if (!win || isCancelled) return;
 
-        // If the window was maximized by the user, Windows OS refuses to resize it.
-        // Calling unmaximize() first frees the window to shrink into the floating widget.
-        if (await win.isMaximized()) {
-          await win.unmaximize();
-        }
-
-        const targetW = isExpanded ? 700 : 640;
-        const targetH = isHidden ? 70 : (isExpanded ? 640 : 540);
-
-        await win.setSize(new LogicalSize(targetW, targetH));
-
-        // Position widget nicely at top center of screen on initial recording start
-        if (!hasPositionedRef.current) {
-          hasPositionedRef.current = true;
-          try {
-            const { currentMonitor, LogicalPosition } = await import('@tauri-apps/api/window');
-            const monitor = await currentMonitor();
-            if (monitor) {
-              const scaleFactor = monitor.scaleFactor || 1;
-              const screenLogicalW = monitor.size.width / scaleFactor;
-              const posX = Math.max(0, Math.round((screenLogicalW - targetW) / 2));
-              const posY = 35; // 35px from top
-              await win.setPosition(new LogicalPosition(posX, posY));
-            } else {
-              await win.center();
-            }
-          } catch (posErr) {
-            console.warn("Could not set top position:", posErr);
+          // If the window was maximized by the user, Windows OS refuses to resize it.
+          // Calling unmaximize() first frees the window to shrink into the floating widget.
+          if (await win.isMaximized()) {
+            await win.unmaximize();
           }
-        }
 
-        await win.setAlwaysOnTop(true);
-        await win.setSkipTaskbar(true);
-      } catch (err) {
-        console.warn("Tauri window resize error:", err);
+          const targetW = isHidden ? 440 : (isExpanded ? 660 : 580);
+          const targetH = isHidden ? 70 : (isExpanded ? 620 : 500);
+
+          await win.setSize(new LogicalSize(targetW, targetH));
+
+          // Position widget nicely at top center of screen on initial recording start
+          if (!hasPositionedRef.current) {
+            hasPositionedRef.current = true;
+            try {
+              const monitor = await currentMonitor();
+              if (monitor) {
+                const scaleFactor = monitor.scaleFactor || 1;
+                const screenLogicalW = monitor.size.width / scaleFactor;
+                const posX = Math.max(0, Math.round((screenLogicalW - targetW) / 2));
+                const posY = 35; // 35px from top
+                await win.setPosition(new LogicalPosition(posX, posY));
+              } else {
+                await win.center();
+              }
+            } catch (posErr) {
+              console.warn("Could not set top position:", posErr);
+            }
+          }
+
+          await win.setAlwaysOnTop(true);
+          await win.setSkipTaskbar(true);
+          await win.setContentProtected(true);
+        } catch (err) {
+          console.warn("Tauri window resize error:", err);
+        }
       }
     };
 
@@ -170,14 +184,21 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
     hasPositionedRef.current = false;
     if (isTauri) {
       try {
-        const { getCurrentWindow, LogicalSize } = await import('@tauri-apps/api/window');
-        const win = getCurrentWindow();
-        await win.setSize(new LogicalSize(1024, 768));
-        await win.center();
-        await win.setAlwaysOnTop(false);
-        await win.setSkipTaskbar(false);
-      } catch (e) {
-        console.warn("Error restoring Tauri window on stop:", e);
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('exit_hud_mode');
+      } catch (err) {
+        console.warn("exit_hud_mode invoke failed, trying JS API fallback:", err);
+        try {
+          const { getCurrentWindow, LogicalSize } = await import('@tauri-apps/api/window');
+          const win = getCurrentWindow();
+          await win.setSize(new LogicalSize(1024, 768));
+          await win.center();
+          await win.setAlwaysOnTop(false);
+          await win.setSkipTaskbar(false);
+          await win.setContentProtected(false);
+        } catch (e) {
+          console.warn("Error restoring Tauri window on stop:", e);
+        }
       }
     }
     stopRecording();
@@ -568,7 +589,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
       drag={!isTauri}
       dragMomentum={false}
       className={isTauri 
-        ? `w-full h-full flex flex-col items-center justify-start p-2 pointer-events-auto select-none font-dm-sans`
+        ? `fixed inset-0 top-0 left-0 w-full h-full flex flex-col items-center justify-start p-2 pointer-events-auto select-none font-dm-sans z-[2147483647]`
         : `fixed top-12 sm:top-14 inset-x-0 mx-auto z-[2147483647] w-[92%] ${isExpanded ? "max-w-[700px]" : "max-w-[620px]"} flex flex-col items-center pointer-events-none select-none font-dm-sans`
       }
     >
@@ -584,46 +605,48 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
             } catch {}
           }
         }}
-        className="bg-[#222225]/95 backdrop-blur-md border border-white/10 rounded-full flex items-center p-1.5 gap-2 shadow-2xl mb-3 pointer-events-auto transition-transform hover:scale-[1.01] cursor-grab active:cursor-grabbing"
+        className="bg-[#18181b]/95 backdrop-blur-md border border-white/10 rounded-full flex items-center p-1.5 px-3 gap-2.5 shadow-2xl mb-2.5 pointer-events-auto transition-transform cursor-grab active:cursor-grabbing shrink-0"
       >
-        <div className="pl-2 pr-1 text-white/40 hover:text-white/80" title="Drag to reposition widget">
-          <GripHorizontal size={16} />
+        <div className="text-white/40 hover:text-white/80 cursor-grab" title="Drag to reposition widget">
+          <GripHorizontal size={15} />
         </div>
 
-        <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
-          <Send size={15} className="text-white transform -rotate-45 ml-0.5" />
-        </div>
-        
         {/* Toggleable Undetectable Mode button */}
         <button 
           onClick={toggleStealth}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
+          className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all ${
             isStealth 
-              ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30" 
+              ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 shadow-[0_0_12px_rgba(16,185,129,0.25)]" 
               : "bg-white/10 text-white/70 hover:text-white hover:bg-white/20 border border-white/10"
           }`}
           title={isStealth ? "Undetectable Mode ON: Window excluded from Zoom/Meet capture & hidden from taskbar" : "Undetectable Mode OFF: Click to enable"}
         >
-          {isStealth ? <ShieldCheck size={14} className="text-emerald-400" /> : <ShieldAlert size={14} className="text-amber-400" />}
+          {isStealth ? <ShieldCheck size={13} className="text-emerald-400" /> : <ShieldAlert size={13} className="text-amber-400" />}
           <span>{isStealth ? "Undetectable: ON" : "Undetectable: OFF"}</span>
         </button>
+
+        {/* Live Session Timer */}
+        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/5 border border-white/5 text-xs font-mono font-medium text-white/90">
+          <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+          <span>{formattedTimer}</span>
+        </div>
 
         {/* Expand / Collapse Height Toggle */}
         <button 
           onClick={() => setIsExpanded(!isExpanded)}
-          className="flex items-center gap-1 px-3 py-1.5 rounded-full hover:bg-white/10 text-white/80 hover:text-white transition-colors text-xs font-semibold"
+          className="p-1.5 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-colors"
           title={isExpanded ? "Collapse height (Compact)" : "Expand height (Expanded)"}
         >
           {isExpanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-          <span>{isExpanded ? "Compact" : "Expand"}</span>
         </button>
 
+        {/* Hide / Show Card Toggle */}
         <button 
           onClick={() => setIsHidden(!isHidden)}
-          className="flex items-center gap-1 px-3 py-1.5 rounded-full hover:bg-white/10 text-white/80 hover:text-white transition-colors text-xs font-semibold"
+          className="p-1.5 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-colors"
+          title={isHidden ? "Show co-pilot" : "Hide co-pilot"}
         >
           <ChevronDown size={14} className={isHidden ? "rotate-180 transition-transform" : "transition-transform"} />
-          {isHidden ? "Show" : "Hide"}
         </button>
         
         {/* Minimize Button */}
@@ -638,25 +661,29 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
               setIsHidden(true);
             }
           }}
-          className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors text-white/70 hover:text-white"
+          className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors text-white/70 hover:text-white"
           title="Minimize floating assistant"
         >
-          <Minus size={13} />
+          <Minus size={12} />
         </button>
         
+        {/* Stop Button */}
         <button 
           onClick={handleStop}
-          className="w-8 h-8 rounded-full bg-white/10 hover:bg-red-500/30 flex items-center justify-center transition-colors group"
+          className="w-7 h-7 rounded-full bg-red-500/20 hover:bg-red-500/40 border border-red-500/30 flex items-center justify-center transition-colors group"
           title="Stop & Save Meeting"
         >
-          <Square size={12} fill="currentColor" className="text-white group-hover:text-red-400 transition-colors" />
+          <Square size={10} fill="currentColor" className="text-red-400 group-hover:text-red-300 transition-colors" />
         </button>
       </div>
 
       {/* Main Floating Card */}
       {!isHidden && (
-        <div className={`w-full bg-[#18181b]/95 backdrop-blur-xl border border-white/10 rounded-2xl p-5 shadow-2xl pointer-events-auto animate-in fade-in slide-in-from-top-4 duration-300 relative overflow-hidden transition-all duration-300 ${isExpanded ? "max-w-[700px]" : "max-w-[620px]"}`}>
+        <div className={`w-full bg-[#18181b]/95 backdrop-blur-xl border border-white/10 rounded-2xl p-4 shadow-2xl pointer-events-auto animate-in fade-in slide-in-from-top-4 duration-300 relative overflow-hidden transition-all duration-300 ${isExpanded ? "max-w-[660px]" : "max-w-[560px]"}`}>
           
+          {/* Subtle Top Handle */}
+          <div className="w-10 h-1 bg-white/20 rounded-full mx-auto mb-2.5" />
+
           {/* Blurred Background Overlay When Basic Limit is Reached */}
           {isLimitReached && (
             <div className="absolute inset-0 z-50 rounded-2xl flex flex-col items-center justify-center p-6 text-center backdrop-blur-xl bg-white/85 dark:bg-black/90 border border-voiceflow-orange/30 shadow-2xl animate-in fade-in duration-300">
@@ -685,7 +712,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
             </div>
           )}
 
-          <div className="flex justify-between items-center mb-4">
+          <div className="flex justify-between items-center mb-3">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
               <span className="text-xs font-semibold text-white/70">Listening live...</span>
@@ -693,7 +720,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
             <button 
               onClick={() => handleAskAI("What should I say next in this meeting?")}
               disabled={isQuerying}
-              className="bg-voiceflow-orange hover:bg-orange-600 text-white text-xs font-bold py-1.5 px-4 rounded-full shadow-lg transition-colors flex items-center gap-1.5 disabled:opacity-50"
+              className="bg-voiceflow-orange hover:bg-orange-600 text-white text-xs font-bold py-1.5 px-3.5 rounded-full shadow-lg transition-colors flex items-center gap-1.5 disabled:opacity-50"
             >
               {isQuerying ? <Loader2 size={13} className="animate-spin" /> : null}
               What should I say?
@@ -723,7 +750,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
 
           <div 
             ref={chatContainerRef}
-            className={`mb-5 bg-white/5 p-4 rounded-xl border border-white/5 overflow-y-auto space-y-3.5 transition-all duration-300 ${isExpanded ? "h-[450px] max-h-[450px]" : "h-72 max-h-72"} select-text cursor-text pointer-events-auto scrollbar-thin scrollbar-thumb-white/20 hover:scrollbar-thumb-white/30 scrollbar-track-transparent pr-1.5`}
+            className={`mb-3 bg-white/5 p-3 rounded-xl border border-white/5 overflow-y-auto space-y-3 transition-all duration-300 ${isExpanded ? "h-[320px] max-h-[320px]" : "h-56 max-h-56"} select-text cursor-text pointer-events-auto scrollbar-thin scrollbar-thumb-white/20 hover:scrollbar-thumb-white/30 scrollbar-track-transparent pr-1.5`}
           >
             {messages.length === 0 ? (
               <div className="text-white/70 text-[13px] leading-relaxed py-2">
@@ -816,48 +843,34 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
             )}
           </div>
 
-          {/* Prompt Pills */}
-          <div className="flex flex-wrap items-center gap-2 mb-4 text-xs font-medium text-white/70">
+          {/* Quick-Action Triggers */}
+          <div className="grid grid-cols-3 gap-2 mb-3 text-xs font-semibold">
             <button 
               onClick={() => handleAskAI(query.trim() ? query : "Analyze what is on my screen right now and give me the exact answer, code, or speaking points.", true)}
               disabled={isQuerying}
-              className="flex items-center gap-1.5 transition-all bg-gradient-to-r from-blue-600/30 to-indigo-600/30 hover:from-blue-600/50 hover:to-indigo-600/50 text-blue-200 hover:text-white px-3 py-1.5 rounded-lg border border-blue-500/40 disabled:opacity-50 font-semibold shadow-sm"
-              title="Take a screenshot of your screen and analyze with AI"
+              className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl bg-gradient-to-r from-blue-600/20 to-indigo-600/20 hover:from-blue-600/30 hover:to-indigo-600/30 text-blue-200 hover:text-white border border-blue-500/30 hover:border-blue-500/50 transition-all active:scale-[0.98] disabled:opacity-50 text-[11px] font-medium shadow-sm"
+              title="Capture & Analyze Screen with AI"
             >
-              <Camera size={13} className="text-blue-300" />
-              Analyze This
+              <Camera size={13} className="text-blue-400 shrink-0" />
+              <span className="truncate">Analyze Screen</span>
             </button>
             <button 
               onClick={() => handleAskAI("Give me a smart real-time answer suggestion for the current meeting point.")}
               disabled={isQuerying}
-              className="flex items-center gap-1.5 hover:text-white transition-colors bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/5 disabled:opacity-50"
+              className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-white/90 border border-white/10 hover:border-white/20 transition-all active:scale-[0.98] disabled:opacity-50 text-[11px] font-medium shadow-sm"
+              title="Suggest Answer based on conversation"
             >
-              <Sparkles size={13} className="text-amber-400" />
-              Assist
-            </button>
-            <button 
-              onClick={() => handleAskAI("What should I say next?")}
-              disabled={isQuerying}
-              className="flex items-center gap-1.5 hover:text-white transition-colors bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/5 disabled:opacity-50"
-            >
-              <Wand2 size={13} className="text-purple-400" />
-              What should I say?
-            </button>
-            <button 
-              onClick={() => handleAskAI("Suggest 3 follow-up questions I can ask right now.")}
-              disabled={isQuerying}
-              className="flex items-center gap-1.5 hover:text-white transition-colors bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/5 disabled:opacity-50"
-            >
-              <MessageSquare size={13} className="text-orange-400" />
-              Follow-ups
+              <Sparkles size={13} className="text-amber-400 shrink-0" />
+              <span className="truncate">Suggest Answer</span>
             </button>
             <button 
               onClick={() => handleAskAI("Give me a 2-bullet point quick recap of what was just said.")}
               disabled={isQuerying}
-              className="flex items-center gap-1.5 hover:text-white transition-colors bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/5 disabled:opacity-50"
+              className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-white/90 border border-white/10 hover:border-white/20 transition-all active:scale-[0.98] disabled:opacity-50 text-[11px] font-medium shadow-sm"
+              title="Quick Recap of current topic"
             >
-              <RotateCcw size={13} className="text-green-400" />
-              Recap
+              <RotateCcw size={13} className="text-emerald-400 shrink-0" />
+              <span className="truncate">Recap</span>
             </button>
           </div>
 

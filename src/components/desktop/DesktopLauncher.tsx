@@ -25,6 +25,8 @@ export function DesktopLauncher() {
         ) {
           body.style.backgroundColor = 'transparent';
           root.style.backgroundColor = 'transparent';
+          body.style.background = 'transparent';
+          root.style.background = 'transparent';
           return;
         }
 
@@ -33,8 +35,12 @@ export function DesktopLauncher() {
         
         if (bgValue) {
           const hslColor = `hsl(${bgValue})`;
-          body.style.backgroundColor = hslColor;
-          root.style.backgroundColor = hslColor;
+          if (body.style.backgroundColor !== hslColor) {
+            body.style.backgroundColor = hslColor;
+          }
+          if (root.style.backgroundColor !== hslColor) {
+            root.style.backgroundColor = hslColor;
+          }
         }
       };
 
@@ -42,22 +48,28 @@ export function DesktopLauncher() {
 
       const handleRecordState = (e: any) => {
         if (e.detail?.isRecording) {
+          document.body.classList.add('tauri-recording-mode');
+          document.documentElement.classList.add('tauri-recording-mode');
           document.body.style.backgroundColor = 'transparent';
           document.documentElement.style.backgroundColor = 'transparent';
+          document.body.style.background = 'transparent';
+          document.documentElement.style.background = 'transparent';
         } else {
+          document.body.classList.remove('tauri-recording-mode');
+          document.documentElement.classList.remove('tauri-recording-mode');
           updateBackground();
         }
       };
       window.addEventListener('voiceflow-record-state', handleRecordState);
 
-      // Observe BOTH class changes (theme) and style changes
+      // Observe class and theme changes without recursion on style attribute
       const observer = new MutationObserver(() => {
         updateBackground();
       });
       
       observer.observe(document.documentElement, { 
         attributes: true, 
-        attributeFilter: ['class', 'style', 'data-theme'] 
+        attributeFilter: ['class', 'data-theme'] 
       });
 
       return () => {

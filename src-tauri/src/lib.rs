@@ -59,6 +59,58 @@ fn set_ignore_cursor_events(window: tauri::Window, ignore: bool) -> Result<(), S
     window.set_ignore_cursor_events(ignore).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn enter_hud_mode(window: tauri::Window, is_expanded: bool, is_hidden: bool) -> Result<(), String> {
+    println!("Voiceflow: Entering HUD mode (expanded: {}, hidden: {})...", is_expanded, is_hidden);
+
+    // 1. Unmaximize first if window is maximized (Windows OS requirement)
+    if window.is_maximized().unwrap_or(false) {
+        let _ = window.unmaximize();
+    }
+
+    let (target_w, target_h) = if is_hidden {
+        (440.0, 70.0)
+    } else if is_expanded {
+        (660.0, 600.0)
+    } else {
+        (580.0, 480.0)
+    };
+
+    // 2. Set size
+    window.set_size(tauri::LogicalSize::new(target_w, target_h)).map_err(|e| e.to_string())?;
+
+    // 3. Position top-center of the active screen
+    if let Ok(Some(monitor)) = window.current_monitor() {
+        let scale = monitor.scale_factor();
+        let screen_w = monitor.size().width as f64 / scale;
+        let pos_x = ((screen_w - target_w) / 2.0).max(0.0);
+        let pos_y = 35.0; // 35px from top
+        let _ = window.set_position(tauri::LogicalPosition::new(pos_x, pos_y));
+    } else {
+        let _ = window.center();
+    }
+
+    // 4. Always on top, skip taskbar, and stealth exclude from screen capture
+    let _ = window.set_always_on_top(true);
+    let _ = window.set_skip_taskbar(true);
+    let _ = window.set_content_protected(true);
+
+    Ok(())
+}
+
+#[tauri::command]
+fn exit_hud_mode(window: tauri::Window) -> Result<(), String> {
+    println!("Voiceflow: Exiting HUD mode, restoring dashboard...");
+    let _ = window.set_always_on_top(false);
+    let _ = window.set_skip_taskbar(false);
+    let _ = window.set_content_protected(false);
+
+    window.set_size(tauri::LogicalSize::new(1024.0, 768.0)).map_err(|e| e.to_string())?;
+    let _ = window.center();
+    let _ = window.set_focus();
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   #[cfg(target_os = "android")]
@@ -77,6 +129,8 @@ pub fn run() {
         validate_subscription,
         set_detectable,
         set_ignore_cursor_events,
+        enter_hud_mode,
+        exit_hud_mode,
         win_grid::list_desktop_windows,
         win_grid::read_desktop_grid
     ])

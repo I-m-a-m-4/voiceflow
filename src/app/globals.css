@@ -949,14 +949,30 @@ a, button, select, input, [role="button"], .clickable {
 
 html.tauri-recording-mode,
 body.tauri-recording-mode,
-html.tauri-recording-mode body,
-html.tauri-recording-mode #__next,
-html.tauri-recording-mode main,
+html.tauri-recording-mode body {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+}
+
+html.tauri-recording-mode body > div:not(#meeting-widget-root) {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
 html.tauri-recording-mode #meeting-widget-root {
   background: transparent !important;
   background-color: transparent !important;
   box-shadow: none !important;
 }
+
 
 
 

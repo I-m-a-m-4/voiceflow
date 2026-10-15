@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "voiceflow",
-  "version": "0.0.9",
+  "version": "0.1.0",
   "identifier": "com.voiceflow.app",
   "build": {
     "frontendDist": "../out",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Voiceflow v0.0.9",
+        "title": "Voiceflow v0.1.0",
         "width": 1024,
         "height": 768,
         "resizable": true,
@@ -61,7 +61,7 @@
       }
     },
     "android": {
-      "versionCode": 9
+      "versionCode": 1000
     }
   },
   "plugins": {

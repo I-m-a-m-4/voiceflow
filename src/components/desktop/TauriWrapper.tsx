@@ -109,11 +109,13 @@ export function TauriLayoutWrapper({ children }: { children: React.ReactNode }) 
   return (
     <div
       className={cn(
-        "flex flex-col h-screen max-h-screen w-full overflow-hidden",
-        isRecording ? "bg-transparent" : (darkTopInset ? "bg-black text-white" : "bg-background text-foreground")
+        "flex flex-col w-full overflow-hidden",
+        isRecording 
+          ? "h-0 max-h-0 bg-transparent overflow-hidden pointer-events-none" 
+          : (darkTopInset ? "h-screen max-h-screen bg-black text-white" : "h-screen max-h-screen bg-background text-foreground")
       )}
     >
-      <div className="flex-1 flex flex-col relative h-full min-h-0 overflow-hidden">
+      <div className={cn("flex-1 flex flex-col relative min-h-0 overflow-hidden", isRecording && "hidden")}>
         {children}
       </div>
     </div>
