@@ -1,4 +1,5 @@
 mod win_grid;
+mod screen_capture;
 
 use tauri::Emitter;
 #[cfg(desktop)]
@@ -132,7 +133,8 @@ pub fn run() {
         enter_hud_mode,
         exit_hud_mode,
         win_grid::list_desktop_windows,
-        win_grid::read_desktop_grid
+        win_grid::read_desktop_grid,
+        screen_capture::capture_screen
     ])
     .plugin(tauri_plugin_sql::Builder::default().build())
     .plugin(tauri_plugin_fs::init())
