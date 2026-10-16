@@ -408,7 +408,12 @@ export function useAudioRecorder() {
         localStorage.removeItem('voiceflow_auto_start_record');
 
         // Redirect back to meeting details page so user sees resumed transcript immediately
-        window.location.href = `/dashboard/meeting/${resumeMeetingId}`;
+        window.location.href = `/dashboard/meeting?id=${resumeMeetingId}`;
+      }
+
+      // Notify dashboard to refresh meetings feed immediately
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('voiceflow-meeting-saved'));
       }
 
       // 4. Auto Copy to Clipboard
@@ -420,6 +425,9 @@ export function useAudioRecorder() {
       console.error("Processing failed", err);
     } finally {
       setIsProcessing(false);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('voiceflow-processing-state', { detail: { isProcessing: false } }));
+      }
     }
   };
 

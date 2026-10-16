@@ -237,7 +237,12 @@ export default function NotetakerPage() {
                 return (
                   <Link 
                     key={meeting.id} 
-                    href={`/dashboard/meeting/${meeting.id}`}
+                    href={`/dashboard/meeting?id=${meeting.id}`}
+                    onClick={() => {
+                      if (typeof window !== 'undefined') {
+                        localStorage.setItem('voiceflow_current_meeting_id', meeting.id);
+                      }
+                    }}
                     className="block group p-4 border border-border rounded-xl hover:border-voiceflow-orange hover:bg-muted/40 transition-all cursor-pointer"
                   >
                     <h3 className="text-sm font-bold text-foreground mb-1.5 group-hover:text-voiceflow-orange transition-colors truncate">

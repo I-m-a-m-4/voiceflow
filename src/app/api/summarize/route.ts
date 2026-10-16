@@ -115,7 +115,10 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
       throw lastError || new Error("All Groq summarization models failed");
     }
 
-    const outputText = completion.choices[0]?.message?.content || "";
+    let outputText = completion.choices[0]?.message?.content || "";
+    // Clean redundant duplicate headers e.g. "## Executive Summary\n**Executive Summary**"
+    outputText = outputText.replace(/(##\s*Executive Summary\s*\n+)(?:\*\*)?Executive Summary(?:\*\*)?[:\s]*/gi, '$1');
+    outputText = outputText.replace(/^(\*\*)?Executive Summary(\*\*)?[:\s]*\n+(##\s*Executive Summary)/gi, '$3');
 
     return NextResponse.json({ text: outputText.trim() });
   } catch (error: any) {

@@ -95,13 +95,15 @@ export function cleanSummaryForCard(raw?: string): string {
   // Strip Markdown code fences if any
   text = text.replace(/```[a-z]*\n[\s\S]*?```/gi, '');
 
-  // Strip duplicated or initial section headers like:
-  // "## Executive Summary", "**Executive Summary**", "Executive Summary:"
+  // Strip any leading section headers (e.g. "## Executive Summary", "**Executive Summary**", "Executive Summary")
   // repeatedly until we reach the actual body text
-  text = text
-    .replace(/^(?:#+\s*)?(?:\*\*)?(?:Executive Summary|Summary|Key Takeaways|Overview|Meeting Summary)(?:\*\*)?:?\s*/i, '')
-    .replace(/^(?:#+\s*)?(?:\*\*)?(?:Executive Summary|Summary|Key Takeaways|Overview|Meeting Summary)(?:\*\*)?:?\s*/i, '')
-    .trim();
+  let prev = '';
+  while (prev !== text) {
+    prev = text;
+    text = text
+      .replace(/^(?:#+\s*)?(?:\*\*)?(?:Executive Summary|Summary|Key Takeaways|Overview|Meeting Summary)(?:\*\*)?:?\s*/i, '')
+      .trim();
+  }
 
   // Strip remaining markdown headers (e.g. ## Key Points, ### Action Items)
   text = text.replace(/^#+\s+/gm, '');
@@ -129,8 +131,9 @@ export function formatRawSummaryToMarkdown(raw?: string): string {
   if (!raw || typeof raw !== 'string') return '';
   let text = raw.replace(/^SUMMARY:\s*/i, '').trim();
 
-  // Clean redundant bold duplicate headers right after markdown header (e.g. "## Executive Summary\n**Executive Summary**")
-  text = text.replace(/(##\s*Executive Summary\s*\n+)\*\*Executive Summary\*\*[:\s]*/gi, '$1');
+  // Clean redundant duplicate headers (e.g. "## Executive Summary\n**Executive Summary**")
+  text = text.replace(/(##\s*Executive Summary\s*\n+)(?:\*\*)?Executive Summary(?:\*\*)?[:\s]*/gi, '$1');
+  text = text.replace(/^(\*\*)?Executive Summary(\*\*)?[:\s]*\n+(##\s*Executive Summary)/gi, '$3');
 
   // If already structured with Markdown headers and bullet points, return cleanly
   if (/^##\s+/m.test(text)) {

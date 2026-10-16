@@ -29,6 +29,8 @@ export default function MeetingsFeed() {
     }
   };
 
+  const [isProcessing, setIsProcessing] = useState(false);
+
   useEffect(() => {
     fetchMeetings();
     
@@ -44,7 +46,16 @@ export default function MeetingsFeed() {
         setSearchQuery(e.detail.query);
       }
     };
+    const handleProcessing = (e: any) => {
+      setIsProcessing(Boolean(e.detail?.isProcessing));
+    };
+    const handleSaved = () => {
+      fetchMeetings(true);
+    };
+
     window.addEventListener('voiceflow-search-query', handleSearch);
+    window.addEventListener('voiceflow-processing-state', handleProcessing);
+    window.addEventListener('voiceflow-meeting-saved', handleSaved);
     
     // Set up a simple interval to poll for new meetings every 10 seconds 
     // since the user might be recording in the right panel
@@ -52,6 +63,8 @@ export default function MeetingsFeed() {
     return () => {
       clearInterval(interval);
       window.removeEventListener('voiceflow-search-query', handleSearch);
+      window.removeEventListener('voiceflow-processing-state', handleProcessing);
+      window.removeEventListener('voiceflow-meeting-saved', handleSaved);
     };
   }, [auth?.currentUser?.uid]);
 
@@ -139,9 +152,18 @@ export default function MeetingsFeed() {
           <div className="space-y-6">
             {filteredMeetings.map((meeting) => (
               <Link 
-                href={`/dashboard/meeting/${meeting.id}`}
+                href={`/dashboard/meeting?id=${meeting.id}`}
                 key={meeting.id} 
-                className="bg-card border border-border rounded-2xl overflow-hidden hover:shadow-lg dark:hover:shadow-none transition-all cursor-pointer flex flex-col group"
+                onClick={(e) => {
+                  if (isProcessing) {
+                    e.preventDefault();
+                    return;
+                  }
+                  if (typeof window !== 'undefined') {
+                    localStorage.setItem('voiceflow_current_meeting_id', meeting.id);
+                  }
+                }}
+                className={`bg-card border border-border rounded-2xl overflow-hidden hover:shadow-lg dark:hover:shadow-none transition-all cursor-pointer flex flex-col group ${isProcessing ? 'opacity-75 cursor-not-allowed' : ''}`}
               >
                 
                 {(() => {

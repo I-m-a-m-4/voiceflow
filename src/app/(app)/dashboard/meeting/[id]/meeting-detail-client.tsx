@@ -74,17 +74,24 @@ export default function MeetingDetailClient({ id }: { id?: string }) {
 
   useEffect(() => {
     let resolvedId = cleanId;
-    if ((!resolvedId || resolvedId === 'undefined') && typeof window !== 'undefined') {
+    if ((!resolvedId || resolvedId === 'undefined' || resolvedId === 'view' || resolvedId === 'default') && typeof window !== 'undefined') {
       const search = window.location.search.replace(/^\?/, '').trim();
-      if (search) {
-        if (search.startsWith('id=')) {
-          resolvedId = search.slice(3).split('&')[0];
-        } else {
-          resolvedId = search.split('&')[0].split('=')[0];
-        }
+      const params = new URLSearchParams(window.location.search);
+      const queryId = params.get('id') || params.get('meetingId');
+      if (queryId) {
+        resolvedId = queryId;
+      } else if (search.startsWith('id=')) {
+        resolvedId = search.slice(3).split('&')[0];
+      } else if (search && !search.includes('=')) {
+        resolvedId = search;
       } else {
         const parts = window.location.pathname.split('/').filter(Boolean);
-        resolvedId = parts[parts.length - 1];
+        const last = parts[parts.length - 1];
+        if (last && last !== 'meeting' && last !== 'view' && last !== 'default') {
+          resolvedId = last;
+        } else {
+          resolvedId = localStorage.getItem('voiceflow_current_meeting_id') || '';
+        }
       }
     }
     resolvedId = (resolvedId || '').replace(/^\?/, '').trim();
@@ -610,7 +617,7 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
     return (
       <div className="flex-1 flex flex-col items-center justify-center min-h-[60vh] bg-background text-foreground p-6">
         <h2 className="text-2xl font-bold font-clash text-foreground">Meeting not found</h2>
-        <button onClick={() => router.back()} className="mt-4 text-voiceflow-orange hover:underline text-sm font-semibold">
+        <button onClick={() => router.push('/dashboard')} className="mt-4 text-voiceflow-orange hover:underline text-sm font-semibold">
           ← Go back to meetings
         </button>
       </div>
@@ -625,7 +632,7 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
       {/* Clean top navigation header (back to meetings) */}
       <div className="flex items-center justify-between px-6 py-3.5 border-b border-border bg-background/80 backdrop-blur-md sticky top-0 z-20">
         <button 
-          onClick={() => router.back()} 
+          onClick={() => router.push('/dashboard')} 
           className="flex items-center gap-2 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors px-2.5 py-1.5 hover:bg-muted rounded-lg"
           title="Back to meetings"
         >

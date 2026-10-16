@@ -58,6 +58,13 @@ export default function RightPanel() {
     }
   }, [isRecording]);
 
+  // Synchronize processing state to prevent navigation interruption
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('voiceflow-processing-state', { detail: { isProcessing } }));
+    }
+  }, [isProcessing]);
+
   useEffect(() => {
     const handleToggle = () => {
       if (isRecording) {
