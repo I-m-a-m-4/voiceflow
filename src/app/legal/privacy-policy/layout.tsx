@@ -2,8 +2,8 @@ import { Metadata } from 'next';
 
 // page.tsx is a client component, so metadata has to live in a layout.
 export const metadata: Metadata = {
-  title: 'Privacy Policy',
-  description: 'How Voiceflow collects, stores, and protects your business and customer data, including your rights over that data and how to exercise them.',
+  title: 'Privacy Policy | Voiceflow AI Meeting Notetaker',
+  description: 'How Voiceflow collects, processes, and protects your meeting audio, transcripts, and notes, including our Presenter Privacy Shield and your data deletion rights.',
   alternates: {
     canonical: '/legal/privacy-policy'
   },

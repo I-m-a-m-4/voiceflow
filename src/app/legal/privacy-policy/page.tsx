@@ -5,12 +5,14 @@ import Link from 'next/link';
 
 const sections = [
   { id: 'intro', num: 'I', label: 'Introduction' },
-  { id: 'collect', num: 'II', label: 'What we collect' },
-  { id: 'use', num: 'III', label: 'How we use it' },
-  { id: 'share', num: 'IV', label: 'Disclosure' },
-  { id: 'security', num: 'V', label: 'Data Security' },
-  { id: 'rights', num: 'VI', label: 'Your Rights' },
-  { id: 'contact', num: 'VII', label: 'Contact Us' },
+  { id: 'collect', num: 'II', label: 'What We Collect' },
+  { id: 'audio', num: 'III', label: 'Audio & Microphone Privacy' },
+  { id: 'screen', num: 'IV', label: 'Presenter Privacy Shield' },
+  { id: 'use', num: 'V', label: 'How We Use Your Data' },
+  { id: 'ai-disclosure', num: 'VI', label: 'AI Processors & Disclosure' },
+  { id: 'security', num: 'VII', label: 'Data Security & Encryption' },
+  { id: 'rights', num: 'VIII', label: 'Your Rights & Deletion' },
+  { id: 'contact', num: 'IX', label: 'Contact Us' },
 ];
 
 export default function PrivacyPolicyPage() {
@@ -37,39 +39,39 @@ export default function PrivacyPolicyPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-white dark:bg-slate-950 font-sans text-slate-900 dark:text-slate-100 selection:bg-primary/20">
+    <div className="min-h-screen bg-white dark:bg-slate-950 font-sans text-slate-900 dark:text-slate-100 selection:bg-orange-500/20">
       {/* Hero Section */}
-      <section className="relative overflow-hidden px-6 pb-12 pt-24 md:pb-16 md:pt-32">
+      <section className="relative overflow-hidden px-6 pb-12 pt-20 md:pb-16 md:pt-28">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-[480px] [mask-image:linear-gradient(to_bottom,black_70%,transparent)]">
           <div 
             aria-hidden="true" 
             className="pointer-events-none absolute inset-0 opacity-50 dark:opacity-20" 
             style={{
-              backgroundImage: 'linear-gradient(to right, rgba(21,17,14,0.1) 1px, transparent 1px), linear-gradient(to bottom, rgba(21,17,14,0.1) 1px, transparent 1px)',
+              backgroundImage: 'linear-gradient(to right, rgba(249,115,22,0.1) 1px, transparent 1px), linear-gradient(to bottom, rgba(249,115,22,0.1) 1px, transparent 1px)',
               backgroundSize: '44px 44px'
             }}
           />
         </div>
         <div className="relative mx-auto max-w-3xl text-center">
           <div className="flex justify-center">
-            <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-900/70 px-4 py-1.5 font-medium lowercase tracking-[0.14em] text-slate-500 dark:text-slate-400 backdrop-blur-sm text-[19px]">
-              legal
+            <span className="inline-flex items-center gap-2 rounded-full border border-orange-500/30 bg-orange-500/10 px-4 py-1.5 font-medium tracking-wide text-orange-600 dark:text-orange-400 backdrop-blur-sm text-sm uppercase">
+              Compliance & Safety
             </span>
           </div>
-          <h1 className="mx-auto mt-6 max-w-[680px] text-4xl font-bold tracking-[-0.04em] sm:text-[54px] sm:leading-[1.15]">
-            Privacy <span className="text-primary text-5xl sm:text-[70px] italic">Policy</span>
+          <h1 className="mx-auto mt-6 max-w-[680px] text-4xl font-bold tracking-tight sm:text-5xl">
+            Voiceflow Privacy <span className="text-orange-500 italic">Policy</span>
           </h1>
-          <p className="mx-auto mt-4 max-w-[640px] text-lg leading-[26px] tracking-[-0.4px] text-slate-500 dark:text-slate-400">
-            What we collect, why we collect it, and how you stay in control.
+          <p className="mx-auto mt-4 max-w-[640px] text-base sm:text-lg leading-relaxed text-slate-600 dark:text-slate-400">
+            How Voiceflow collects, processes, and protects your meeting audio, live transcripts, and notes with end-to-end security and full user transparency.
           </p>
-          <p className="mt-5 text-sm tracking-[-0.3px] text-slate-500 dark:text-slate-400">
+          <p className="mt-4 text-xs font-mono text-slate-500 dark:text-slate-400">
             Last updated: {new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
           </p>
         </div>
       </section>
 
       {/* Main Content Layout */}
-      <div className="mx-auto max-w-6xl px-6 py-14 sm:py-16">
+      <div className="mx-auto max-w-6xl px-6 py-12 sm:py-16">
         <div className="grid gap-10 lg:grid-cols-[260px_minmax(0,1fr)] lg:gap-14">
           
           {/* Sidebar Navigation */}
@@ -81,13 +83,13 @@ export default function PrivacyPolicyPage() {
                   <Link
                     key={id}
                     href={`#${id}`}
-                    className={`rounded-full border px-3.5 py-1.5 text-sm tracking-[-0.2px] transition-colors whitespace-nowrap ${
+                    className={`rounded-full border px-3.5 py-1.5 text-xs tracking-tight transition-colors whitespace-nowrap ${
                       activeSection === id 
-                        ? 'border-primary bg-primary/5 text-primary font-medium' 
-                        : 'border-dashed border-slate-200 dark:border-slate-800 bg-transparent text-slate-500 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700'
+                        ? 'border-orange-500 bg-orange-500/10 text-orange-600 dark:text-orange-400 font-semibold' 
+                        : 'border-slate-200 dark:border-slate-800 bg-transparent text-slate-500 dark:text-slate-400 hover:border-slate-300'
                     }`}
                   >
-                    <span className="me-1.5 opacity-60 font-mono text-xs">{num}</span>
+                    <span className="me-1.5 opacity-60 font-mono text-[11px]">{num}</span>
                     {label}
                   </Link>
                 ))}
@@ -95,24 +97,23 @@ export default function PrivacyPolicyPage() {
             </nav>
 
             {/* Desktop Vertical Nav */}
-            <nav aria-label="Page sections" className="hidden lg:flex flex-col border-l-2 border-slate-100 dark:border-slate-800/50">
+            <nav aria-label="Page sections" className="hidden lg:flex flex-col border-l-2 border-slate-100 dark:border-slate-800/60">
               {sections.map(({ id, num, label }) => (
                 <Link
                   key={id}
                   href={`#${id}`}
-                  className={`group relative py-2.5 pl-4 pr-3 text-sm transition-colors ${
+                  className={`group relative py-2 pl-4 pr-3 text-xs font-medium transition-colors ${
                     activeSection === id 
-                      ? 'text-primary font-medium' 
+                      ? 'text-orange-500 font-semibold' 
                       : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                   }`}
                 >
-                  {/* Active Indicator Line */}
                   <span 
                     className={`absolute inset-y-0 left-[-2px] w-[2px] transition-all ${
-                      activeSection === id ? 'bg-primary' : 'bg-transparent group-hover:bg-slate-200 dark:group-hover:bg-slate-700'
+                      activeSection === id ? 'bg-orange-500' : 'bg-transparent group-hover:bg-slate-200 dark:group-hover:bg-slate-700'
                     }`} 
                   />
-                  <span className="me-2 inline-block w-4 opacity-50 font-mono text-xs">{num}</span>
+                  <span className="me-2 inline-block w-4 opacity-50 font-mono text-[10px]">{num}</span>
                   {label}
                 </Link>
               ))}
@@ -120,130 +121,177 @@ export default function PrivacyPolicyPage() {
           </aside>
 
           {/* Content Area */}
-          <div className="min-w-0 prose prose-slate dark:prose-invert max-w-none lg:prose-lg prose-headings:scroll-mt-28">
+          <div className="min-w-0 prose prose-slate dark:prose-invert max-w-none lg:prose-lg prose-headings:scroll-mt-28 prose-headings:font-bold prose-h2:text-2xl prose-h3:text-lg">
+            
+            {/* Section I: Introduction */}
             <div id="intro" className="scroll-mt-32">
-              <h2>Introduction</h2>
+              <h2>I. Introduction</h2>
               <p>
-                Welcome to Voiceflow ("we," "us," or "our"). We are committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our software-as-a-service platform (the "Service"). Please read this privacy policy carefully. If you do not agree with the terms of this privacy policy, please do not access the service.
+                Welcome to <strong>Voiceflow</strong> ("we," "our," or "the Service"), an intelligent <strong>AI Meeting Notetaker, Real-Time Speaking Assistant, and Executive Teleprompter</strong> designed to help professionals, teams, and executives capture meeting discussions, organize follow-up action items, and speak with confidence during live presentations and calls.
+              </p>
+              <p>
+                We believe your private conversations, client calls, and meeting minutes belong exclusively to you. This Privacy Policy details our technical architecture, our strict zero-data-selling pledge, and how we handle microphone audio, screen display frames, and meeting transcripts in full compliance with international privacy standards and Microsoft Store developer policies.
               </p>
 
-              <div className="not-prose my-8 p-5 rounded-2xl border bg-slate-50/50 dark:bg-slate-900/40 border-slate-200/60 dark:border-slate-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-sm backdrop-blur-sm shadow-sm">
-                <div className="flex items-center gap-3 font-medium text-slate-800 dark:text-slate-200">
-                  <span className="relative flex h-3 w-3 shrink-0">
+              <div className="not-prose my-6 p-4 rounded-xl border bg-orange-500/5 dark:bg-orange-950/20 border-orange-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2.5 font-medium text-slate-800 dark:text-slate-200">
+                  <span className="relative flex h-2.5 w-2.5 shrink-0">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
                   </span>
                   <div>
-                    Voiceflow Retail OS is operated by <strong className="text-primary">VOICEFLOWTECH SOLUTIONS</strong>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-normal">CAC Registered Entity — BN: 9673520</div>
+                    Voiceflow is operated by <strong>VOICEFLOWTECH SOLUTIONS</strong>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400">Registered Business Entity — BN: 9673520</div>
                   </div>
                 </div>
-                <div className="text-slate-500 dark:text-slate-400 font-mono text-xs bg-white dark:bg-slate-950 px-3 py-1.5 rounded-full border border-slate-100 dark:border-slate-800">
-                  voiceflowpos@gmail.com
+                <div className="text-slate-600 dark:text-slate-400 font-mono text-[11px] bg-white dark:bg-slate-900 px-3 py-1 rounded-full border border-slate-200 dark:border-slate-800">
+                  support@voiceflow.space
                 </div>
               </div>
             </div>
 
-            <div id="collect" className="scroll-mt-28 mt-16 pt-8 border-t border-slate-100 dark:border-slate-800/50">
-              <h2>What we collect</h2>
+            {/* Section II: What We Collect */}
+            <div id="collect" className="scroll-mt-28 mt-14 pt-8 border-t border-slate-100 dark:border-slate-800/50">
+              <h2>II. What We Collect</h2>
               <p>
-                We may collect information about you in a variety of ways. The information we may collect via the Service includes:
+                To provide real-time speech-to-text transcription and structured meeting summaries, Voiceflow collects only the data necessary to deliver the Service:
               </p>
               
-              <h3>A. Personal Data</h3>
+              <h3>A. Account Identification</h3>
               <p>
-                Personally identifiable information, such as your <strong>name, email address, and telephone number</strong>, that you voluntarily give to us when you register with the Service or when you choose to participate in various activities related to the Service.
+                When you create an account, we collect your name, email address, profile picture (if signing in via Google OAuth), and subscription tier. This information is used strictly to identify your workspace and authenticate access to your saved transcripts.
+              </p>
+
+              <h3>B. User-Initiated Meeting Content</h3>
+              <p>
+                When you explicitly click <em>"Start Voiceflow"</em> or dictate notes, the application processes:
+              </p>
+              <ul>
+                <li><strong>Spoken Dialogue Audio:</strong> Microphone audio recorded in real-time during your active meeting session.</li>
+                <li><strong>Generated Transcripts:</strong> Text transcripts derived from speech-to-text processing.</li>
+                <li><strong>Executive Summaries & Action Items:</strong> AI-generated structured outlines, takeaways, and follow-up checklists.</li>
+                <li><strong>Saved Q&A Assists:</strong> Specific prompt questions and answers generated during your meeting session.</li>
+              </ul>
+
+              <h3>C. Technical Device & Diagnostic Telemetry</h3>
+              <p>
+                We collect standard technical diagnostic information, including app version, OS platform (Windows, macOS, Web), and anonymous error logs to monitor stability and prevent crashes. We do not track keystrokes, personal browsing history, or background applications.
+              </p>
+            </div>
+
+            {/* Section III: Audio & Microphone Privacy */}
+            <div id="audio" className="scroll-mt-28 mt-14 pt-8 border-t border-slate-100 dark:border-slate-800/50">
+              <h2>III. Audio & Microphone Privacy</h2>
+              <p>
+                Voiceflow treats audio data with the highest sensitivity:
+              </p>
+              <ul>
+                <li><strong>Explicit User Activation:</strong> Voiceflow never listens or records in the background without your explicit action. The microphone is only active while the visual recording indicator (pulsing session timer) is displayed on your screen.</li>
+                <li><strong>Local Voice Activity Detection (VAD):</strong> When you stop speaking for more than 2 seconds, Voiceflow automatically pauses stream processing locally to save bandwidth and prevent recording ambient silence.</li>
+                <li><strong>Ephemeral Audio Processing:</strong> Captured audio is converted into voice-optimized 64kbps Opus WebM chunks and transmitted over secure TLS 1.3 to our transcription pipeline. Once the transcript is generated and returned to your dashboard, the temporary raw audio stream is purged from memory.</li>
+                <li><strong>Zero Audio Brokering:</strong> We never sell, license, or trade raw meeting audio to third-party data brokers or marketing firms.</li>
+              </ul>
+            </div>
+
+            {/* Section IV: Presenter Privacy Shield */}
+            <div id="screen" className="scroll-mt-28 mt-14 pt-8 border-t border-slate-100 dark:border-slate-800/50">
+              <h2>IV. Presenter Privacy Shield & Screen Share Protection</h2>
+              <p>
+                A core feature of the Voiceflow desktop application on Windows is the <strong>Presenter Privacy Shield</strong>. This capability is engineered to protect confidential meeting notes and teleprompter cues when presenting to colleagues or clients.
               </p>
               
-              <h3>B. Business Data</h3>
+              <h3>A. Technical Implementation (`WDA_EXCLUDEFROMCAPTURE`)</h3>
               <p>
-                Information related to your business that you provide or generate, including but not limited to:
+                Voiceflow utilizes the official native Windows Win32 API <code>SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)</code>. When Presenter Privacy is enabled:
               </p>
               <ul>
-                <li>Product details (names, SKUs, prices, stock levels, images)</li>
-                <li>Sales transaction records (receipts, items sold, totals)</li>
-                <li>Customer information (names, emails, phone numbers, purchase history)</li>
-                <li>Business settings and configurations</li>
+                <li>Your floating notes and teleprompter widget remain fully visible to you on your desktop.</li>
+                <li>The widget is automatically excluded from display capture and screen sharing streams in Microsoft Teams, Zoom, Google Meet, and OBS.</li>
+                <li>This ensures your private speaking points, confidential agenda items, and internal cheat sheets are never accidentally broadcasted to webinar attendees, clients, or interviewers.</li>
               </ul>
-              <p>
-                <strong>This Business Data is considered your confidential property. We will not use it for any purpose other than providing and improving the Service.</strong>
-              </p>
-              
-              <h3>C. Derivative Data</h3>
-              <p>
-                Information our servers automatically collect when you access the Service, such as your IP address, your browser type, your operating system, your access times, and the pages you have viewed directly before and after accessing the Service.
-              </p>
 
-              <h3>D. Device Permissions (Camera)</h3>
+              <h3>B. On-Demand Visual Snapshotting</h3>
               <p>
-                We may request access or permission to certain features from your mobile device, including your device's camera. The camera is used solely to scan barcodes and product QR codes during checkout and inventory actions. Image frames processed by the camera are analyzed locally on your device in real-time and are never uploaded, stored, or shared on our servers.
+                When you click the <em>"Analyze Screen"</em> button, Voiceflow captures a single static snapshot of your active display surface via browser/system capture APIs. This snapshot is transmitted directly to our vision inference engine to extract slide text or answer visual questions, and is discarded from memory immediately after the answer is produced. Voiceflow never performs ongoing passive screen recording.
               </p>
             </div>
 
-            <div id="use" className="scroll-mt-28 mt-16 pt-8 border-t border-slate-100 dark:border-slate-800/50">
-              <h2>How we use it</h2>
+            {/* Section V: How We Use Your Data */}
+            <div id="use" className="scroll-mt-28 mt-14 pt-8 border-t border-slate-100 dark:border-slate-800/50">
+              <h2>V. How We Use Your Data</h2>
               <p>
-                Having accurate information permits us to provide you with a smooth, efficient, and customized experience. Specifically, we may use information collected about you via the Service to:
+                Information processed through Voiceflow is used strictly to provide the core services you request:
               </p>
               <ul>
-                <li>Create and manage your account.</li>
-                <li>Process your transactions and subscriptions.</li>
-                <li>Provide you with the core functionality of inventory management, POS, and CRM.</li>
-                <li>Email you regarding your account or order.</li>
-                <li>Monitor and analyze usage and trends to improve your experience with the Service.</li>
-                <li>Notify you of updates to the Service.</li>
-                <li>Provide customer support and respond to your requests.</li>
+                <li><strong>Real-Time Meeting Transcription:</strong> Generating accurate transcripts of spoken dialogue during calls.</li>
+                <li><strong>Executive Summarization:</strong> Transforming lengthy transcripts into concise executive overviews, key takeaways, and action items.</li>
+                <li><strong>Teleprompter Assistance:</strong> Delivering suggested follow-up questions, topic recaps, and talking points in real-time.</li>
+                <li><strong>Follow-Up Email Drafting:</strong> Generating professional recap emails that you can review and send via Gmail or Outlook.</li>
+                <li><strong>Account & Subscription Maintenance:</strong> Verifying plan limits and processing premium subscriptions.</li>
               </ul>
             </div>
 
-            <div id="share" className="scroll-mt-28 mt-16 pt-8 border-t border-slate-100 dark:border-slate-800/50">
-              <h2>Disclosure</h2>
+            {/* Section VI: AI Processors & Third-Party Disclosure */}
+            <div id="ai-disclosure" className="scroll-mt-28 mt-14 pt-8 border-t border-slate-100 dark:border-slate-800/50">
+              <h2>VI. AI Model Processing & Third-Party Disclosures</h2>
               <p>
-                We do not share, sell, rent, or trade your Personal Data or Business Data with third parties for their commercial purposes. We may share information we have collected about you in certain situations:
+                To provide ultra-low latency transcription and summarization, Voiceflow partners with enterprise AI infrastructure providers:
               </p>
               <ul>
-                <li><strong>By Law or to Protect Rights:</strong> If we believe the release of information about you is necessary to respond to legal process, to investigate or remedy potential violations of our policies, or to protect the rights, property, and safety of others.</li>
-                <li><strong>Third-Party Service Providers:</strong> We may share your information with third parties that perform services for us, including local and international payment processing (Paystack), data analysis, email delivery, and hosting services.</li>
-                <li><strong>Business Transfers:</strong> We may share or transfer your information in connection with, or during negotiations of, any merger, sale of company assets, financing, or acquisition of all or a portion of our business to another company.</li>
+                <li><strong>Groq Cloud:</strong> Provides high-speed Whisper audio transcription and Llama-3 inference under strict zero-data-retention enterprise agreements.</li>
+                <li><strong>Google Cloud & Gemini GenAI:</strong> Powers multimodal vision understanding and contextual summarization with enterprise confidentiality guarantees.</li>
+                <li><strong>Firebase (Google Cloud):</strong> Provides secure authentication, identity management, and multi-tenant Firestore cloud database hosting.</li>
               </ul>
-            </div>
-
-            <div id="security" className="scroll-mt-28 mt-16 pt-8 border-t border-slate-100 dark:border-slate-800/50">
-              <h2>Data Security</h2>
-              <p>
-                We use administrative, technical, and physical security measures to protect your personal information and Business Data. This includes:
-              </p>
-              <ul>
-                <li><strong>Enterprise-Grade Cloud Infrastructure:</strong> Voiceflow is securely hosted on Google Cloud and Firebase. Our infrastructure complies with rigorous international security standards, including <strong>ISO/IEC 27001, 27017, and 27018</strong> certifications, and undergoes regular <strong>AICPA SOC 2 and SOC 3</strong> audits.</li>
-                <li><strong>GDPR & HIPAA Readiness:</strong> Our backend architecture provides the data controls necessary to help your business meet stringent privacy regulations like GDPR (General Data Protection Regulation) and HIPAA (Health Insurance Portability and Accountability Act), including comprehensive data export and erasure capabilities.</li>
-                <li><strong>Encryption at Rest:</strong> Sensitive business and transaction data is protected using 256-bit AES bank-grade encryption to ensure information remains confidential even when stored locally.</li>
-                <li><strong>Secure Transmission:</strong> All data transmitted between your device and our servers is encrypted using industry-standard SSL/TLS protocols.</li>
-                <li><strong>Multi-Tenant Isolation:</strong> We use strict logical boundaries to ensure your data is accessible only by you and your authorized staff.</li>
-              </ul>
-            </div>
-
-            <div id="rights" className="scroll-mt-28 mt-16 pt-8 border-t border-slate-100 dark:border-slate-800/50">
-              <h2>Your Rights</h2>
-              <p>
-                You have the right to:
-              </p>
-              <ul>
-                <li>Review or change the information in your account by logging into your account settings and updating your account.</li>
-                <li>Terminate your account, which will result in the deletion of your Personal Data and the archiving or deletion of your Business Data according to our data retention policies.</li>
-                <li><strong>Request Data Deletion:</strong> You can request the complete deletion of your account and all associated personal and business data at any time by emailing us at <strong>voiceflowpos@gmail.com</strong>. Upon receiving your request, we will verify your identity and delete all your hosted data from our active databases within 30 days.</li>
-              </ul>
-            </div>
-
-            <div id="contact" className="scroll-mt-28 mt-16 pt-8 border-t border-slate-100 dark:border-slate-800/50">
-              <h2>Contact Us</h2>
-              <p>
-                If you have questions or comments about this Privacy Policy, or if you need to request data deletion, please contact us at:
-              </p>
-              <div className="not-prose mt-6 flex items-center gap-3 text-primary font-medium bg-primary/5 border border-primary/10 rounded-xl px-4 py-3 w-fit">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
-                voiceflowpos@gmail.com
+              <div className="not-prose my-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-400">
+                <strong>No Public Model Training:</strong> Under our enterprise agreements with our AI infrastructure providers, your proprietary meeting transcripts, audio files, and private notes are <strong>NEVER used to train, fine-tune, or improve public AI foundation models</strong>.
               </div>
             </div>
+
+            {/* Section VII: Data Security & Encryption */}
+            <div id="security" className="scroll-mt-28 mt-14 pt-8 border-t border-slate-100 dark:border-slate-800/50">
+              <h2>VII. Data Security & Encryption</h2>
+              <p>
+                We deploy robust administrative, physical, and technical safeguards to keep your meeting transcripts secure:
+              </p>
+              <ul>
+                <li><strong>Encryption in Transit:</strong> All communications between the Voiceflow desktop/web client and our cloud backend are encrypted using TLS 1.3 / SSL.</li>
+                <li><strong>Encryption at Rest:</strong> All saved meeting records, summaries, and transcripts are stored with 256-bit AES encryption in Google Cloud Firestore.</li>
+                <li><strong>Multi-Tenant Isolation:</strong> Meeting records are strictly partitioned by authenticated user ID. Strict server-side security rules ensure no account can access, query, or view another user's recordings.</li>
+                <li><strong>Compliance Standards:</strong> Our hosting infrastructure complies with ISO/IEC 27001, 27017, 27018 standards and SOC 2 Type II certification.</li>
+              </ul>
+            </div>
+
+            {/* Section VIII: Your Rights & One-Click Data Deletion */}
+            <div id="rights" className="scroll-mt-28 mt-14 pt-8 border-t border-slate-100 dark:border-slate-800/50">
+              <h2>VIII. Your Rights & Data Deletion</h2>
+              <p>
+                You maintain complete ownership and control over your meeting history:
+              </p>
+              <ul>
+                <li><strong>Instant Meeting Deletion:</strong> You can delete any individual meeting, transcript, or summary directly from your dashboard at any time. Clicking <em>"Delete"</em> immediately and permanently removes the document from our Firestore database.</li>
+                <li><strong>Full Account Erasure:</strong> You may request complete deletion of your account and all associated workspace data by emailing <strong>support@voiceflow.space</strong>. All records are permanently erased within 30 days of identity confirmation.</li>
+                <li><strong>Data Portability:</strong> You can copy your summaries, export clean transcripts, or copy email drafts to your clipboard with a single click at any time.</li>
+              </ul>
+            </div>
+
+            {/* Section IX: Contact Us */}
+            <div id="contact" className="scroll-mt-28 mt-14 pt-8 border-t border-slate-100 dark:border-slate-800/50">
+              <h2>IX. Contact & Microsoft Store Compliance</h2>
+              <p>
+                If you have questions regarding this Privacy Policy, wish to report a privacy concern, or require technical verification for Microsoft Partner Center certification, please contact our data protection team:
+              </p>
+              
+              <div className="not-prose mt-4 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 space-y-2 text-xs">
+                <div className="font-bold text-slate-800 dark:text-slate-200 text-sm">VOICEFLOWTECH SOLUTIONS</div>
+                <div className="text-slate-600 dark:text-slate-400">Attn: Privacy & Safety Officer</div>
+                <div className="text-slate-600 dark:text-slate-400">Official Support: <a href="mailto:support@voiceflow.space" className="text-orange-500 font-semibold underline">support@voiceflow.space</a></div>
+                <div className="text-slate-600 dark:text-slate-400">Developer Contact: <a href="mailto:voiceflowpos@gmail.com" className="text-orange-500 font-semibold underline">voiceflowpos@gmail.com</a></div>
+                <div className="text-slate-500 dark:text-slate-500 pt-2 border-t border-slate-200 dark:border-slate-800">
+                  Store Certification URL: <code className="bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded text-[11px]">https://voiceflow.space/legal/privacy-policy</code>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
