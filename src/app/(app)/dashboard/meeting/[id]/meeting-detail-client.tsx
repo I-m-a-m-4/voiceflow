@@ -16,7 +16,10 @@ import {
   ArrowUpRight, 
   Check,
   Trash2,
-  Clock
+  Clock,
+  FileText,
+  Download,
+  ExternalLink
 } from 'lucide-react';
 import { useAuth } from '@/firebase';
 import ReactMarkdown from 'react-markdown';
@@ -65,12 +68,40 @@ export default function MeetingDetailClient({ id }: { id?: string }) {
   const [emailTo, setEmailTo] = useState("");
   const [emailSubject, setEmailSubject] = useState("");
   const [emailBody, setEmailBody] = useState("");
+  const [hasCopiedEmail, setHasCopiedEmail] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
 
   const rawId = id || '';
   const cleanId = rawId.replace(/^\?/, '').split('?')[0].split('&')[0].trim();
 
   // User display name
   const userName = auth?.currentUser?.displayName || "Imamshaffy Bello";
+
+  const generateDynamicFollowUp = (currentTitle: string, currentSummary: string, authorName: string) => {
+    const isInterview = currentTitle.toLowerCase().includes('interview');
+    const cleanSubject = isInterview
+      ? `Thank You & Action Items — ${currentTitle.replace(/Computer Science /i, '')}`
+      : `Meeting Recap & Next Steps: ${currentTitle}`;
+
+    let summaryPoints = '';
+    if (currentSummary) {
+      const bulletLines = currentSummary
+        .split('\n')
+        .map(l => l.trim())
+        .filter(l => l.startsWith('•') || l.startsWith('-') || l.startsWith('*') || l.match(/^\d+\./))
+        .slice(0, 4)
+        .join('\n');
+      if (bulletLines) {
+        summaryPoints = `\n\nKey Takeaways & Decisions:\n${bulletLines}`;
+      }
+    }
+
+    const body = isInterview
+      ? `Hi,\n\nThank you for taking the time to speak with me today regarding ${currentTitle}. I really enjoyed learning more about your team's current focus, technical priorities, and future plans.${summaryPoints}\n\nI look forward to our next steps and would be delighted to provide any additional context or follow-ups needed.\n\nBest regards,\n${authorName}`
+      : `Hi everyone,\n\nThank you for joining today's meeting on "${currentTitle}". Here is an executive summary of our discussion and key action items:${summaryPoints}\n\nPlease let me know if anyone has additional thoughts or adjustments before our next check-in.\n\nBest regards,\n${authorName}`;
+
+    return { subject: cleanSubject, body };
+  };
 
   useEffect(() => {
     let resolvedId = cleanId;
@@ -154,9 +185,10 @@ export default function MeetingDetailClient({ id }: { id?: string }) {
             ]);
           }
 
-          setEmailBody(
-            `Hi,\n\nThank you for the opportunity to discuss my background. I've practiced core data structures and enjoy graph traversal and dynamic programming; I'm most comfortable with easy- and medium-level problems. I'd be glad to share more about my practice on coding platforms in a follow-up.\n\nBest,\n${userName}`
-          );
+          const meetingTitle = data?.title || "Meeting Session";
+          const dynamicEmail = generateDynamicFollowUp(meetingTitle, data?.summary || "", userName);
+          setEmailSubject(dynamicEmail.subject);
+          setEmailBody(dynamicEmail.body);
 
           if (!data?.summary && data?.transcript) {
             setActiveTab('transcript');
@@ -580,15 +612,103 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
   };
 
   const handleResetEmail = () => {
-    const title = displayTitle;
-    const cleanSubject = title.toLowerCase().includes('interview')
-      ? `Thank You for the ${title.replace(/Computer Science /i, '')}`
-      : `Thank You for the ${title}`;
+    const dynamicEmail = generateDynamicFollowUp(displayTitle, meeting?.summary || "", userName);
     setEmailTo("");
-    setEmailSubject(cleanSubject);
-    setEmailBody(
-      `Hi,\n\nThank you for the opportunity to discuss my background. I've practiced core data structures and enjoy graph traversal and dynamic programming; I'm most comfortable with easy- and medium-level problems. I'd be glad to share more about my practice on coding platforms in a follow-up.\n\nBest,\n${userName}`
-    );
+    setEmailSubject(dynamicEmail.subject);
+    setEmailBody(dynamicEmail.body);
+  };
+
+  const handleCopyEmail = () => {
+    const fullText = `Subject: ${emailSubject}\n\n${emailBody}`;
+    navigator.clipboard.writeText(fullText);
+    setHasCopiedEmail(true);
+    setTimeout(() => setHasCopiedEmail(false), 2000);
+  };
+
+  const handleExportToDocs = (format: 'docx' | 'gdocs' | 'markdown') => {
+    const title = displayTitle;
+    const dateStr = formattedDate;
+    const durStr = meeting?.durationSeconds 
+      ? formatDuration(meeting.durationSeconds, true) 
+      : (meeting?.durationMinutes 
+        ? formatDuration(meeting.durationMinutes, false) 
+        : estimateDurationFromTranscript(meeting?.transcript || ''));
+
+    const markdownContent = `# ${title}
+**Date:** ${dateStr}  
+**Duration:** ${durStr}  
+**Notetaker:** Voiceflow AI Meeting Co-Pilot  
+
+---
+
+## Executive Summary
+${meeting?.summary ? formatRawSummaryToMarkdown(meeting.summary) : '_No summary recorded for this session._'}
+
+---
+
+## Full Meeting Transcript
+${meeting?.transcript ? meeting.transcript : '_No transcript recorded._'}
+`;
+
+    if (format === 'markdown') {
+      const blob = new Blob([markdownContent], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_notes.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setShowExportMenu(false);
+      return;
+    }
+
+    if (format === 'gdocs') {
+      navigator.clipboard.writeText(markdownContent);
+      window.open('https://docs.google.com/document/create', '_blank');
+      setShowExportMenu(false);
+      return;
+    }
+
+    if (format === 'docx') {
+      const htmlContent = `<!DOCTYPE html>
+<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+<head>
+<meta charset='utf-8'>
+<title>${title}</title>
+<style>
+  body { font-family: 'Segoe UI', Calibri, Arial, sans-serif; line-height: 1.6; color: #1e293b; margin: 40px; }
+  h1 { color: #ea580c; font-size: 24pt; border-bottom: 2px solid #ea580c; padding-bottom: 8px; margin-bottom: 8px; }
+  h2 { color: #0f172a; font-size: 16pt; margin-top: 24px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
+  .meta { color: #64748b; font-size: 11pt; margin-bottom: 24px; font-weight: 500; }
+  .section { margin-bottom: 25px; }
+  p, li { font-size: 11pt; color: #334155; }
+  pre { background: #f8fafc; border: 1px solid #e2e8f0; padding: 14px; border-radius: 6px; white-space: pre-wrap; font-family: Consolas, monospace; font-size: 10pt; }
+</style>
+</head>
+<body>
+  <h1>${title}</h1>
+  <div class="meta">
+    Date: ${dateStr} | Duration: ${durStr} | Generated by Voiceflow AI Meeting Co-Pilot
+  </div>
+  <div class="section">
+    <h2>Executive Summary</h2>
+    <div>${meeting?.summary ? meeting.summary.replace(/\\n/g, '<br>') : '<em>No summary available.</em>'}</div>
+  </div>
+  <div class="section">
+    <h2>Meeting Transcript</h2>
+    <pre>${meeting?.transcript || 'No transcript available.'}</pre>
+  </div>
+</body>
+</html>`;
+      const blob = new Blob(['\ufeff', htmlContent], { type: 'application/msword' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_notes.doc`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setShowExportMenu(false);
+    }
   };
 
   const handleDeleteMeeting = async () => {
@@ -658,6 +778,42 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
             <Mail size={13} className="text-voiceflow-orange" />
             Follow-up email
           </button>
+
+          <div className="relative">
+            <button 
+              onClick={() => setShowExportMenu(!showExportMenu)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold border border-border bg-card hover:bg-muted rounded-lg transition-colors text-foreground shadow-sm ml-1"
+              title="Export meeting summary and transcript"
+            >
+              <Download size={13} className="text-voiceflow-orange" />
+              Export to Docs
+            </button>
+            {showExportMenu && (
+              <div className="absolute right-0 mt-1.5 w-52 bg-card border border-border rounded-xl shadow-xl py-1 z-30 font-dm-sans animate-fade-in">
+                <button 
+                  onClick={() => handleExportToDocs('gdocs')}
+                  className="w-full text-left px-3 py-2 text-xs font-semibold hover:bg-muted text-foreground flex items-center justify-between"
+                >
+                  <span>Open in Google Docs</span>
+                  <ExternalLink size={12} className="text-muted-foreground" />
+                </button>
+                <button 
+                  onClick={() => handleExportToDocs('docx')}
+                  className="w-full text-left px-3 py-2 text-xs font-semibold hover:bg-muted text-foreground flex items-center justify-between"
+                >
+                  <span>Download Word Doc (.doc)</span>
+                  <Download size={12} className="text-muted-foreground" />
+                </button>
+                <button 
+                  onClick={() => handleExportToDocs('markdown')}
+                  className="w-full text-left px-3 py-2 text-xs font-semibold hover:bg-muted text-foreground flex items-center justify-between border-t border-border mt-1 pt-1.5"
+                >
+                  <span>Download Markdown (.md)</span>
+                  <FileText size={12} className="text-muted-foreground" />
+                </button>
+              </div>
+            )}
+          </div>
           <button 
             onClick={() => setShowDeleteConfirm(true)}
             disabled={isDeleting}
@@ -963,14 +1119,14 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
         </div>
       </div>
 
-      {/* Follow-up Email Modal (Light & Dark Theme Compatible) */}
+      {/* Follow-up Email Modal (Light & Dark Theme Compatible, 100% Responsive) */}
       {isEmailModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-fade-in">
-          <div className="bg-card border border-border rounded-2xl w-full max-w-lg p-6 shadow-2xl relative flex flex-col gap-4 text-foreground font-dm-sans animate-scale-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-background/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-card border border-border rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-4 sm:p-6 shadow-2xl relative flex flex-col gap-4 text-foreground font-dm-sans animate-scale-in">
             {/* Top Row: To + Close */}
             <div className="flex items-center justify-between pb-3 border-b border-border">
-              <div className="flex items-center gap-4 flex-1">
-                <span className="text-xs font-semibold text-muted-foreground w-12">To</span>
+              <div className="flex items-center gap-3 flex-1">
+                <span className="text-xs font-semibold text-muted-foreground w-12 shrink-0">To</span>
                 <input
                   type="email"
                   value={emailTo}
@@ -981,15 +1137,15 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
               </div>
               <button 
                 onClick={() => setIsEmailModalOpen(false)} 
-                className="text-muted-foreground hover:text-foreground p-1 rounded-md transition-colors"
+                className="text-muted-foreground hover:text-foreground p-1 rounded-md transition-colors shrink-0"
               >
                 <X size={16} />
               </button>
             </div>
 
             {/* Row 2: Subject */}
-            <div className="flex items-center gap-4 pb-3 border-b border-border">
-              <span className="text-xs font-semibold text-muted-foreground w-12">Subject</span>
+            <div className="flex items-center gap-3 pb-3 border-b border-border">
+              <span className="text-xs font-semibold text-muted-foreground w-12 shrink-0">Subject</span>
               <input
                 type="text"
                 value={emailSubject}
@@ -1001,16 +1157,16 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
 
             {/* Row 3: Body Textarea */}
             <textarea
-              rows={8}
+              rows={9}
               value={emailBody}
               onChange={(e) => setEmailBody(e.target.value)}
               className="w-full bg-transparent border-none outline-none text-xs leading-relaxed text-foreground placeholder:text-muted-foreground focus:ring-0 resize-none font-dm-sans py-2"
               placeholder="Write follow-up email..."
             />
 
-            {/* Row 4: Action Buttons */}
-            <div className="flex items-center justify-between pt-3 border-t border-border">
-              <div className="flex items-center gap-2">
+            {/* Row 4: Action Buttons (Responsive Layout) */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-border">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={handleSendWithGmail}
                   className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold bg-voiceflow-orange hover:bg-orange-600 text-white shadow-sm transition-colors"
@@ -1023,17 +1179,36 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
                   className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold bg-card hover:bg-muted text-foreground border border-border shadow-sm transition-colors"
                 >
                   <Mail size={13} className="text-muted-foreground" />
-                  Send with default client
+                  Default Mail
+                </button>
+                <button
+                  onClick={handleCopyEmail}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-card hover:bg-muted text-foreground border border-border shadow-sm transition-colors"
+                >
+                  {hasCopiedEmail ? (
+                    <>
+                      <Check size={13} className="text-emerald-500" />
+                      <span className="text-emerald-600 font-bold">Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy size={13} className="text-muted-foreground" />
+                      <span>Copy Email</span>
+                    </>
+                  )}
                 </button>
               </div>
 
-              <button
-                onClick={handleResetEmail}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-card hover:bg-muted text-muted-foreground hover:text-foreground border border-border transition-colors shadow-sm"
-              >
-                <RotateCcw size={13} />
-                Reset
-              </button>
+              <div className="flex items-center justify-end">
+                <button
+                  onClick={handleResetEmail}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-card hover:bg-muted text-muted-foreground hover:text-foreground border border-border transition-colors shadow-sm"
+                  title="Reset to tailored meeting template"
+                >
+                  <RotateCcw size={13} />
+                  Reset
+                </button>
+              </div>
             </div>
           </div>
         </div>

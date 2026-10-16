@@ -23,6 +23,51 @@ export default function NotetakerPage() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedAutoStart = localStorage.getItem('voiceflow_notetaker_autostart');
+      if (savedAutoStart !== null) setAutoStart(savedAutoStart === 'true');
+
+      const savedAutoJoin = localStorage.getItem('voiceflow_notetaker_autojoin');
+      if (savedAutoJoin !== null) setAutoJoin(savedAutoJoin === 'true');
+
+      const savedDetail = localStorage.getItem('voiceflow_notetaker_summary_detail');
+      if (savedDetail) setSummaryDetail(savedDetail);
+
+      const savedPlat = localStorage.getItem('voiceflow_target_platform');
+      if (savedPlat) setSelectedPlatform(savedPlat);
+    }
+  }, []);
+
+  const handleUpdateAutoStart = (val: boolean) => {
+    setAutoStart(val);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('voiceflow_notetaker_autostart', String(val));
+    }
+  };
+
+  const handleUpdateAutoJoin = (val: boolean) => {
+    setAutoJoin(val);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('voiceflow_notetaker_autojoin', String(val));
+    }
+  };
+
+  const handleUpdateSummaryDetail = (level: string) => {
+    setSummaryDetail(level);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('voiceflow_notetaker_summary_detail', level);
+      localStorage.setItem('voiceflow_summary_detail', level);
+    }
+  };
+
+  const handleSelectPlatform = (platId: string) => {
+    setSelectedPlatform(platId);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('voiceflow_target_platform', platId);
+    }
+  };
+
+  useEffect(() => {
     const handleRecordState = (e: any) => {
       if (typeof e.detail?.isRecording === 'boolean') {
         setIsLiveRecording(e.detail.isRecording);
@@ -33,6 +78,10 @@ export default function NotetakerPage() {
   }, []);
 
   const handleToggleNotetaker = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('voiceflow_target_platform', selectedPlatform);
+      localStorage.setItem('voiceflow_summary_detail', summaryDetail);
+    }
     window.dispatchEvent(new CustomEvent('voiceflow-toggle-record'));
   };
 
@@ -108,7 +157,7 @@ export default function NotetakerPage() {
                 <button
                   key={plat.id}
                   type="button"
-                  onClick={() => setSelectedPlatform(plat.id)}
+                  onClick={() => handleSelectPlatform(plat.id)}
                   className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-all ${
                     selectedPlatform === plat.id 
                       ? 'bg-voiceflow-orange text-white border-voiceflow-orange shadow-sm' 
@@ -161,7 +210,7 @@ export default function NotetakerPage() {
                   <div className="text-sm font-bold text-foreground mb-1">Auto-Start Notetaker</div>
                   <div className="text-xs text-muted-foreground max-w-md">Automatically begin listening and transcribing when a supported meeting is detected (Zoom, Teams, Meet).</div>
                 </div>
-                <Switch checked={autoStart} onCheckedChange={setAutoStart} className="data-[state=checked]:bg-voiceflow-orange" />
+                <Switch checked={autoStart} onCheckedChange={handleUpdateAutoStart} className="data-[state=checked]:bg-voiceflow-orange" />
               </div>
 
               <div className="flex items-start justify-between pt-6 border-t border-border">
@@ -169,7 +218,7 @@ export default function NotetakerPage() {
                   <div className="text-sm font-bold text-foreground mb-1">Auto-join Calendar Events</div>
                   <div className="text-xs text-muted-foreground max-w-md">VoiceFlow will automatically join meetings listed in your connected Google or Outlook calendar.</div>
                 </div>
-                <Switch checked={autoJoin} onCheckedChange={setAutoJoin} className="data-[state=checked]:bg-voiceflow-orange" />
+                <Switch checked={autoJoin} onCheckedChange={handleUpdateAutoJoin} className="data-[state=checked]:bg-voiceflow-orange" />
               </div>
 
               <div className="pt-6 border-t border-border">
@@ -178,7 +227,7 @@ export default function NotetakerPage() {
                   {['brief', 'standard', 'comprehensive'].map((level) => (
                     <button 
                       key={level}
-                      onClick={() => setSummaryDetail(level)}
+                      onClick={() => handleUpdateSummaryDetail(level)}
                       className={`py-3 px-4 rounded-xl border text-sm font-semibold transition-all capitalize ${
                         summaryDetail === level 
                           ? 'border-voiceflow-orange bg-orange-50 dark:bg-orange-950/20 text-voiceflow-orange ring-1 ring-voiceflow-orange' 
