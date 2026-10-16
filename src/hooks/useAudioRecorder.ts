@@ -26,19 +26,68 @@ export function useAudioRecorder() {
   const isRecordingRef = useRef<boolean>(false);
   const shouldRestartRecognitionRef = useRef<boolean>(true);
   const startTimeRef = useRef<number>(0);
+  const liveTranscribeTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isTranscribingLiveRef = useRef<boolean>(false);
+  const lastProcessedChunkCountRef = useRef<number>(0);
+
+  const triggerLiveWhisperTranscribe = async () => {
+    if (isTranscribingLiveRef.current || !isRecordingRef.current) return;
+    if (chunksRef.current.length < 3) return; // Wait for at least ~3 seconds of initial audio
+    if (chunksRef.current.length <= lastProcessedChunkCountRef.current) return;
+
+    isTranscribingLiveRef.current = true;
+    lastProcessedChunkCountRef.current = chunksRef.current.length;
+
+    try {
+      const mimeType = typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : "audio/webm";
+
+      const currentBlob = new Blob(chunksRef.current, { type: mimeType });
+      const formData = new FormData();
+      formData.append("file", currentBlob, "live-slice.webm");
+
+      const base = apiBase();
+      const transcribeUrl = base ? `${base}/api/transcribe` : "/api/transcribe";
+
+      const res = await fetch(transcribeUrl, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const liveText = (data.formattedTranscript || data.text || "").trim();
+        if (liveText && isRecordingRef.current) {
+          setTranscript(liveText);
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem('voiceflow_live_transcript', liveText);
+            } catch (e) {}
+            window.dispatchEvent(new CustomEvent('voiceflow-live-transcript', { detail: { transcript: liveText } }));
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Live transcription slice skipped:", err);
+    } finally {
+      isTranscribingLiveRef.current = false;
+    }
+  };
 
   const startRecording = useCallback(async (captureSystemAudio = false) => {
     try {
       startTimeRef.current = Date.now();
       // 1. Get Microphone Audio (reuse healthy stream if already open to prevent permission prompts)
+      // Note: echoCancellation: false is critical so laptop/desktop speaker audio isn't cancelled out by the OS
       let micStream = micStreamRef.current;
       const isStreamActive = micStream && micStream.getAudioTracks().some(track => track.readyState === 'live');
       
       if (!isStreamActive) {
         micStream = await navigator.mediaDevices.getUserMedia({ 
           audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
+            echoCancellation: false,
+            noiseSuppression: false,
             autoGainControl: true,
           } 
         });
@@ -81,6 +130,7 @@ export function useAudioRecorder() {
 
       streamRef.current = finalStream;
       chunksRef.current = [];
+      lastProcessedChunkCountRef.current = 0;
 
       const mimeType = typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
         ? "audio/webm;codecs=opus"
@@ -111,7 +161,11 @@ export function useAudioRecorder() {
       setIsPausedBySilence(false);
       setTranscript("");
 
-      // --- Real-Time Speech Recognition Setup ---
+      // Start periodic live Whisper transcription every 5 seconds
+      if (liveTranscribeTimerRef.current) clearInterval(liveTranscribeTimerRef.current);
+      liveTranscribeTimerRef.current = setInterval(triggerLiveWhisperTranscribe, 5000);
+
+      // --- Real-Time Speech Recognition Setup (local fast bonus when supported) ---
       const SpeechRecognitionAPI = typeof window !== "undefined" && ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
       if (SpeechRecognitionAPI) {
         try {
@@ -134,6 +188,9 @@ export function useAudioRecorder() {
             const currentText = (finalTranscript + interimTranscript).trim();
             if (currentText) {
               setTranscript(currentText);
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('voiceflow-live-transcript', { detail: { transcript: currentText } }));
+              }
             }
           };
 
@@ -163,7 +220,7 @@ export function useAudioRecorder() {
         }
       }
 
-      // --- VAD (Silence Detection) Setup ---
+      // --- Volume Level Monitor (VAD without disruptive recorder pausing) ---
       const audioCtx = new AudioContext();
       audioCtxRef.current = audioCtx;
       const analyser = audioCtx.createAnalyser();
@@ -183,27 +240,9 @@ export function useAudioRecorder() {
         const average = dataArray.reduce((acc, val) => acc + val, 0) / bufferLength;
 
         if (average < SILENCE_THRESHOLD) {
-          // It's silent
-          if (!silenceTimerRef.current && mediaRecorderRef.current.state === "recording") {
-            silenceTimerRef.current = setTimeout(() => {
-              if (mediaRecorderRef.current?.state === "recording") {
-                mediaRecorderRef.current.pause();
-                setIsPausedBySilence(true);
-                console.log("VAD: Paused recording due to silence.");
-              }
-            }, SILENCE_DURATION);
-          }
+          setIsPausedBySilence(true);
         } else {
-          // Someone is speaking
-          if (silenceTimerRef.current) {
-            clearTimeout(silenceTimerRef.current);
-            silenceTimerRef.current = null;
-          }
-          if (mediaRecorderRef.current.state === "paused") {
-            mediaRecorderRef.current.resume();
-            setIsPausedBySilence(false);
-            console.log("VAD: Resumed recording (speech detected).");
-          }
+          setIsPausedBySilence(false);
         }
 
         vadLoopRef.current = requestAnimationFrame(checkVolume);
@@ -219,6 +258,10 @@ export function useAudioRecorder() {
 
   const stopRecording = useCallback(() => {
     isRecordingRef.current = false;
+    if (liveTranscribeTimerRef.current) {
+      clearInterval(liveTranscribeTimerRef.current);
+      liveTranscribeTimerRef.current = null;
+    }
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
@@ -253,8 +296,8 @@ export function useAudioRecorder() {
     if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
       navigator.mediaDevices.getUserMedia({
         audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
+          echoCancellation: false,
+          noiseSuppression: false,
           autoGainControl: true,
         }
       }).then((stream) => {
@@ -265,6 +308,10 @@ export function useAudioRecorder() {
     }
 
     return () => {
+      if (liveTranscribeTimerRef.current) {
+        clearInterval(liveTranscribeTimerRef.current);
+        liveTranscribeTimerRef.current = null;
+      }
       if (micStreamRef.current) {
         micStreamRef.current.getTracks().forEach(track => track.stop());
         micStreamRef.current = null;

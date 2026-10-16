@@ -23,7 +23,10 @@ import {
   Bot,
   Trash2,
   Camera,
-  Minus
+  Minus,
+  Paperclip,
+  X,
+  Image as ImageIcon
 } from 'lucide-react';
 import { captureScreenBase64 } from '@/lib/capture-screen';
 import ReactMarkdown from 'react-markdown';
@@ -73,8 +76,66 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
   });
   const [isStealth, setIsStealth] = useState<boolean>(true);
   const [isTauri, setIsTauri] = useState(false);
+  const [liveTranscript, setLiveTranscript] = useState<string>(() => {
+    return transcript || (typeof window !== 'undefined' ? localStorage.getItem('voiceflow_live_transcript') || '' : '');
+  });
+  const [hasAttachedImage, setHasAttachedImage] = useState<boolean>(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const lastImageBase64Ref = useRef<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Sync transcript from props or live background Whisper events
+  useEffect(() => {
+    if (transcript && transcript.trim()) {
+      setLiveTranscript(transcript);
+    }
+  }, [transcript]);
+
+  useEffect(() => {
+    const handleLiveTranscript = (e: any) => {
+      if (e.detail?.transcript) {
+        setLiveTranscript(e.detail.transcript);
+      }
+    };
+    window.addEventListener('voiceflow-live-transcript', handleLiveTranscript);
+    return () => window.removeEventListener('voiceflow-live-transcript', handleLiveTranscript);
+  }, []);
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        const file = items[i].getAsFile();
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (uploadEvent) => {
+            const base64 = uploadEvent.target?.result as string;
+            if (base64) {
+              lastImageBase64Ref.current = base64;
+              setHasAttachedImage(true);
+            }
+          };
+          reader.readAsDataURL(file);
+        }
+      }
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (uploadEvent) => {
+        const base64 = uploadEvent.target?.result as string;
+        if (base64) {
+          lastImageBase64Ref.current = base64;
+          setHasAttachedImage(true);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   useEffect(() => {
     setMounted(true);
@@ -333,24 +394,26 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
 
     setIsQuerying(true);
     try {
+      // Detect if prompt requires visual screen inspection
+      const wantsScreenAnalysis = includeScreenCapture || 
+        /\b(screen|slide|display|image|photo|visual|picture|diagram|look at this|see on|what's on my screen|screenshot)\b/i.test(promptToUse);
+
       let base64Image: string | null = null;
-      if (includeScreenCapture) {
+      if (wantsScreenAnalysis && !lastImageBase64Ref.current) {
         try {
           base64Image = await captureScreenBase64();
           if (base64Image) {
             lastImageBase64Ref.current = base64Image;
+            setHasAttachedImage(true);
           }
         } catch (e) {
           console.warn("Screen capture skipped, proceeding with transcript context:", e);
         }
       }
 
-      // Only send screen capture if explicitly requested or if prompt mentions visual/screen analysis
-      const wantsScreenAnalysis = includeScreenCapture || 
-        /\b(screen|slide|display|image|photo|visual|picture|diagram|look at this|see on|what's on my screen)\b/i.test(promptToUse);
-      const effectiveImage = wantsScreenAnalysis ? (base64Image || lastImageBase64Ref.current || "") : "";
-
+      const effectiveImage = base64Image || lastImageBase64Ref.current || "";
       const customContext = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_custom_context') || '' : '';
+      const activeTranscript = liveTranscript || transcript || (typeof window !== 'undefined' ? localStorage.getItem('voiceflow_live_transcript') || '' : '');
 
       // Lightweight conversation history (last 6 messages) for token economy and low latency
       const historyPayload = messages.slice(-6).map(m => ({
@@ -369,7 +432,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
           body: JSON.stringify({ 
             imageBase64: effectiveImage, 
             prompt: promptToUse,
-            transcript: transcript || "",
+            transcript: activeTranscript,
             customContext: customContext,
             history: historyPayload
           })
@@ -874,16 +937,54 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
             </button>
           </div>
 
+          {/* Attached image preview badge if available */}
+          {hasAttachedImage && (
+            <div className="flex items-center justify-between bg-blue-500/10 border border-blue-500/30 px-3 py-1.5 rounded-lg mb-2 text-xs text-blue-300">
+              <span className="flex items-center gap-1.5 font-medium">
+                <ImageIcon size={12} className="text-blue-400" />
+                Screenshot attached & ready for analysis
+              </span>
+              <button 
+                onClick={() => {
+                  lastImageBase64Ref.current = null;
+                  setHasAttachedImage(false);
+                }}
+                className="hover:text-white p-0.5 rounded transition-colors"
+                title="Remove attached image"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          )}
+
+          {/* Hidden file input for screenshot upload */}
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            onChange={handleFileUpload} 
+            accept="image/*" 
+            className="hidden" 
+          />
+
           {/* Input Box */}
           <div className="relative flex items-center bg-[#252528] rounded-xl border border-white/10 p-1.5">
             <button 
-              onClick={() => handleAskAI(query.trim() ? query : "Analyze what is on my screen and tell me key highlights and answers.", true)}
+              onClick={() => handleAskAI(query.trim() ? query : "Analyze what is on my screen right now and give me the exact answer, code, or speaking points.", true)}
               disabled={isQuerying}
               className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-colors border border-white/5 disabled:opacity-50" 
-              title="Capture & Analyze Screen (Sends your question with a screenshot)"
+              title="Capture & Analyze Screen (Sends your question with a live display capture)"
             >
               <Camera size={12} className="text-blue-400" />
               Screen
+            </button>
+
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isQuerying}
+              className="p-1.5 text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+              title="Upload slide or screenshot image"
+            >
+              <Paperclip size={13} />
             </button>
 
             <input 
@@ -891,14 +992,15 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
               disabled={isQuerying}
-              placeholder="Ask about the conversation or question..."
-              className="flex-1 bg-transparent border-none outline-none text-white text-xs px-3 placeholder:text-white/40 disabled:opacity-50"
+              placeholder="Ask about conversation, screen, or paste screenshot (Ctrl+V)..."
+              className="flex-1 bg-transparent border-none outline-none text-white text-xs px-2.5 placeholder:text-white/40 disabled:opacity-50"
             />
 
             <button 
               onClick={() => handleAskAI()}
-              disabled={isQuerying || !query.trim()}
+              disabled={isQuerying || (!query.trim() && !hasAttachedImage)}
               className="w-8 h-8 rounded-full bg-voiceflow-orange hover:bg-orange-600 flex items-center justify-center transition-colors shadow-md disabled:opacity-40"
             >
               {isQuerying ? (
