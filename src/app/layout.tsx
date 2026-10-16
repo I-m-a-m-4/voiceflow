@@ -60,20 +60,21 @@ export const metadata: Metadata = {
   // param, add hreflang then — claiming it now would point every language at
   // the same English HTML.
   title: {
-    default: 'Voiceflow - Undetectable AI Notetaker & Live Meeting Assistant',
+    default: 'Voiceflow - AI Meeting Notetaker & Live Meeting Co-Pilot',
     template: '%s | Voiceflow'
   },
-  description: 'Voiceflow takes perfect meeting notes, transcribes live audio, and provides undetectable real-time AI assistance during calls.',
+  description: 'Voiceflow takes automated meeting notes, transcribes live audio, and provides private real-time speech assistance with Presenter Privacy Shield.',
   keywords: [
     'ai meeting notetaker', 
-    'undetectable ai meeting assistant', 
-    'real time meeting answers', 
-    'stealth meeting assistant', 
+    'meeting notes app', 
+    'real time meeting notes', 
+    'presenter privacy shield', 
+    'screen share protection',
     'zoom ai notetaker', 
     'google meet transcription', 
     'teams meeting assistant', 
     'ai live transcript', 
-    'stealth screen ai'
+    'speech co pilot'
   ],
   applicationName: 'Voiceflow',
   authors: [{ name: 'Voiceflow Team' }],
@@ -98,8 +99,8 @@ export const metadata: Metadata = {
     title: 'Voiceflow',
   },
   openGraph: {
-    title: 'Voiceflow - Undetectable AI Notetaker & Live Meeting Co-Pilot',
-    description: 'Capture every meeting detail and get instant, undetectable live answers during Zoom, Teams, and Google Meet calls.',
+    title: 'Voiceflow - AI Meeting Notetaker & Live Meeting Co-Pilot',
+    description: 'Capture every meeting detail, generate automated summaries, and keep speaking notes protected with Presenter Privacy Shield.',
     url: siteUrl,
     siteName: 'Voiceflow',
     images: [

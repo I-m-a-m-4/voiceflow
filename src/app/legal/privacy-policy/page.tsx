@@ -207,7 +207,7 @@ export default function PrivacyPolicyPage() {
               <ul>
                 <li>Your floating notes and teleprompter widget remain fully visible to you on your desktop.</li>
                 <li>The widget is automatically excluded from display capture and screen sharing streams in Microsoft Teams, Zoom, Google Meet, and OBS.</li>
-                <li>This ensures your private speaking points, confidential agenda items, and internal cheat sheets are never accidentally broadcasted to webinar attendees, clients, or interviewers.</li>
+                <li>This ensures your private speaking points, confidential agenda items, and internal reference guides are never accidentally broadcasted to webinar attendees, clients, or meeting participants.</li>
               </ul>
 
               <h3>B. On-Demand Visual Snapshotting</h3>

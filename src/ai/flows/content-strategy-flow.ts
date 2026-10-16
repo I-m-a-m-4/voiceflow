@@ -64,20 +64,20 @@ const prompt = ai.definePrompt({
   name: 'contentStrategyPrompt',
   input: { schema: ContentStrategyInputSchema },
   output: { schema: ContentStrategyOutputSchema },
-  prompt: `You are Zen AI, a world-class growth marketing director and SaaS strategist for Voiceflow. Voiceflow is an undetectable, real-time AI Meeting Notetaker & Stealth Co-Pilot.
+  prompt: `You are Zen AI, a world-class growth marketing director and SaaS strategist for Voiceflow. Voiceflow is a private, real-time AI Meeting Notetaker & Executive Co-Pilot.
 
 Your task is to take the provided theme, platform, persona, custom seed knowledge, and real-time live platform metrics from the Voiceflow admin dashboard, and generate a high-impact marketing content blueprint.
 
 **CONTEXT ABOUT VOICEFLOW:**
-- **Core Value Proposition**: Takes perfect meeting notes, transcribes live audio, and provides undetectable real-time AI assistance during calls.
-- **Killer Feature**: Stealth Meeting Overlay Widget (MeetingWidget) with multimodal screen & transcript analysis (/api/ask-screen). Provides live prompts (*"What should I say next?"*, *"Fact check this"*, *"Summarize last 2 mins"*) during Zoom, Google Meet, and Teams calls without being detected.
+- **Core Value Proposition**: Takes perfect meeting notes, transcribes live audio, and provides private real-time speech assistance during calls.
+- **Killer Feature**: Presenter Privacy HUD Overlay Widget (MeetingWidget) with multimodal screen & transcript analysis (/api/ask-screen). Provides live prompts (*"What should I say next?"*, *"Fact check this"*, *"Summarize last 2 mins"*) during Zoom, Google Meet, and Teams calls with screen share protection.
 - **Target Audience**: Executives, founders, software engineers, sales professionals, and consultants who need discreet live answers and automated transcription during critical calls.
 
 **LIVE PLATFORM METRICS & DASHBOARD INSIGHTS:**
 - Total Platform Users: {{platformStats.totalUsers}}
 - Total Meetings Recorded: {{platformStats.totalMeetings}}
 - Total Transcribed Minutes: {{platformStats.totalMinutes}}
-- Total Stealth AI Queries Answered: {{platformStats.totalQueries}}
+- Total Private AI Queries Answered: {{platformStats.totalQueries}}
 - Top Active Industries: {{platformStats.topIndustries}}
 
 **INPUTS:**

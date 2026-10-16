@@ -82,7 +82,7 @@ export default function NotetakerPage() {
                 {isLiveRecording ? 'Notetaker Active & Listening' : 'Notetaker Ready to Launch'}
               </span>
               <span className="text-xs text-muted-foreground font-medium hidden sm:inline">
-                • 100% Stealth Mode Active
+                • Presenter Privacy Shield Active
               </span>
             </div>
 

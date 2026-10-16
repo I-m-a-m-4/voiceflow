@@ -611,7 +611,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
           <GripHorizontal size={15} />
         </div>
 
-        {/* Toggleable Undetectable Mode button */}
+        {/* Toggleable Presenter Privacy Shield button */}
         <button 
           onClick={toggleStealth}
           className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all ${
@@ -619,10 +619,10 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
               ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 shadow-[0_0_12px_rgba(16,185,129,0.25)]" 
               : "bg-white/10 text-white/70 hover:text-white hover:bg-white/20 border border-white/10"
           }`}
-          title={isStealth ? "Undetectable Mode ON: Window excluded from Zoom/Meet capture & hidden from taskbar" : "Undetectable Mode OFF: Click to enable"}
+          title={isStealth ? "Presenter Privacy Shield ON: Window excluded from Zoom/Teams/Meet screen share & hidden from taskbar" : "Presenter Privacy Shield OFF: Click to enable"}
         >
           {isStealth ? <ShieldCheck size={13} className="text-emerald-400" /> : <ShieldAlert size={13} className="text-amber-400" />}
-          <span>{isStealth ? "Undetectable: ON" : "Undetectable: OFF"}</span>
+          <span>{isStealth ? "Presenter Privacy: ON" : "Presenter Privacy: OFF"}</span>
         </button>
 
         {/* Live Session Timer */}
@@ -697,7 +697,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
                 Upgrade to Voiceflow Pro
               </h3>
               <p className="text-xs text-gray-600 dark:text-white/70 max-w-sm mb-5 leading-relaxed">
-                You have used your 3 free meeting sessions on the Basic Plan. Upgrade to Pro for unlimited AI notetaking, live stealth co-pilot, and custom instructions.
+                You have used your 3 free meeting sessions on the Basic Plan. Upgrade to Pro for unlimited AI notetaking, live privacy co-pilot, and custom instructions.
               </p>
               <button
                 onClick={() => {

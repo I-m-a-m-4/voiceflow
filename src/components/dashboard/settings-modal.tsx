@@ -609,17 +609,17 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
                     </button>
                   </div>
 
-                  {/* Stealth Mode */}
+                  {/* Presenter Privacy Shield */}
                   <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-[#1A1A1A] rounded-xl border border-gray-200 dark:border-gray-800">
                     <div className="flex items-center gap-4">
                       <div className="bg-gray-100 dark:bg-[#2A2A2A] p-2 rounded-lg">
                         <ShieldCheck size={20} className={detectable ? "text-emerald-500" : "text-gray-400"} />
                       </div>
                       <div>
-                        <div className="text-sm font-bold text-gray-900 dark:text-white">Stealth Mode (100% Undetectable)</div>
+                        <div className="text-sm font-bold text-gray-900 dark:text-white">Presenter Privacy Shield (Screen Share Protection)</div>
                         <div className="text-xs text-gray-500 dark:text-gray-400">
                           {detectable 
-                            ? "Active: Excluded from Zoom/Meet screen share & hidden from taskbar" 
+                            ? "Active: Excluded from Zoom, Teams & Meet screen share & hidden from taskbar" 
                             : "Off: Visible to screen share and taskbar"}
                         </div>
                       </div>
@@ -810,7 +810,7 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
                   <textarea
                     value={customContext}
                     onChange={(e) => setCustomContext(e.target.value)}
-                    placeholder="e.g. I am a Senior Software Engineer interviewing for a role at Google. My primary stack is React, Next.js, and Python. When giving me answers, keep them concise and technical, focusing on system architecture."
+                    placeholder="e.g. I am a Principal Solutions Architect leading client technical briefings and sales demos. My primary stack is Cloud Architecture, React, and Python. Keep meeting action items concise, executive-ready, and technically rigorous."
                     className="w-full h-28 bg-white dark:bg-[#141414] border border-gray-200 dark:border-gray-800 rounded-lg p-3 text-xs text-gray-900 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-voiceflow-orange/50 focus:border-voiceflow-orange resize-none transition-all"
                   />
                   <div className="flex justify-between items-center mt-3">
@@ -858,7 +858,7 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
                     </div>
                     <div className="flex items-start gap-2">
                       <span className="bg-voiceflow-orange text-white w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">4</span>
-                      <span><strong>Stealth & Privacy:</strong> Enable Stealth Mode in General settings so the window is completely invisible to screen share.</span>
+                      <span><strong>Presenter Privacy Shield:</strong> Enable Presenter Privacy Shield in General settings so the window is completely invisible to screen share.</span>
                     </div>
                   </div>
                 </div>

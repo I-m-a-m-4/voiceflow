@@ -65,7 +65,7 @@ export default function CommandPalette({
     },
     {
       id: 'toggle-detectable',
-      title: isDetectable ? 'Enable Stealth Mode (Undetectable)' : 'Disable Stealth Mode (Detectable)',
+      title: isDetectable ? 'Enable Presenter Privacy Shield' : 'Disable Presenter Privacy Shield',
       icon: Eye,
       action: () => {
         onToggleDetectable();

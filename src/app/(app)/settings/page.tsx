@@ -1728,8 +1728,8 @@ function SettingsPageContent() {
 
                             <div className="flex items-center justify-between rounded-lg border p-4">
                                 <div className="space-y-0.5">
-                                    <Label className="text-base text-stone-900">Screen Share Protection (Undetectable Mode)</Label>
-                                    <p className="text-sm text-muted-foreground">When enabled, the Voiceflow app windows will be invisible to screen sharing apps (e.g. Zoom, Google Meet) to protect privacy during presentations.</p>
+                                    <Label className="text-base text-stone-900">Presenter Privacy Shield (Screen Share Protection)</Label>
+                                    <p className="text-sm text-muted-foreground">When enabled, Voiceflow overlay windows are excluded from screen capture (Zoom, Microsoft Teams, Google Meet) to safeguard confidential meeting notes during presentations.</p>
                                 </div>
                                 <Switch checked={screenShareProtectionEnabled} onCheckedChange={setScreenShareProtectionEnabled} />
                             </div>

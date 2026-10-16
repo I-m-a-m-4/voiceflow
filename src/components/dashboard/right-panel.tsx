@@ -127,7 +127,7 @@ export default function RightPanel() {
 
   return (
     <>
-      {/* Floating Undetectable Widget (visible during recording & draggable) */}
+      {/* Floating Privacy HUD Widget (visible during recording & draggable) */}
       <MeetingWidget 
         isRecording={isRecording} 
         stopRecording={stopRecording} 
@@ -139,7 +139,7 @@ export default function RightPanel() {
         {/* Voiceflow Co-Pilot Control */}
         <div className="mb-8">
           <h3 className="text-[15px] font-bold text-foreground mb-1 font-nexa">Voiceflow Co-Pilot</h3>
-          <p className="text-[11px] font-medium text-muted-foreground mb-3 font-dm-sans">Stealth real-time notetaker & live assistant</p>
+          <p className="text-[11px] font-medium text-muted-foreground mb-3 font-dm-sans">Real-time meeting notetaker & executive co-pilot</p>
           
           {!isRecording && !isProcessing ? (
             <div className="space-y-3">
@@ -202,7 +202,7 @@ export default function RightPanel() {
               )}
               <div className="flex items-center justify-center gap-1.5 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 py-1.5 px-3 rounded-full border border-emerald-500/20">
                 <ShieldCheck size={14} className="text-emerald-500" />
-                <span className="text-[11px] font-bold tracking-tight font-dm-sans">100% Undetectable • Draggable • Taskbar Hidden</span>
+                <span className="text-[11px] font-bold tracking-tight font-dm-sans">Presenter Privacy Shield • Draggable • Taskbar Hidden</span>
               </div>
             </div>
           ) : isRecording ? (

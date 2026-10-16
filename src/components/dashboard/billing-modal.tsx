@@ -30,7 +30,7 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
       annualNgn: 120000,
       icon: Crown,
       features: [
-        'Stealth Mode: 100% Undetectable to Zoom, Meet & Teams',
+        'Screen Share Shield: Private Notes during Zoom, Meet & Teams',
         '10 Hours (600 Mins) / month meeting transcription',
         'Up to 30 meeting sessions monthly',
         'Live Real-Time AI Copilot & Suggested Responses',
@@ -55,7 +55,7 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
       features: [
         '100% UNLIMITED Minutes (Zero monthly caps)',
         '100% UNLIMITED Meeting Sessions (Infinite calls)',
-        'Stealth Mode: 100% Undetectable to Zoom, Meet & Teams',
+        'Screen Share Shield: Private Notes during Zoom, Meet & Teams',
         'Live Real-Time Screen Q&A & Visual Screen Intelligence',
         'Instant AI Meeting Copilot with Suggested Responses',
         'Deep Executive Briefs & Automated Follow-up Email Drafts',
@@ -297,7 +297,7 @@ export function BillingModal({ isOpen, onClose }: BillingModalProps) {
             Subscription Plans & Pricing
           </DialogTitle>
           <DialogDescription className="text-sm text-muted-foreground">
-            Experience unlimited real-time meeting transcription, instant AI copilot, and 100% stealth mode.
+            Experience unlimited real-time meeting transcription, instant AI copilot, and Presenter Privacy Shield.
           </DialogDescription>
         </DialogHeader>
 
