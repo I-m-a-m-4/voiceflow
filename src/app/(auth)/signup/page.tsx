@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { createUserWithEmailAndPassword, signInWithPopup, signInWithRedirect, GoogleAuthProvider } from 'firebase/auth';
+import { createUserWithEmailAndPassword, signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 import { useAuth } from '@/context/auth-context';
@@ -29,7 +29,40 @@ export default function SignupPage() {
   useEffect(() => {
     if (!authLoading && user) {
       router.replace('/dashboard');
+      return;
     }
+
+    // Handle return from signInWithRedirect
+    getRedirectResult(auth)
+      .then(async (result) => {
+        if (!result?.user) return;
+        const redirectUser = result.user;
+        const userDocRef = doc(db, 'users', redirectUser.uid);
+        const userDoc = await getDoc(userDocRef);
+        const userName = redirectUser.displayName || (redirectUser.email ? redirectUser.email.split('@')[0] : 'User');
+
+        if (!userDoc.exists()) {
+          await setDoc(userDocRef, {
+            name: userName,
+            email: redirectUser.email,
+            createdAt: new Date().toISOString(),
+            role: 'admin',
+          }, { merge: true });
+        }
+
+        localStorage.setItem('userEmail', redirectUser.email || '');
+        localStorage.setItem('userName', userName);
+        toast({
+          title: 'Account created!',
+          description: 'Successfully signed up with Google.',
+        });
+        router.push('/dashboard');
+      })
+      .catch((err) => {
+        if (err?.code !== 'auth/null-user') {
+          console.error('Redirect sign-up error:', err);
+        }
+      });
   }, [user, authLoading, router]);
 
   const handleGoogleSignup = async () => {
@@ -63,18 +96,14 @@ export default function SignupPage() {
       });
       router.push('/dashboard');
     } catch (err: any) {
-      if (
-        isNativeApp() ||
-        err?.code === 'auth/internal-error' ||
-        err?.code === 'auth/operation-not-supported-in-this-environment' ||
-        err?.code === 'auth/unauthorized-domain'
-      ) {
-        console.warn('Native environment or internal-error detected for Google Sign Up. Launching external browser...');
+      if (isNativeApp()) {
+        console.warn('Native environment detected for Google Sign Up. Launching external browser...');
         toast({
           title: 'Opening Browser for Google Sign-Up',
           description: 'Completing registration in your default browser. You can also create an account with Email & Password.',
         });
-        await openExternal('https://voiceflow-azure.vercel.app/signup');
+        const targetUrl = `${process.env.NEXT_PUBLIC_BASE_URL || 'https://voiceflow.space'}/signup`;
+        await openExternal(targetUrl);
         return;
       }
       if (
