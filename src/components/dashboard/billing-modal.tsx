@@ -30,6 +30,7 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
       annualNgn: 120000,
       icon: Crown,
       features: [
+        'Unlimited AI Screen Capture & Real-Time Visual Q&A',
         'Screen Share Shield: Private Notes during Zoom, Meet & Teams',
         '10 Hours (600 Mins) / month meeting transcription',
         'Up to 30 meeting sessions monthly',

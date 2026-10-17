@@ -46,7 +46,23 @@ async function bmpToJpeg(bmpDataUrl: string): Promise<string> {
   });
 }
 
+export function canCaptureScreen(): boolean {
+  if (typeof window === 'undefined') return true;
+  const isPro = localStorage.getItem('voiceflow_is_pro') === 'true';
+  if (isPro) return true;
+  const count = parseInt(localStorage.getItem('voiceflow_screen_capture_count') || '0', 10);
+  return count < 3;
+}
+
 export async function captureScreenBase64(): Promise<string> {
+  if (!canCaptureScreen()) {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('open-billing-modal'));
+    }
+    console.warn('Screen capture blocked: Free tier limit (3 captures) reached.');
+    return '';
+  }
+
   // 1. Native Desktop App: Silent Win32 GDI capture (Zero permission prompts, completely invisible)
   if (isNativeApp()) {
     try {

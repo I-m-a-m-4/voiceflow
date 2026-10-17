@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth, useFirestore } from '@/firebase';
-import { doc, getDoc, updateDoc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
-import { syncDeviceTrial, recordDeviceSession } from '@/lib/device-fingerprint';
+import { doc, getDoc, updateDoc, onSnapshot, collection, query, where, getDocs, increment } from 'firebase/firestore';
+import { syncDeviceTrial, recordDeviceSession, recordDeviceScreenCapture } from '@/lib/device-fingerprint';
 
 export interface PlanUsageState {
   isPro: boolean;
@@ -16,6 +16,10 @@ export interface PlanUsageState {
   isLimitReached: boolean;
   recordSession: (durationSeconds?: number) => Promise<void>;
   refreshUsage: () => void;
+  screenCaptureCount: number;
+  maxFreeScreenCaptures: number;
+  isScreenCaptureLimitReached: boolean;
+  recordScreenCapture: () => Promise<boolean>;
 }
 
 export function usePlanUsage(): PlanUsageState {
@@ -49,8 +53,15 @@ export function usePlanUsage(): PlanUsageState {
     return saved ? parseInt(saved, 10) : 0;
   });
 
+  const [screenCaptureCount, setScreenCaptureCount] = useState<number>(() => {
+    if (typeof window === 'undefined') return 0;
+    const saved = localStorage.getItem('voiceflow_screen_capture_count');
+    return saved ? parseInt(saved, 10) : 0;
+  });
+
   const maxMinutes = 30; // 30 minutes monthly free limit
   const maxFreeSessions = 3; // 3 sessions free limit
+  const maxFreeScreenCaptures = 3; // 3 screen captures free limit
 
   const syncFromStorage = useCallback(() => {
     if (typeof window === 'undefined') return;
@@ -63,10 +74,12 @@ export function usePlanUsage(): PlanUsageState {
     const devExceeded = localStorage.getItem('voiceflow_device_trial_exceeded') === 'true';
     const sessions = parseInt(localStorage.getItem('voiceflow_session_count') || '0', 10);
     const mins = parseInt(localStorage.getItem('voiceflow_used_minutes') || '0', 10);
+    const captures = parseInt(localStorage.getItem('voiceflow_screen_capture_count') || '0', 10);
     setIsPro(pro);
     setIsDeviceExceeded(devExceeded);
     setSessionCount(sessions);
     setUsedMinutes(mins);
+    setScreenCaptureCount(captures);
   }, [isAdmin]);
 
   // Synchronize device trial with Firestore across accounts
@@ -74,8 +87,11 @@ export function usePlanUsage(): PlanUsageState {
     if (isAdmin) return;
     let isMounted = true;
     syncDeviceTrial(firestore, auth?.currentUser)
-      .then((res) => {
+      .then((res: any) => {
         if (!isMounted) return;
+        if (res.screenCaptureCount !== undefined) {
+          setScreenCaptureCount((prev) => Math.max(prev, res.screenCaptureCount || 0));
+        }
         if (res.trialExceeded && !res.isPro) {
           setIsDeviceExceeded(true);
           setSessionCount((prev) => Math.max(prev, res.sessionCount, 3));
@@ -136,6 +152,7 @@ export function usePlanUsage(): PlanUsageState {
         const proStatus = !!(data.isPro === true || data.planTier === 'pro' || data.subscriptionPlan?.toLowerCase().includes('pro'));
         const firestoreMins = typeof data.usedMinutes === 'number' ? data.usedMinutes : 0;
         const firestoreSessions = typeof data.sessionCount === 'number' ? data.sessionCount : 0;
+        const firestoreCaptures = typeof data.screenCaptureCount === 'number' ? data.screenCaptureCount : 0;
 
         setIsPro(proStatus);
         if (proStatus) {
@@ -148,14 +165,18 @@ export function usePlanUsage(): PlanUsageState {
         // Use the maximum between local and server to avoid resetting upon offline/cache tampering
         const currentLocalSessions = parseInt(localStorage.getItem('voiceflow_session_count') || '0', 10);
         const currentLocalMins = parseInt(localStorage.getItem('voiceflow_used_minutes') || '0', 10);
+        const currentLocalCaptures = parseInt(localStorage.getItem('voiceflow_screen_capture_count') || '0', 10);
 
         const finalSessions = Math.max(firestoreSessions, currentLocalSessions);
         const finalMins = Math.max(firestoreMins, currentLocalMins);
+        const finalCaptures = Math.max(firestoreCaptures, currentLocalCaptures);
 
         setSessionCount(finalSessions);
         setUsedMinutes(finalMins);
+        setScreenCaptureCount(finalCaptures);
         localStorage.setItem('voiceflow_session_count', String(finalSessions));
         localStorage.setItem('voiceflow_used_minutes', String(finalMins));
+        localStorage.setItem('voiceflow_screen_capture_count', String(finalCaptures));
       }
     }, (err) => {
       console.warn("Could not listen to user doc for plan usage:", err);
@@ -232,12 +253,49 @@ export function usePlanUsage(): PlanUsageState {
     });
   }, [auth?.currentUser?.uid, firestore, sessionCount, usedMinutes]);
 
+  const recordScreenCapture = useCallback(async (): Promise<boolean> => {
+    if (isAdmin || isPro) {
+      return true;
+    }
+    const currentCaptures = parseInt(localStorage.getItem('voiceflow_screen_capture_count') || '0', 10);
+    if (currentCaptures >= maxFreeScreenCaptures) {
+      return false;
+    }
+    const next = currentCaptures + 1;
+    setScreenCaptureCount(next);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('voiceflow_screen_capture_count', String(next));
+      window.dispatchEvent(new CustomEvent('voiceflow-usage-updated'));
+    }
+
+    if (auth?.currentUser?.uid && firestore) {
+      try {
+        const userDocRef = doc(firestore, 'users', auth.currentUser.uid);
+        await updateDoc(userDocRef, {
+          screenCaptureCount: increment(1)
+        });
+      } catch (e) {
+        console.warn('Failed to update Firestore screen capture count:', e);
+      }
+    }
+
+    recordDeviceScreenCapture(firestore).catch((e) => {
+      console.warn('Failed to update device screen capture:', e);
+    });
+
+    return true;
+  }, [auth?.currentUser?.uid, firestore, isAdmin, isPro, maxFreeScreenCaptures]);
+
   // Anti-cheating & Anti-account hopping:
   // Limit reached if user is not pro AND (device trial already exhausted OR user exceeded sessions/minutes)
   // Bello Imam is the owner/admin: NEVER restricted by limits
   const isLimitReached = isAdmin
     ? false
     : (!isPro && (isDeviceExceeded || sessionCount >= maxFreeSessions || usedMinutes >= maxMinutes));
+
+  const isScreenCaptureLimitReached = isAdmin
+    ? false
+    : (!isPro && screenCaptureCount >= maxFreeScreenCaptures);
 
   // If device trial is exhausted, clamp displayed usage to the limit so user sees 3/3 sessions and 30/30 mins
   const displaySessions = isDeviceExceeded && !isPro ? Math.max(sessionCount, maxFreeSessions) : sessionCount;
@@ -254,5 +312,9 @@ export function usePlanUsage(): PlanUsageState {
     isLimitReached,
     recordSession,
     refreshUsage: syncFromStorage,
+    screenCaptureCount,
+    maxFreeScreenCaptures: isAdmin ? 999999 : maxFreeScreenCaptures,
+    isScreenCaptureLimitReached,
+    recordScreenCapture,
   };
 }

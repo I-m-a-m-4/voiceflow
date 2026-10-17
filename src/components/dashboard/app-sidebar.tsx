@@ -78,7 +78,7 @@ export default function AppSidebar() {
     };
   }, []);
 
-  const { isPro, sessionCount, usedMinutes, maxMinutes, maxFreeSessions, isLimitReached } = usePlanUsage();
+  const { isPro, sessionCount, usedMinutes, maxMinutes, maxFreeSessions, isLimitReached, screenCaptureCount } = usePlanUsage();
 
   return (
     <>
@@ -171,9 +171,15 @@ export default function AppSidebar() {
                   )}
                 </div>
 
-                <div className="text-[11px] text-gray-500 mb-2 dark:text-gray-400">
+                <div className="text-[11px] text-gray-500 mb-1 dark:text-gray-400">
                   {isPro ? "Unlimited monthly mins" : `${usedMinutes} of ${maxMinutes} monthly mins used`}
                 </div>
+                {!isPro && (
+                  <div className="text-[10px] text-gray-500 mb-2 dark:text-gray-400 flex items-center justify-between">
+                    <span>Screen captures:</span>
+                    <span className="font-semibold text-gray-700 dark:text-gray-300">{Math.min(screenCaptureCount, 3)}/3 used</span>
+                  </div>
+                )}
                 
                 <div className="w-full bg-gray-200 h-1.5 rounded-full mb-2.5 overflow-hidden dark:bg-gray-700">
                   <div 

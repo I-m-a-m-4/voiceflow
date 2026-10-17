@@ -225,6 +225,7 @@ export interface DeviceTrialInfo {
   trialExceeded: boolean;
   sessionCount: number;
   usedMinutes: number;
+  screenCaptureCount?: number;
   primaryEmail?: string;
   isPro?: boolean;
 }
@@ -248,6 +249,7 @@ export async function syncDeviceTrial(
       trialExceeded: false,
       sessionCount: 0,
       usedMinutes: 0,
+      screenCaptureCount: 0,
       isPro: true
     };
   }
@@ -261,7 +263,8 @@ export async function syncDeviceTrial(
       deviceId,
       trialExceeded: localExceeded,
       sessionCount: localSessions,
-      usedMinutes: localMins
+      usedMinutes: localMins,
+      screenCaptureCount: parseInt(localStorage.getItem('voiceflow_screen_capture_count') || '0', 10)
     };
   }
 
@@ -274,6 +277,10 @@ export async function syncDeviceTrial(
       const serverSessions = typeof devData.sessionCount === 'number' ? devData.sessionCount : 0;
       const serverMins = typeof devData.usedMinutes === 'number' ? devData.usedMinutes : 0;
       const devHasPro = devData.hasPro === true || devData.isPro === true;
+      const serverCaptures = typeof devData.screenCaptureCount === 'number' ? devData.screenCaptureCount : 0;
+      const localCaptures = parseInt(localStorage.getItem('voiceflow_screen_capture_count') || '0', 10);
+      const effectiveCaptures = Math.max(serverCaptures, localCaptures);
+      localStorage.setItem('voiceflow_screen_capture_count', String(effectiveCaptures));
 
       const effectiveSessions = Math.max(serverSessions, localSessions);
       const effectiveMins = Math.max(serverMins, localMins);
@@ -306,7 +313,8 @@ export async function syncDeviceTrial(
           registeredUids: user?.uid ? arrayUnion(user.uid) : [],
           trialExceeded: isExceeded,
           sessionCount: effectiveSessions,
-          usedMinutes: effectiveMins
+          usedMinutes: effectiveMins,
+          screenCaptureCount: effectiveCaptures
         }).catch(() => {});
       }
 
@@ -315,6 +323,7 @@ export async function syncDeviceTrial(
         trialExceeded: isExceeded,
         sessionCount: effectiveSessions,
         usedMinutes: effectiveMins,
+        screenCaptureCount: effectiveCaptures,
         primaryEmail: devData.primaryEmail,
         isPro: devHasPro
       };
@@ -322,6 +331,7 @@ export async function syncDeviceTrial(
       // First time device is registered
       const ip = await getPublicIP().catch(() => 'Unknown');
       const isExceeded = localExceeded;
+      const localCaptures = parseInt(localStorage.getItem('voiceflow_screen_capture_count') || '0', 10);
 
       await setDoc(devDocRef, {
         deviceId,
@@ -331,6 +341,7 @@ export async function syncDeviceTrial(
         registeredUids: user?.uid ? [user.uid] : [],
         sessionCount: localSessions,
         usedMinutes: localMins,
+        screenCaptureCount: localCaptures,
         trialExceeded: isExceeded,
         hasPro: false,
         ip,
@@ -349,6 +360,7 @@ export async function syncDeviceTrial(
         trialExceeded: isExceeded,
         sessionCount: localSessions,
         usedMinutes: localMins,
+        screenCaptureCount: localCaptures,
         primaryEmail: currentEmail,
         isPro: false
       };
@@ -359,7 +371,8 @@ export async function syncDeviceTrial(
       deviceId,
       trialExceeded: localExceeded,
       sessionCount: localSessions,
-      usedMinutes: localMins
+      usedMinutes: localMins,
+      screenCaptureCount: parseInt(localStorage.getItem('voiceflow_screen_capture_count') || '0', 10)
     };
   }
 }
@@ -400,6 +413,29 @@ export async function recordDeviceSession(
   } catch (err) {
     console.warn('Could not update device usage in Firestore:', err);
   }
+}
+
+/**
+ * Increment screen capture count on the permanent device record
+ */
+export async function recordDeviceScreenCapture(firestore: any): Promise<number> {
+  const deviceId = await getDeviceFingerprint();
+  const curCaptures = parseInt(localStorage.getItem('voiceflow_screen_capture_count') || '0', 10) + 1;
+  localStorage.setItem('voiceflow_screen_capture_count', String(curCaptures));
+  window.dispatchEvent(new CustomEvent('voiceflow-usage-updated'));
+
+  if (!firestore) return curCaptures;
+
+  try {
+    const devDocRef = doc(firestore, 'devices', deviceId);
+    await updateDoc(devDocRef, {
+      screenCaptureCount: increment(1),
+      lastSeen: serverTimestamp()
+    });
+  } catch (err) {
+    console.warn('Could not update device screen capture in Firestore:', err);
+  }
+  return curCaptures;
 }
 
 /**

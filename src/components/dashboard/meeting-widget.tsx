@@ -32,6 +32,7 @@ import { captureScreenBase64 } from '@/lib/capture-screen';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { usePlanUsage } from '@/hooks/use-plan-usage';
+import { toast } from '@/hooks/use-toast';
 import { apiBase } from '@/lib/platform';
 
 interface MeetingWidgetProps {
@@ -332,7 +333,15 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
     }
   }, [messages, isQuerying]);
 
-  const { isPro, sessionCount, maxFreeSessions, isLimitReached } = usePlanUsage();
+  const { 
+    isPro, 
+    sessionCount, 
+    maxFreeSessions, 
+    isLimitReached, 
+    screenCaptureCount, 
+    isScreenCaptureLimitReached, 
+    recordScreenCapture 
+  } = usePlanUsage();
 
   const applyStealth = async (stealthOn: boolean) => {
     try {
@@ -400,14 +409,30 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
 
       let base64Image: string | null = null;
       if (wantsScreenAnalysis && !lastImageBase64Ref.current) {
-        try {
-          base64Image = await captureScreenBase64();
-          if (base64Image) {
-            lastImageBase64Ref.current = base64Image;
-            setHasAttachedImage(true);
+        if (isScreenCaptureLimitReached) {
+          toast({
+            title: "Screen Capture Limit Reached (3/3 Free Uses)",
+            description: "Free plan is limited to 3 AI screen captures. Upgrade to Voiceflow Pro for unlimited real-time visual analysis.",
+            variant: "destructive"
+          });
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('open-billing-modal'));
           }
-        } catch (e) {
-          console.warn("Screen capture skipped, proceeding with transcript context:", e);
+          if (includeScreenCapture) {
+            setIsQuerying(false);
+            return;
+          }
+        } else {
+          try {
+            base64Image = await captureScreenBase64();
+            if (base64Image) {
+              lastImageBase64Ref.current = base64Image;
+              setHasAttachedImage(true);
+              await recordScreenCapture();
+            }
+          } catch (e) {
+            console.warn("Screen capture skipped, proceeding with transcript context:", e);
+          }
         }
       }
 
@@ -909,13 +934,35 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
           {/* Quick-Action Triggers */}
           <div className="grid grid-cols-3 gap-2 mb-3 text-xs font-semibold">
             <button 
-              onClick={() => handleAskAI(query.trim() ? query : "Analyze what is on my screen right now and give me the exact answer, code, or speaking points.", true)}
+              onClick={() => {
+                if (isScreenCaptureLimitReached) {
+                  toast({
+                    title: "Screen Capture Limit Reached (3/3 Free Uses)",
+                    description: "Free plan is limited to 3 AI screen captures. Upgrade to Voiceflow Pro for unlimited real-time visual analysis.",
+                    variant: "destructive"
+                  });
+                  if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('open-billing-modal'));
+                  }
+                  return;
+                }
+                handleAskAI(query.trim() ? query : "Analyze what is on my screen right now and give me the exact answer, code, or speaking points.", true);
+              }}
               disabled={isQuerying}
               className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl bg-gradient-to-r from-blue-600/20 to-indigo-600/20 hover:from-blue-600/30 hover:to-indigo-600/30 text-blue-200 hover:text-white border border-blue-500/30 hover:border-blue-500/50 transition-all active:scale-[0.98] disabled:opacity-50 text-[11px] font-medium shadow-sm"
-              title="Capture & Analyze Screen with AI"
+              title={!isPro ? `Capture & Analyze Screen (${screenCaptureCount}/3 free uses)` : "Capture & Analyze Screen with AI"}
             >
               <Camera size={13} className="text-blue-400 shrink-0" />
-              <span className="truncate">Analyze Screen</span>
+              <span className="truncate">
+                {!isPro ? (
+                  isScreenCaptureLimitReached ? "Screen (3/3 Free)" : `Screen (${3 - screenCaptureCount} left)`
+                ) : (
+                  "Analyze Screen"
+                )}
+              </span>
+              {!isPro && isScreenCaptureLimitReached && (
+                <span className="text-[9px] uppercase px-1 py-0.5 rounded bg-amber-500/30 text-amber-300 font-bold ml-0.5">Pro</span>
+              )}
             </button>
             <button 
               onClick={() => handleAskAI("Give me a smart real-time answer suggestion for the current meeting point.")}
@@ -969,13 +1016,31 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
           {/* Input Box */}
           <div className="relative flex items-center bg-[#252528] rounded-xl border border-white/10 p-1.5">
             <button 
-              onClick={() => handleAskAI(query.trim() ? query : "Analyze what is on my screen right now and give me the exact answer, code, or speaking points.", true)}
+              onClick={() => {
+                if (isScreenCaptureLimitReached) {
+                  toast({
+                    title: "Screen Capture Limit Reached (3/3 Free Uses)",
+                    description: "Free plan is limited to 3 AI screen captures. Upgrade to Voiceflow Pro for unlimited real-time visual analysis.",
+                    variant: "destructive"
+                  });
+                  if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('open-billing-modal'));
+                  }
+                  return;
+                }
+                handleAskAI(query.trim() ? query : "Analyze what is on my screen right now and give me the exact answer, code, or speaking points.", true);
+              }}
               disabled={isQuerying}
               className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-colors border border-white/5 disabled:opacity-50" 
-              title="Capture & Analyze Screen (Sends your question with a live display capture)"
+              title={!isPro ? `Capture Screen (${screenCaptureCount}/3 free used)` : "Capture & Analyze Screen (Sends your question with a live display capture)"}
             >
               <Camera size={12} className="text-blue-400" />
-              Screen
+              <span>Screen</span>
+              {!isPro && (
+                <span className="text-[9px] px-1 py-0.5 rounded bg-white/10 text-white/70">
+                  {screenCaptureCount >= 3 ? '3/3' : `${3 - screenCaptureCount} left`}
+                </span>
+              )}
             </button>
 
             <button
