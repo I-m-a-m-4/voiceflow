@@ -115,27 +115,32 @@ export default function SignupPage() {
         });
         router.push('/dashboard');
       } catch (popupError: any) {
-        const isDesktop = typeof window !== 'undefined' && window.innerWidth > 768 && !/Mobi|Android/i.test(navigator.userAgent);
-        
-        // 2. Detect webview / desktop shell environment limitations
+        // User cancelled popup explicitly
         if (
+          popupError?.code === 'auth/popup-closed-by-user' ||
+          popupError?.code === 'auth/cancelled-popup-request' ||
+          popupError?.code === 'auth/user-cancelled'
+        ) {
+          setIsGoogleLoading(false);
+          return;
+        }
+
+        // Whenever popup is blocked or unsupported (desktop WebView2, browser popup blocker, etc.)
+        if (
+          popupError?.code === 'auth/popup-blocked' ||
           popupError?.code === 'auth/operation-not-supported-in-this-environment' ||
-          (popupError?.code === 'auth/popup-blocked' && !isDesktop) || 
-          (!isDesktop && popupError?.code === 'auth/network-request-failed') ||
+          popupError?.code === 'auth/network-request-failed' ||
           popupError?.code === 'auth/internal-error'
         ) {
-          // The webview cannot host a popup, or mobile browser blocked it, or Tauri internal error.
-          // Fallback: navigate the shell to Google OAuth redirect
-          if (popupError?.code === 'auth/internal-error' || popupError?.code === 'auth/operation-not-supported-in-this-environment') {
-            toast({
-              title: "Redirecting...",
-              description: "Connecting to Google securely...",
-            });
-          }
+          toast({
+            title: "Redirecting...",
+            description: "Connecting to Google securely...",
+          });
           await signInWithRedirect(auth, provider);
-        } else {
-          throw popupError;
+          return;
         }
+
+        throw popupError;
       }
     } catch (error: any) {
       // Handle user cancellation gracefully without showing noisy error toasts
