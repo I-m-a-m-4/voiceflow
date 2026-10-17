@@ -387,7 +387,7 @@ export default function RightPanel() {
       />
 
       {!isRecording && (
-        <div className="w-full lg:w-[320px] h-auto lg:h-full bg-muted/30 border-t lg:border-t-0 border-l border-border flex flex-col shrink-0 overflow-y-visible lg:overflow-y-auto p-6 font-dm-sans">
+        <div className="w-full lg:w-[320px] h-full bg-muted/30 border-t lg:border-t-0 border-l border-border flex flex-col shrink-0 overflow-y-auto p-6 font-dm-sans">
         {/* Voiceflow Co-Pilot Control */}
         <div className="mb-8">
           <h3 className="text-[15px] font-bold text-foreground mb-1 font-nexa">Voiceflow Co-Pilot</h3>

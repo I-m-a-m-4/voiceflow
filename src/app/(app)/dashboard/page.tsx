@@ -85,7 +85,7 @@ export default function VoiceFlowApp() {
   }, []);
 
   return (
-    <div className={`flex flex-col lg:flex-row min-h-full w-full ${isRecording ? 'bg-transparent' : ''}`}>
+    <div className={`flex flex-col lg:flex-row h-full w-full overflow-hidden ${isRecording ? 'bg-transparent' : ''}`}>
       {!isRecording && <MeetingsFeed />}
       <RightPanel />
     </div>

@@ -106,20 +106,31 @@ export function TauriLayoutWrapper({ children }: { children: React.ReactNode }) 
     }
   }, [isRecording]);
 
-  // On the web (browser), render normal scrollable page layout without desktop frame locking
-  if (!isTauri) {
+  // On the web (browser), render normal scrollable page layout for marketing/public routes only
+  const isMarketingRoute = !pathname || pathname === '/' || 
+    pathname.startsWith('/pricing') || 
+    pathname.startsWith('/blog') || 
+    pathname.startsWith('/legal') || 
+    pathname.startsWith('/careers') || 
+    pathname.startsWith('/contact') || 
+    pathname.startsWith('/help-center') || 
+    pathname.startsWith('/about') || 
+    pathname.startsWith('/zen-ai') || 
+    pathname.startsWith('/download');
+
+  if (!isTauri && isMarketingRoute) {
     return (
-      <div className="flex flex-col min-h-screen w-full bg-background text-foreground">
+      <div className="flex flex-col min-h-screen w-full bg-background text-foreground overflow-x-hidden">
         {children}
       </div>
     );
   }
 
-  // Inside desktop Tauri shell
+  // Inside desktop Tauri shell OR application routes on web
   return (
     <div
       className={cn(
-        "flex flex-col w-full",
+        "flex flex-col w-full overflow-hidden",
         isRecording 
           ? "h-0 max-h-0 bg-transparent overflow-hidden pointer-events-none" 
           : (darkTopInset 
@@ -127,7 +138,7 @@ export function TauriLayoutWrapper({ children }: { children: React.ReactNode }) 
               : "h-screen max-h-screen overflow-hidden bg-background text-foreground")
       )}
     >
-      <div className={cn("flex-1 flex flex-col relative min-h-0 overflow-y-auto", isRecording && "hidden")}>
+      <div className={cn("flex-1 flex flex-col relative min-h-0 overflow-hidden", isRecording && "hidden")}>
         {children}
       </div>
     </div>
