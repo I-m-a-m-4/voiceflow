@@ -164,51 +164,6 @@ export default function MeetingsFeed() {
                 </Link>
               </div>
             </div>
-
-            {/* Interactive Sample Meeting Preview Card */}
-            <div>
-              <div className="flex items-center justify-between mb-3 px-1">
-                <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Interactive Demo Preview</span>
-                <span className="text-xs text-voiceflow-orange font-medium">Click to open full notes →</span>
-              </div>
-              <Link 
-                href="/dashboard/meeting?id=sample"
-                className="bg-card border border-border/90 rounded-2xl p-6 hover:shadow-lg dark:hover:border-voiceflow-orange/50 transition-all cursor-pointer flex flex-col group relative overflow-hidden"
-              >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-                  <div>
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <span className="px-2.5 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">Google Meet</span>
-                      <span className="text-xs text-muted-foreground font-dm-sans">Today • 25 mins</span>
-                    </div>
-                    <h4 className="text-lg font-bold text-foreground group-hover:text-voiceflow-orange transition-colors font-nexa">
-                      Q3 Product Strategy & AI Roadmap Sync
-                    </h4>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-xs px-3 py-1 rounded-lg bg-voiceflow-orange/10 text-voiceflow-orange font-semibold border border-voiceflow-orange/20">
-                      Executive Summary
-                    </span>
-                  </div>
-                </div>
-
-                <div className="space-y-3 text-sm text-muted-foreground font-dm-sans bg-muted/30 p-4 rounded-xl border border-border/50">
-                  <p className="line-clamp-2 text-foreground/90">
-                    <strong className="text-foreground">Key Takeaways:</strong> The leadership team aligned on Q3 roadmap deliverables, prioritizing AI streaming latency under 200ms and deep calendar auto-join for Google Meet and Teams.
-                  </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-border/40 text-xs">
-                    <div className="flex items-center gap-2 text-foreground">
-                      <span className="text-emerald-500 font-bold">✓</span>
-                      <span>Streaming latency benchmark: Friday EOD</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-foreground">
-                      <span className="text-emerald-500 font-bold">✓</span>
-                      <span>Presenter Privacy Shield active by default</span>
-                    </div>
-                  </div>
-                </div>
-              </Link>
-            </div>
           </div>
         ) : filteredMeetings.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-muted-foreground border border-dashed border-border rounded-2xl bg-muted/20 p-8">

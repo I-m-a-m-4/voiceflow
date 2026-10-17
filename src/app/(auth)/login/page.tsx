@@ -27,9 +27,18 @@ export default function LoginPage() {
     password: '',
   });
 
+  const goToDashboard = () => {
+    try {
+      router.push('/dashboard/');
+    } catch {}
+    if (typeof window !== 'undefined') {
+      window.location.replace('/dashboard/');
+    }
+  };
+
   useEffect(() => {
     if (!authLoading && user) {
-      router.replace('/dashboard');
+      goToDashboard();
       return;
     }
 
@@ -38,32 +47,37 @@ export default function LoginPage() {
     let isMounted = true;
     getRedirectResult(auth)
       .then(async (result) => {
-        if (!result?.user || !isMounted) return;
+        if (!result?.user) return;
         setIsGoogleLoading(true);
         const redirectUser = result.user;
-        const userDocRef = doc(db, 'users', redirectUser.uid);
-        const userDoc = await getDoc(userDocRef);
-        let userName = redirectUser.displayName || (redirectUser.email ? redirectUser.email.split('@')[0] : 'User');
-
-        if (!userDoc.exists()) {
-          await setDoc(userDocRef, {
-            name: userName,
-            email: redirectUser.email,
-            createdAt: new Date().toISOString(),
-            role: 'admin',
-          }, { merge: true });
-        } else {
-          userName = userDoc.data()?.name || userName;
-        }
-
-        await syncDeviceTrial(db, redirectUser).catch(() => {});
+        const fallbackName = redirectUser.displayName || (redirectUser.email ? redirectUser.email.split('@')[0] : 'User');
 
         localStorage.setItem('userEmail', redirectUser.email || '');
-        localStorage.setItem('userName', userName);
+        localStorage.setItem('userName', fallbackName);
         toast({
           title: 'Successfully logged in with Google!',
         });
-        router.push('/dashboard');
+
+        // Background sync to Firestore without delaying navigation
+        (async () => {
+          try {
+            const userDocRef = doc(db, 'users', redirectUser.uid);
+            const userDoc = await getDoc(userDocRef);
+            if (!userDoc.exists()) {
+              await setDoc(userDocRef, {
+                name: fallbackName,
+                email: redirectUser.email,
+                createdAt: new Date().toISOString(),
+                role: 'admin',
+              }, { merge: true });
+            }
+            await syncDeviceTrial(db, redirectUser).catch(() => {});
+          } catch (e) {
+            console.error('Background user sync error:', e);
+          }
+        })();
+
+        goToDashboard();
       })
       .catch((err) => {
         if (err?.code && err.code !== 'auth/null-user') {
@@ -89,32 +103,35 @@ export default function LoginPage() {
         // 1. Attempt Popup first
         const userCredential = await signInWithPopup(auth, provider);
         const user = userCredential.user;
-        
-        const userDocRef = doc(db, 'users', user.uid);
-        const userDoc = await getDoc(userDocRef);
-        
-        let userName = user.displayName || (user.email ? user.email.split('@')[0] : 'User');
-        
-        if (!userDoc.exists()) {
-          await setDoc(userDocRef, {
-            name: userName,
-            email: user.email,
-            createdAt: new Date().toISOString(),
-            role: 'admin',
-          }, { merge: true });
-        } else {
-          userName = userDoc.data()?.name || userName;
-        }
-
-        await syncDeviceTrial(db, user).catch(() => {});
+        const fallbackName = user.displayName || (user.email ? user.email.split('@')[0] : 'User');
 
         localStorage.setItem('userEmail', user.email || '');
-        localStorage.setItem('userName', userName);
+        localStorage.setItem('userName', fallbackName);
         
         toast({
           title: 'Successfully logged in with Google!',
         });
-        router.push('/dashboard');
+
+        // Background sync to Firestore without delaying navigation
+        (async () => {
+          try {
+            const userDocRef = doc(db, 'users', user.uid);
+            const userDoc = await getDoc(userDocRef);
+            if (!userDoc.exists()) {
+              await setDoc(userDocRef, {
+                name: fallbackName,
+                email: user.email,
+                createdAt: new Date().toISOString(),
+                role: 'admin',
+              }, { merge: true });
+            }
+            await syncDeviceTrial(db, user).catch(() => {});
+          } catch (e) {
+            console.error('Background user sync error:', e);
+          }
+        })();
+
+        goToDashboard();
       } catch (popupError: any) {
         // User cancelled popup explicitly
         if (
@@ -196,7 +213,7 @@ export default function LoginPage() {
         title: 'Welcome back!',
         description: 'Successfully signed in.',
       });
-      router.push('/dashboard');
+      goToDashboard();
     } catch (err: any) {
       console.error('Login error:', err);
       toast({
