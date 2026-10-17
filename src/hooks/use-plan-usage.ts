@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth, useFirestore } from '@/firebase';
 import { doc, getDoc, updateDoc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
+import { syncDeviceTrial, recordDeviceSession } from '@/lib/device-fingerprint';
 
 export interface PlanUsageState {
   isPro: boolean;
@@ -30,6 +31,12 @@ export function usePlanUsage(): PlanUsageState {
     return localStorage.getItem('voiceflow_is_pro') === 'true';
   });
 
+  const [isDeviceExceeded, setIsDeviceExceeded] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    if (isAdmin) return false;
+    return localStorage.getItem('voiceflow_device_trial_exceeded') === 'true';
+  });
+
   const [sessionCount, setSessionCount] = useState<number>(() => {
     if (typeof window === 'undefined') return 0;
     const saved = localStorage.getItem('voiceflow_session_count');
@@ -49,15 +56,38 @@ export function usePlanUsage(): PlanUsageState {
     if (typeof window === 'undefined') return;
     if (isAdmin) {
       setIsPro(true);
+      setIsDeviceExceeded(false);
       return;
     }
     const pro = localStorage.getItem('voiceflow_is_pro') === 'true';
+    const devExceeded = localStorage.getItem('voiceflow_device_trial_exceeded') === 'true';
     const sessions = parseInt(localStorage.getItem('voiceflow_session_count') || '0', 10);
     const mins = parseInt(localStorage.getItem('voiceflow_used_minutes') || '0', 10);
     setIsPro(pro);
+    setIsDeviceExceeded(devExceeded);
     setSessionCount(sessions);
     setUsedMinutes(mins);
   }, [isAdmin]);
+
+  // Synchronize device trial with Firestore across accounts
+  useEffect(() => {
+    if (isAdmin) return;
+    let isMounted = true;
+    syncDeviceTrial(firestore, auth?.currentUser)
+      .then((res) => {
+        if (!isMounted) return;
+        if (res.trialExceeded && !res.isPro) {
+          setIsDeviceExceeded(true);
+          setSessionCount((prev) => Math.max(prev, res.sessionCount, 3));
+          setUsedMinutes((prev) => Math.max(prev, res.usedMinutes, 30));
+        }
+      })
+      .catch((e) => console.warn('Device trial check error:', e));
+
+    return () => {
+      isMounted = false;
+    };
+  }, [auth?.currentUser, firestore, isAdmin]);
 
   // Listen to cross-component usage events
   useEffect(() => {
@@ -195,18 +225,30 @@ export function usePlanUsage(): PlanUsageState {
         console.warn("Failed to update Firestore plan usage:", e);
       }
     }
+
+    // Also persist usage to permanent device ledger to prevent account hopping
+    recordDeviceSession(firestore, durationSeconds).catch((e) => {
+      console.warn("Failed to update device session:", e);
+    });
   }, [auth?.currentUser?.uid, firestore, sessionCount, usedMinutes]);
 
-  // Anti-cheating: limit reached if user is not pro AND (exceeded 3 sessions OR exceeded 30 minutes)
+  // Anti-cheating & Anti-account hopping:
+  // Limit reached if user is not pro AND (device trial already exhausted OR user exceeded sessions/minutes)
   // Bello Imam is the owner/admin: NEVER restricted by limits
-  const isLimitReached = isAdmin ? false : (!isPro && (sessionCount >= maxFreeSessions || usedMinutes >= maxMinutes));
+  const isLimitReached = isAdmin
+    ? false
+    : (!isPro && (isDeviceExceeded || sessionCount >= maxFreeSessions || usedMinutes >= maxMinutes));
+
+  // If device trial is exhausted, clamp displayed usage to the limit so user sees 3/3 sessions and 30/30 mins
+  const displaySessions = isDeviceExceeded && !isPro ? Math.max(sessionCount, maxFreeSessions) : sessionCount;
+  const displayMinutes = isDeviceExceeded && !isPro ? Math.max(usedMinutes, maxMinutes) : usedMinutes;
 
   return {
     isPro: isAdmin ? true : isPro,
     isAdmin,
     planName: isAdmin ? 'Voiceflow Founder & Admin' : isPro ? 'Voiceflow Pro' : 'Basic Plan',
-    sessionCount,
-    usedMinutes,
+    sessionCount: displaySessions,
+    usedMinutes: displayMinutes,
     maxMinutes: isAdmin ? 999999 : maxMinutes,
     maxFreeSessions: isAdmin ? 999999 : maxFreeSessions,
     isLimitReached,

@@ -2,15 +2,35 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Calendar, Video, RefreshCw, Settings, Mic, Square, Loader2, ShieldCheck, Sparkles, CheckCircle2, Play, ExternalLink } from 'lucide-react';
+import { 
+  Calendar, Video, RefreshCw, Settings, Mic, Square, Loader2, 
+  Sparkles, CheckCircle2, Play, ExternalLink, Plus, Trash2, X 
+} from 'lucide-react';
 import { useAuth, auth as firebaseAuth } from '@/firebase';
-import { GoogleAuthProvider, OAuthProvider, linkWithPopup } from 'firebase/auth';
+import { 
+  GoogleAuthProvider, 
+  OAuthProvider, 
+  linkWithPopup, 
+  reauthenticateWithPopup, 
+  signInWithPopup 
+} from 'firebase/auth';
 import { useAudioRecorder } from '@/hooks/useAudioRecorder';
 import { usePlanUsage } from '@/hooks/use-plan-usage';
+import { useToast } from '@/hooks/use-toast';
+import { openExternal } from '@/lib/platform';
 import MeetingWidget from './meeting-widget';
+
+interface UpcomingMeeting {
+  id: string;
+  title: string;
+  time: string;
+  platform: string;
+  url: string;
+}
 
 export default function RightPanel() {
   const auth = useAuth();
+  const { toast } = useToast();
   const userEmail = auth?.currentUser?.email || 'user@example.com';
   
   const { startRecording, stopRecording, isRecording, isProcessing, transcript } = useAudioRecorder();
@@ -23,6 +43,25 @@ export default function RightPanel() {
   const [outlookConnected, setOutlookConnected] = useState(false);
   const [isSyncingCalendar, setIsSyncingCalendar] = useState(false);
 
+  // Custom upcoming meetings management
+  const [meetings, setMeetings] = useState<UpcomingMeeting[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('voiceflow_upcoming_meetings');
+        if (saved) return JSON.parse(saved);
+      } catch (e) {}
+    }
+    return [
+      { id: '1', title: 'Product & Architecture Review', time: '10:00 AM', platform: 'Meet', url: 'https://meet.google.com/new' },
+      { id: '2', title: 'Client Discovery & Scope Demo', time: '02:30 PM', platform: 'Teams', url: 'https://teams.microsoft.com' },
+    ];
+  });
+
+  const [isAddingMeeting, setIsAddingMeeting] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [newUrl, setNewUrl] = useState('');
+  const [newTime, setNewTime] = useState('');
+
   // Sync calendar integration status
   useEffect(() => {
     const updateCalendarState = () => {
@@ -33,6 +72,11 @@ export default function RightPanel() {
         const hasMicrosoft = auth?.currentUser?.providerData?.some(p => p.providerId === 'microsoft.com');
         setGoogleConnected(g || Boolean(hasGoogle));
         setOutlookConnected(o || Boolean(hasMicrosoft));
+
+        try {
+          const savedMeetings = localStorage.getItem('voiceflow_upcoming_meetings');
+          if (savedMeetings) setMeetings(JSON.parse(savedMeetings));
+        } catch (e) {}
       }
     };
 
@@ -118,45 +162,148 @@ export default function RightPanel() {
 
   const handleGoogleLink = async () => {
     try {
+      const provider = new GoogleAuthProvider();
+      provider.addScope('https://www.googleapis.com/auth/calendar.readonly');
+      provider.setCustomParameters({ prompt: 'consent select_account' });
+
+      let userCred: any;
       if (firebaseAuth.currentUser) {
-        const provider = new GoogleAuthProvider();
-        provider.addScope('https://www.googleapis.com/auth/calendar.readonly');
-        await linkWithPopup(firebaseAuth.currentUser, provider);
+        try {
+          userCred = await linkWithPopup(firebaseAuth.currentUser, provider);
+        } catch (linkErr: any) {
+          if (linkErr.code === 'auth/provider-already-linked' || linkErr.code === 'auth/credential-already-in-use') {
+            userCred = await reauthenticateWithPopup(firebaseAuth.currentUser, provider);
+          } else {
+            userCred = await signInWithPopup(firebaseAuth, provider);
+          }
+        }
+      } else {
+        userCred = await signInWithPopup(firebaseAuth, provider);
       }
+
       setGoogleConnected(true);
       if (typeof window !== 'undefined') {
         localStorage.setItem('voiceflow_google_calendar_connected', 'true');
         window.dispatchEvent(new CustomEvent('voiceflow-calendar-updated'));
       }
+
+      // Fetch real events from Google Calendar API
+      const credential = GoogleAuthProvider.credentialFromResult(userCred);
+      const token = credential?.accessToken;
+      if (token) {
+        try {
+          const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${new Date().toISOString()}&maxResults=6&singleEvents=true&orderBy=startTime`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const realMeetings = (data.items || []).map((item: any) => ({
+              id: item.id,
+              title: item.summary || 'Meeting Session',
+              time: item.start?.dateTime ? new Date(item.start.dateTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'All Day',
+              platform: (item.hangoutLink || item.location || '').includes('meet.google') ? 'Meet' : (item.location || '').includes('teams') ? 'Teams' : (item.location || '').includes('zoom') ? 'Zoom' : 'Meet',
+              url: item.hangoutLink || (item.location?.startsWith('http') ? item.location : 'https://meet.google.com/new')
+            }));
+            if (realMeetings.length > 0) {
+              setMeetings(realMeetings);
+              if (typeof window !== 'undefined') {
+                localStorage.setItem('voiceflow_upcoming_meetings', JSON.stringify(realMeetings));
+              }
+            }
+          }
+        } catch (fetchErr) {
+          console.warn("Could not fetch Google Calendar events:", fetchErr);
+        }
+      }
+
+      toast({
+        title: "Google Calendar Connected",
+        description: "Your Google Meet & calendar schedules are now synced with Voiceflow.",
+      });
     } catch (err: any) {
-      console.warn("Google calendar connection:", err);
-      setGoogleConnected(true);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('voiceflow_google_calendar_connected', 'true');
-        window.dispatchEvent(new CustomEvent('voiceflow-calendar-updated'));
+      const isCancellation =
+        err?.code === 'auth/popup-closed-by-user' ||
+        err?.code === 'auth/cancelled-popup-request' ||
+        err?.code === 'auth/user-cancelled';
+      if (!isCancellation) {
+        console.warn("Google calendar connection error:", err);
+        toast({
+          variant: "destructive",
+          title: "Calendar Link Failed",
+          description: err?.message || "Failed to link Google Calendar.",
+        });
       }
     }
   };
 
   const handleMicrosoftLink = async () => {
     try {
+      const provider = new OAuthProvider('microsoft.com');
+      provider.addScope('Calendars.Read');
+      provider.setCustomParameters({ prompt: 'select_account' });
+
       if (firebaseAuth.currentUser) {
-        const provider = new OAuthProvider('microsoft.com');
-        provider.addScope('Calendars.Read');
-        await linkWithPopup(firebaseAuth.currentUser, provider);
+        try {
+          await linkWithPopup(firebaseAuth.currentUser, provider);
+        } catch (linkErr: any) {
+          if (linkErr.code === 'auth/provider-already-linked' || linkErr.code === 'auth/credential-already-in-use') {
+            await reauthenticateWithPopup(firebaseAuth.currentUser, provider);
+          } else {
+            await signInWithPopup(firebaseAuth, provider);
+          }
+        }
+      } else {
+        await signInWithPopup(firebaseAuth, provider);
       }
+
       setOutlookConnected(true);
       if (typeof window !== 'undefined') {
         localStorage.setItem('voiceflow_outlook_calendar_connected', 'true');
         window.dispatchEvent(new CustomEvent('voiceflow-calendar-updated'));
       }
+      toast({
+        title: "Outlook Calendar Connected",
+        description: "Your Microsoft Teams meetings are now linked with Voiceflow.",
+      });
     } catch (err: any) {
-      console.warn("Microsoft calendar connection:", err);
-      setOutlookConnected(true);
+      const isCancellation =
+        err?.code === 'auth/popup-closed-by-user' ||
+        err?.code === 'auth/cancelled-popup-request' ||
+        err?.code === 'auth/user-cancelled';
+      if (!isCancellation) {
+        console.warn("Microsoft calendar connection error:", err);
+        if (err?.code === 'auth/operation-not-allowed' || err?.code === 'auth/configuration-not-found') {
+          toast({
+            variant: "destructive",
+            title: "Microsoft OAuth Notice",
+            description: "To connect Microsoft, enable Microsoft Provider in Firebase Console. You can also connect Google Calendar or add meeting links directly.",
+          });
+        } else {
+          toast({
+            variant: "destructive",
+            title: "Outlook Connection Failed",
+            description: err?.message || "Failed to connect to Outlook.",
+          });
+        }
+      }
+    }
+  };
+
+  const handleDisconnectCalendar = (providerName: 'google' | 'outlook') => {
+    if (providerName === 'google') {
+      setGoogleConnected(false);
       if (typeof window !== 'undefined') {
-        localStorage.setItem('voiceflow_outlook_calendar_connected', 'true');
+        localStorage.removeItem('voiceflow_google_calendar_connected');
         window.dispatchEvent(new CustomEvent('voiceflow-calendar-updated'));
       }
+      toast({ title: 'Google Calendar Disconnected', description: 'Google Calendar has been unlinked.' });
+    } else {
+      setOutlookConnected(false);
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('voiceflow_outlook_calendar_connected');
+        window.dispatchEvent(new CustomEvent('voiceflow-calendar-updated'));
+      }
+      toast({ title: 'Outlook Calendar Disconnected', description: 'Outlook Calendar has been unlinked.' });
     }
   };
 
@@ -165,7 +312,69 @@ export default function RightPanel() {
     setTimeout(() => {
       setIsSyncingCalendar(false);
       window.dispatchEvent(new CustomEvent('voiceflow-calendar-updated'));
+      toast({ title: "Meetings Refreshed", description: "Upcoming calendar items updated." });
     }, 600);
+  };
+
+  const handleAddMeeting = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTitle.trim()) return;
+
+    let platform = 'Meet';
+    const lowerUrl = newUrl.toLowerCase();
+    if (lowerUrl.includes('teams') || lowerUrl.includes('microsoft')) {
+      platform = 'Teams';
+    } else if (lowerUrl.includes('zoom')) {
+      platform = 'Zoom';
+    } else if (lowerUrl.includes('webex')) {
+      platform = 'Webex';
+    }
+
+    const meetingItem: UpcomingMeeting = {
+      id: Date.now().toString(),
+      title: newTitle.trim(),
+      time: newTime.trim() || 'Today',
+      platform,
+      url: newUrl.trim() || (platform === 'Meet' ? 'https://meet.google.com/new' : 'https://teams.microsoft.com')
+    };
+
+    const updated = [meetingItem, ...meetings];
+    setMeetings(updated);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('voiceflow_upcoming_meetings', JSON.stringify(updated));
+    }
+    setNewTitle('');
+    setNewUrl('');
+    setNewTime('');
+    setIsAddingMeeting(false);
+    toast({
+      title: "Meeting Added",
+      description: `"${meetingItem.title}" is ready. Click Join & Start Notetaker to launch.`,
+    });
+  };
+
+  const handleDeleteMeeting = (id: string) => {
+    const updated = meetings.filter(m => m.id !== id);
+    setMeetings(updated);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('voiceflow_upcoming_meetings', JSON.stringify(updated));
+    }
+  };
+
+  const handleJoinAndStart = async (meeting: UpcomingMeeting) => {
+    if (isLimitReached) {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('open-billing-modal'));
+      }
+      return;
+    }
+    if (meeting.url) {
+      await openExternal(meeting.url);
+    }
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('voiceflow_active_meeting_title', meeting.title);
+    }
+    startRecording(false);
   };
 
   return (
@@ -226,32 +435,28 @@ export default function RightPanel() {
                   }
                   startRecording(false);
                 }} 
-                className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl transition-all font-semibold shadow-sm active:scale-[0.98] ${
-                  isLimitReached 
-                    ? "bg-red-500 hover:bg-red-600 text-white shadow-red-500/10" 
-                    : "bg-voiceflow-orange hover:bg-orange-600 text-white shadow-orange-500/10"
-                }`}
+                className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl transition-all font-semibold shadow-sm active:scale-[0.98] bg-voiceflow-orange hover:bg-orange-600 text-white shadow-orange-500/20"
                 title={isLimitReached ? "Upgrade to Pro to start a new session" : "Launch Voiceflow Floating Assistant and start live listening"}
               >
-                <Mic size={18} className="shrink-0" />
+                {isLimitReached ? (
+                  <Sparkles size={18} className="shrink-0 fill-white" />
+                ) : (
+                  <Mic size={18} className="shrink-0" />
+                )}
                 <span className="text-sm font-bold tracking-tight whitespace-nowrap font-nexa">
                   {isLimitReached ? "Upgrade Plan to Start" : resumingInfo ? "Resume Recording" : "Start Voiceflow"}
                 </span>
               </button>
               {isLimitReached && (
-                <p className="text-[11px] text-center text-red-500 font-medium leading-tight font-dm-sans">
-                  Free limit reached (30 mins / 3 sessions)
+                <p className="text-[11px] text-center text-voiceflow-orange font-medium leading-tight font-dm-sans">
+                  Free limit reached (30 mins / 3 sessions) • Click to Upgrade
                 </p>
               )}
-              <div className="flex items-center justify-center gap-1.5 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 py-1.5 px-3 rounded-full border border-emerald-500/20">
-                <ShieldCheck size={14} className="text-emerald-500" />
-                <span className="text-[11px] font-bold tracking-tight font-dm-sans">Presenter Privacy Shield • Draggable • Taskbar Hidden</span>
-              </div>
             </div>
           ) : isRecording ? (
-            <div className="w-full p-4 border border-red-500/30 bg-red-500/10 rounded-xl flex flex-col items-center justify-center gap-3">
-              <div className="flex items-center gap-2 text-red-500 font-semibold animate-pulse text-sm">
-                <div className="w-2.5 h-2.5 rounded-full bg-red-500"></div>
+            <div className="w-full p-4 border border-orange-500/30 bg-orange-500/10 rounded-xl flex flex-col items-center justify-center gap-3">
+              <div className="flex items-center gap-2 text-voiceflow-orange font-semibold animate-pulse text-sm">
+                <div className="w-2.5 h-2.5 rounded-full bg-voiceflow-orange"></div>
                 {resumingInfo ? 'Resumed Session' : 'Session Active'} • {formatTime(recordingTime + (resumingInfo?.prevDuration || 0))}
               </div>
               <p className="text-[11px] text-muted-foreground text-center font-dm-sans">
@@ -259,7 +464,7 @@ export default function RightPanel() {
               </p>
               <button 
                 onClick={stopRecording} 
-                className="w-full flex items-center justify-center gap-2 py-2.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors font-semibold shadow-sm text-sm active:scale-[0.98]"
+                className="w-full flex items-center justify-center gap-2 py-2.5 bg-voiceflow-orange text-white rounded-lg hover:bg-orange-600 transition-colors font-semibold shadow-sm text-sm active:scale-[0.98]"
               >
                 <Square size={15} fill="currentColor" />
                 Stop & Save Meeting
@@ -303,97 +508,155 @@ export default function RightPanel() {
               Calendar Integrations
               <ExternalLink size={11} className="text-muted-foreground ml-0.5" />
             </button>
-            <button 
-              onClick={handleRefreshCalendar}
-              title="Refresh Calendar Sync"
-              className="p-1.5 text-muted-foreground hover:bg-muted rounded-full transition-colors"
-            >
-              <RefreshCw size={13} className={isSyncingCalendar ? 'animate-spin text-voiceflow-orange' : ''} />
-            </button>
+            <div className="flex items-center gap-1">
+              <button 
+                onClick={() => setIsAddingMeeting(!isAddingMeeting)}
+                title="Add Meeting Link"
+                className="p-1.5 text-muted-foreground hover:bg-muted rounded-full transition-colors hover:text-voiceflow-orange"
+              >
+                <Plus size={14} />
+              </button>
+              <button 
+                onClick={handleRefreshCalendar}
+                title="Refresh Calendar Sync"
+                className="p-1.5 text-muted-foreground hover:bg-muted rounded-full transition-colors"
+              >
+                <RefreshCw size={13} className={isSyncingCalendar ? 'animate-spin text-voiceflow-orange' : ''} />
+              </button>
+            </div>
           </div>
 
-          {(googleConnected || outlookConnected) ? (
-            <div className="space-y-2.5 mb-4">
-              {/* Meeting Item 1 */}
-              <div className="p-3 bg-card border border-border rounded-xl shadow-xs hover:border-voiceflow-orange/50 transition-all">
-                <div className="flex items-start justify-between gap-2 mb-1.5">
-                  <div>
-                    <h4 className="text-xs font-bold text-foreground line-clamp-1">Product & Architecture Review</h4>
-                    <span className="text-[11px] text-muted-foreground font-medium">10:00 AM • Google Meet</span>
-                  </div>
-                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 shrink-0">Meet</span>
-                </div>
-                <button
-                  onClick={() => {
-                    if (isLimitReached) {
-                      window.dispatchEvent(new CustomEvent('open-billing-modal'));
-                      return;
-                    }
-                    startRecording(false);
-                  }}
-                  className="w-full mt-2 py-1.5 px-2.5 rounded-lg bg-voiceflow-orange hover:bg-orange-600 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-sm transition-colors"
-                >
-                  <Play size={12} fill="currentColor" />
-                  Join & Start Notetaker
+          {/* Quick Add Meeting Form */}
+          {isAddingMeeting && (
+            <form onSubmit={handleAddMeeting} className="p-3 mb-3 bg-card border border-voiceflow-orange/40 rounded-xl space-y-2 animate-fade-in shadow-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-foreground">Add Meeting Call</span>
+                <button type="button" onClick={() => setIsAddingMeeting(false)} className="text-muted-foreground hover:text-foreground">
+                  <X size={14} />
                 </button>
               </div>
+              <input 
+                type="text" 
+                placeholder="Meeting Title (e.g. Design Sync)" 
+                value={newTitle} 
+                onChange={e => setNewTitle(e.target.value)}
+                className="w-full text-xs p-2 rounded-lg border border-border bg-background focus:outline-none focus:border-voiceflow-orange"
+                required
+              />
+              <input 
+                type="text" 
+                placeholder="Meeting Link (Meet, Zoom, or Teams URL)" 
+                value={newUrl} 
+                onChange={e => setNewUrl(e.target.value)}
+                className="w-full text-xs p-2 rounded-lg border border-border bg-background focus:outline-none focus:border-voiceflow-orange"
+              />
+              <div className="flex gap-2">
+                <input 
+                  type="text" 
+                  placeholder="Time (e.g. 03:00 PM)" 
+                  value={newTime} 
+                  onChange={e => setNewTime(e.target.value)}
+                  className="w-2/3 text-xs p-2 rounded-lg border border-border bg-background focus:outline-none focus:border-voiceflow-orange"
+                />
+                <button 
+                  type="submit"
+                  className="w-1/3 bg-voiceflow-orange hover:bg-orange-600 text-white font-bold text-xs py-2 rounded-lg transition-colors"
+                >
+                  Save
+                </button>
+              </div>
+            </form>
+          )}
 
-              {/* Meeting Item 2 */}
-              <div className="p-3 bg-card border border-border rounded-xl shadow-xs hover:border-blue-500/50 transition-all">
-                <div className="flex items-start justify-between gap-2 mb-1.5">
-                  <div>
-                    <h4 className="text-xs font-bold text-foreground line-clamp-1">Client Discovery & Scope Demo</h4>
-                    <span className="text-[11px] text-muted-foreground font-medium">02:30 PM • Microsoft Teams</span>
+          {meetings.length > 0 ? (
+            <div className="space-y-2.5 mb-4">
+              {meetings.map((meeting) => (
+                <div key={meeting.id} className="p-3 bg-card border border-border rounded-xl shadow-xs hover:border-voiceflow-orange/50 transition-all group/item">
+                  <div className="flex items-start justify-between gap-2 mb-1.5">
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-xs font-bold text-foreground truncate">{meeting.title}</h4>
+                      <span className="text-[11px] text-muted-foreground font-medium">{meeting.time} • {meeting.platform}</span>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                        meeting.platform === 'Teams' 
+                          ? 'bg-blue-500/10 text-blue-600' 
+                          : meeting.platform === 'Zoom'
+                            ? 'bg-indigo-500/10 text-indigo-600'
+                            : 'bg-emerald-500/10 text-emerald-600'
+                      }`}>
+                        {meeting.platform}
+                      </span>
+                      <button 
+                        onClick={() => handleDeleteMeeting(meeting.id)}
+                        className="opacity-0 group-hover/item:opacity-100 text-muted-foreground hover:text-red-500 p-0.5 transition-opacity"
+                        title="Remove meeting"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
                   </div>
-                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 shrink-0">Teams</span>
+                  <button
+                    onClick={() => handleJoinAndStart(meeting)}
+                    className="w-full mt-2 py-1.5 px-2.5 rounded-lg bg-voiceflow-orange hover:bg-orange-600 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-sm transition-colors active:scale-[0.98]"
+                  >
+                    <Play size={12} fill="currentColor" />
+                    Join & Start Notetaker
+                  </button>
                 </div>
-                <button
-                  onClick={() => {
-                    if (isLimitReached) {
-                      window.dispatchEvent(new CustomEvent('open-billing-modal'));
-                      return;
-                    }
-                    startRecording(false);
-                  }}
-                  className="w-full mt-2 py-1.5 px-2.5 rounded-lg bg-card hover:bg-muted border border-border text-foreground font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-xs transition-colors"
-                >
-                  <Play size={12} fill="currentColor" />
-                  Join & Start Notetaker
-                </button>
-              </div>
+              ))}
             </div>
           ) : (
-            <>
-              <div className="text-xs text-muted-foreground leading-relaxed mb-3">
-                Looks like you don't have any upcoming meetings linked yet from <span className="font-semibold text-foreground">{userEmail}</span>.
-              </div>
-              
-              <div className="text-xs text-muted-foreground leading-relaxed mb-3">
-                Connect your calendars to automatically sync meeting schedules and launch the notetaker:
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button onClick={handleGoogleLink} className="flex-1 flex items-center justify-center gap-1.5 py-2 border border-border rounded-lg hover:bg-muted transition-colors bg-card font-semibold text-xs text-foreground shadow-xs">
-                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24">
-                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                  </svg>
-                  Google
-                </button>
-                <button onClick={handleMicrosoftLink} className="flex-1 flex items-center justify-center gap-1.5 py-2 border border-border rounded-lg hover:bg-muted transition-colors bg-card font-semibold text-xs text-foreground shadow-xs">
-                  <svg className="h-3.5 w-3.5" viewBox="0 0 21 21">
-                      <path fill="#f25022" d="M1 1h9v9H1z"/>
-                      <path fill="#7fba00" d="M11 1h9v9h-9z"/>
-                      <path fill="#00a4ef" d="M1 11h9v9H1z"/>
-                      <path fill="#ffb900" d="M11 11h9v9h-9z"/>
-                  </svg>
-                  Outlook
-                </button>
-              </div>
-            </>
+            <div className="text-xs text-muted-foreground leading-relaxed mb-3">
+              No meetings scheduled. Click + to add your meeting link or connect your calendars below:
+            </div>
           )}
+
+          {/* Connected Calendar Quick Status & Links */}
+          <div className="pt-2 border-t border-border/60">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-semibold text-muted-foreground">Accounts</span>
+              {(googleConnected || outlookConnected) && (
+                <span className="text-[10px] text-muted-foreground">Click to unlink</span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={googleConnected ? () => handleDisconnectCalendar('google') : handleGoogleLink} 
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 border rounded-lg transition-colors font-semibold text-xs shadow-xs ${
+                  googleConnected 
+                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20' 
+                    : 'border-border bg-card hover:bg-muted text-foreground'
+                }`}
+                title={googleConnected ? "Google Calendar connected. Click to disconnect." : "Click to connect Google Calendar."}
+              >
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                </svg>
+                {googleConnected ? 'Google ✓' : 'Google'}
+              </button>
+              <button 
+                onClick={outlookConnected ? () => handleDisconnectCalendar('outlook') : handleMicrosoftLink} 
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 border rounded-lg transition-colors font-semibold text-xs shadow-xs ${
+                  outlookConnected 
+                    ? 'border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20' 
+                    : 'border-border bg-card hover:bg-muted text-foreground'
+                }`}
+                title={outlookConnected ? "Outlook Calendar connected. Click to disconnect." : "Click to connect Outlook Calendar."}
+              >
+                <svg className="h-3.5 w-3.5" viewBox="0 0 21 21">
+                  <path fill="#f25022" d="M1 1h9v9H1z"/>
+                  <path fill="#7fba00" d="M11 1h9v9h-9z"/>
+                  <path fill="#00a4ef" d="M1 11h9v9H1z"/>
+                  <path fill="#ffb900" d="M11 11h9v9h-9z"/>
+                </svg>
+                {outlookConnected ? 'Outlook ✓' : 'Outlook'}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
       )}

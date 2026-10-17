@@ -177,41 +177,73 @@ export default function AppSidebar() {
                 
                 <div className="w-full bg-gray-200 h-1.5 rounded-full mb-2.5 overflow-hidden dark:bg-gray-700">
                   <div 
-                    className={`h-full transition-all duration-500 ${isPro ? "bg-emerald-500" : isLimitReached ? "bg-red-500" : "bg-voiceflow-orange"}`} 
+                    className={`h-full transition-all duration-500 ${isPro ? "bg-emerald-500" : "bg-voiceflow-orange"}`} 
                     style={{ 
                       width: isPro ? '100%' : `${Math.min(100, Math.max(usedMinutes > 0 ? 5 : 0, Math.round((usedMinutes / maxMinutes) * 100)))}%` 
                     }}
                   />
                 </div>
                 
-                <button 
-                  onClick={() => setIsBillingModalOpen(true)}
-                  className={`w-full py-1.5 px-3 rounded-full text-xs font-bold transition-all shadow-sm ${
-                    isPro
-                      ? "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 hover:bg-emerald-500/20 dark:text-emerald-400"
-                      : isLimitReached
-                        ? "bg-red-500 text-white hover:bg-red-600 border border-red-500 animate-pulse"
-                        : "border border-voiceflow-orange text-voiceflow-orange hover:bg-orange-50 dark:hover:bg-orange-500/10"
-                  }`}
-                >
-                  {isPro ? "Pro Active • Manage" : isLimitReached ? "Limit Reached • Upgrade" : "Upgrade to Pro"}
-                </button>
+                {isPro ? (
+                  <button 
+                    onClick={() => setIsBillingModalOpen(true)}
+                    className="w-full py-1.5 px-3 rounded-full text-xs font-bold transition-all shadow-sm bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 hover:bg-emerald-500/20 dark:text-emerald-400"
+                  >
+                    Pro Active • Manage
+                  </button>
+                ) : isLimitReached ? (
+                  <div className="relative p-[1.5px] rounded-full overflow-hidden shadow-[0_0_20px_rgba(255,107,0,0.38)] group">
+                    {/* Slow-motion rolling light orangish glow beam */}
+                    <div 
+                      className="absolute inset-[-150%] bg-[conic-gradient(from_0deg,transparent_0_300deg,#fff2e5_330deg,#ffa040_348deg,#ff6b00_360deg)] animate-spin"
+                      style={{ animationDuration: '9s' }}
+                    />
+                    <button 
+                      onClick={() => setIsBillingModalOpen(true)}
+                      className="relative w-full py-2 px-3 rounded-full bg-slate-950 dark:bg-black text-white text-xs font-extrabold flex items-center justify-center gap-1.5 hover:bg-slate-900 transition-colors tracking-wide"
+                    >
+                      <Sparkles size={13} className="text-voiceflow-orange fill-voiceflow-orange animate-pulse" />
+                      <span className="font-nexa font-bold">Upgrade</span>
+                    </button>
+                  </div>
+                ) : (
+                  <button 
+                    onClick={() => setIsBillingModalOpen(true)}
+                    className="w-full py-1.5 px-3 rounded-full text-xs font-bold transition-all shadow-sm border border-voiceflow-orange text-voiceflow-orange hover:bg-orange-50 dark:hover:bg-orange-500/10"
+                  >
+                    Upgrade to Pro
+                  </button>
+                )}
               </>
             ) : (
               <div className="flex flex-col items-center gap-2">
-                <button
-                  onClick={() => setIsBillingModalOpen(true)}
-                  title={isPro ? "Voiceflow Pro Active" : isLimitReached ? "Limit Reached - Upgrade" : "Upgrade to Pro"}
-                  className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
-                    isPro 
-                      ? "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 hover:scale-105"
-                      : isLimitReached
-                        ? "bg-red-500 text-white hover:scale-105 animate-pulse"
+                {isLimitReached && !isPro ? (
+                  <div className="relative p-[1.5px] rounded-full overflow-hidden shadow-[0_0_16px_rgba(255,107,0,0.35)]">
+                    <div 
+                      className="absolute inset-[-150%] bg-[conic-gradient(from_0deg,transparent_0_300deg,#fff2e5_330deg,#ffa040_348deg,#ff6b00_360deg)] animate-spin"
+                      style={{ animationDuration: '9s' }}
+                    />
+                    <button
+                      onClick={() => setIsBillingModalOpen(true)}
+                      title="Upgrade"
+                      className="relative w-10 h-10 rounded-full flex items-center justify-center bg-slate-950 dark:bg-black text-voiceflow-orange hover:scale-105 transition-all"
+                    >
+                      <Sparkles size={16} className="fill-voiceflow-orange" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setIsBillingModalOpen(true)}
+                    title={isPro ? "Voiceflow Pro Active" : "Upgrade to Pro"}
+                    className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+                      isPro 
+                        ? "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 hover:scale-105"
                         : "bg-orange-500/10 text-voiceflow-orange border border-voiceflow-orange/30 hover:scale-105"
-                  }`}
-                >
-                  <Sparkles size={16} />
-                </button>
+                    }`}
+                  >
+                    <Sparkles size={16} />
+                  </button>
+                )}
               </div>
             )}
           </div>

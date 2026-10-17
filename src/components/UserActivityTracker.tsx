@@ -13,6 +13,7 @@ import {
     recordDwell,
     recordRoutePerf,
 } from '@/lib/product-telemetry';
+import { getDeviceFingerprint, getPublicIP, syncDeviceTrial } from '@/lib/device-fingerprint';
 
 /**
  * Routes are keyed on the user doc's `pageViews` map, so the key has to survive
@@ -324,6 +325,13 @@ export function UserActivityTracker() {
                         }
                     }
 
+                    // Permanent device fingerprint and public IP
+                    const deviceId = await getDeviceFingerprint().catch(() => 'unknown_device');
+                    const publicIP = await getPublicIP().catch(() => 'Unknown');
+
+                    // Synchronize and enforce device trial state across accounts
+                    syncDeviceTrial(firestore, user).catch(() => {});
+
                     // ——— Page-visit behavior tracking ———
                     // Drains the routes accumulated since the last flush. These
                     // fields ride along on the heartbeat's own set() below: as a
@@ -363,6 +371,8 @@ export function UserActivityTracker() {
                         platformsUsed: arrayUnion(deviceType, platformTag),
                         userAgent: navigator.userAgent,
                         country: country || 'Unknown',
+                        ip: publicIP || 'Unknown',
+                        deviceId: deviceId || 'Unknown',
                         appVersion: AppConfig.version || 'unknown',
                         // One extra field on a write that already happens, so the
                         // admin language breakdown costs nothing beyond the
@@ -390,7 +400,9 @@ export function UserActivityTracker() {
                         deviceInfo: {
                             platform: navigator?.platform || 'Unknown',
                             vendor: navigator?.vendor || 'Unknown',
-                            language: navigator?.language || 'Unknown'
+                            language: navigator?.language || 'Unknown',
+                            deviceId,
+                            ip: publicIP
                         }
                     }, { merge: true });
 

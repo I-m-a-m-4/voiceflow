@@ -230,6 +230,12 @@ service cloud.firestore {
       allow read, delete: if isSuperAdmin();
     }
 
+    // Permanent device fingerprint and trial enforcement ledger
+    match /devices/{deviceId} {
+      allow read, create, update: if true;
+      allow delete: if isSuperAdmin();
+    }
+
     // Meeting notetaker data. A meeting belongs to the user who recorded it;
     // only that user (or the platform owner) reads or deletes it. `type` is
     // 'meeting' | 'dictation', both written by the same client path.

@@ -112,6 +112,66 @@ fn exit_hud_mode(window: tauri::Window) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn get_machine_guid() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+        use std::os::windows::process::CommandExt;
+        let mut cmd = Command::new("reg");
+        cmd.args(["query", "HKLM\\SOFTWARE\\Microsoft\\Cryptography", "/v", "MachineGuid"]);
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        if let Ok(output) = cmd.output() {
+            if output.status.success() {
+                let text = String::from_utf8_lossy(&output.stdout);
+                for line in text.lines() {
+                    if line.contains("MachineGuid") {
+                        if let Some(guid) = line.split_whitespace().last() {
+                            return guid.to_string();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+        if let Ok(output) = Command::new("ioreg")
+            .args(["-rd1", "-c", "IOPlatformExpertDevice"])
+            .output()
+        {
+            let text = String::from_utf8_lossy(&output.stdout);
+            for line in text.lines() {
+                if line.contains("IOPlatformUUID") {
+                    if let Some(uuid) = line.split('"').nth(3) {
+                        return uuid.to_string();
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(id) = std::fs::read_to_string("/etc/machine-id") {
+            let trimmed = id.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+        if let Ok(id) = std::fs::read_to_string("/var/lib/dbus/machine-id") {
+            let trimmed = id.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+    }
+
+    String::new()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   #[cfg(target_os = "android")]
@@ -132,6 +192,7 @@ pub fn run() {
         set_ignore_cursor_events,
         enter_hud_mode,
         exit_hud_mode,
+        get_machine_guid,
         win_grid::list_desktop_windows,
         win_grid::read_desktop_grid,
         screen_capture::capture_screen

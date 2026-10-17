@@ -18,7 +18,9 @@ import {
   sendPasswordResetEmail, 
   GoogleAuthProvider, 
   OAuthProvider, 
-  linkWithPopup 
+  linkWithPopup,
+  reauthenticateWithPopup,
+  signInWithPopup
 } from 'firebase/auth';
 import { doc, updateDoc, getFirestore } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
@@ -401,30 +403,58 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
     try {
       const provider = new GoogleAuthProvider();
       provider.addScope('https://www.googleapis.com/auth/calendar.readonly');
-      await linkWithPopup(auth.currentUser, provider);
+      provider.setCustomParameters({ prompt: 'consent select_account' });
+
+      let userCred: any;
+      try {
+        userCred = await linkWithPopup(auth.currentUser, provider);
+      } catch (linkErr: any) {
+        if (linkErr.code === 'auth/provider-already-linked' || linkErr.code === 'auth/credential-already-in-use') {
+          userCred = await reauthenticateWithPopup(auth.currentUser, provider);
+        } else {
+          userCred = await signInWithPopup(auth, provider);
+        }
+      }
+
       setGoogleConnected(true);
       if (typeof window !== 'undefined') {
         localStorage.setItem('voiceflow_google_calendar_connected', 'true');
         window.dispatchEvent(new CustomEvent('voiceflow-calendar-updated'));
       }
+
+      // Fetch real events from Google Calendar API
+      const credential = GoogleAuthProvider.credentialFromResult(userCred);
+      const token = credential?.accessToken;
+      if (token) {
+        try {
+          const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${new Date().toISOString()}&maxResults=6&singleEvents=true&orderBy=startTime`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const realMeetings = (data.items || []).map((item: any) => ({
+              id: item.id,
+              title: item.summary || 'Meeting Session',
+              time: item.start?.dateTime ? new Date(item.start.dateTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'All Day',
+              platform: (item.hangoutLink || item.location || '').includes('meet.google') ? 'Meet' : (item.location || '').includes('teams') ? 'Teams' : (item.location || '').includes('zoom') ? 'Zoom' : 'Meet',
+              url: item.hangoutLink || (item.location?.startsWith('http') ? item.location : 'https://meet.google.com/new')
+            }));
+            if (realMeetings.length > 0 && typeof window !== 'undefined') {
+              localStorage.setItem('voiceflow_upcoming_meetings', JSON.stringify(realMeetings));
+              window.dispatchEvent(new CustomEvent('voiceflow-calendar-updated'));
+            }
+          }
+        } catch (fetchErr) {
+          console.warn("Could not fetch Google Calendar events:", fetchErr);
+        }
+      }
+
       toast({ title: 'Google Calendar Connected', description: 'Your meetings and Google Meet schedules are now synced.' });
     } catch (e: any) {
-      console.warn("Google link result:", e);
-      if (e.code === 'auth/provider-already-linked' || e.code === 'auth/credential-already-in-use') {
-        setGoogleConnected(true);
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('voiceflow_google_calendar_connected', 'true');
-          window.dispatchEvent(new CustomEvent('voiceflow-calendar-updated'));
-        }
-        toast({ title: 'Google Calendar Synced', description: 'Your Google Calendar account is verified and linked.' });
-      } else {
-        // Fallback for native/webview contexts where popups are blocked
-        setGoogleConnected(true);
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('voiceflow_google_calendar_connected', 'true');
-          window.dispatchEvent(new CustomEvent('voiceflow-calendar-updated'));
-        }
-        toast({ title: 'Google Calendar Linked', description: `Calendar sync verified for ${auth.currentUser.email || 'your account'}.` });
+      const isCancellation = e?.code === 'auth/popup-closed-by-user' || e?.code === 'auth/cancelled-popup-request' || e?.code === 'auth/user-cancelled';
+      if (!isCancellation) {
+        console.warn("Google link result:", e);
+        toast({ variant: 'destructive', title: 'Google Calendar Failed', description: e.message || 'Could not connect Google Calendar.' });
       }
     }
   };
@@ -437,7 +467,18 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
     try {
       const provider = new OAuthProvider('microsoft.com');
       provider.addScope('Calendars.Read');
-      await linkWithPopup(auth.currentUser, provider);
+      provider.setCustomParameters({ prompt: 'select_account' });
+
+      try {
+        await linkWithPopup(auth.currentUser, provider);
+      } catch (linkErr: any) {
+        if (linkErr.code === 'auth/provider-already-linked' || linkErr.code === 'auth/credential-already-in-use') {
+          await reauthenticateWithPopup(auth.currentUser, provider);
+        } else {
+          await signInWithPopup(auth, provider);
+        }
+      }
+
       setOutlookConnected(true);
       if (typeof window !== 'undefined') {
         localStorage.setItem('voiceflow_outlook_calendar_connected', 'true');
@@ -445,13 +486,19 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
       }
       toast({ title: 'Outlook Calendar Connected', description: 'Your Microsoft Teams meetings are now linked.' });
     } catch (e: any) {
-      console.warn("Outlook link result:", e);
-      setOutlookConnected(true);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('voiceflow_outlook_calendar_connected', 'true');
-        window.dispatchEvent(new CustomEvent('voiceflow-calendar-updated'));
+      const isCancellation = e?.code === 'auth/popup-closed-by-user' || e?.code === 'auth/cancelled-popup-request' || e?.code === 'auth/user-cancelled';
+      if (!isCancellation) {
+        console.warn("Outlook link result:", e);
+        if (e?.code === 'auth/operation-not-allowed' || e?.code === 'auth/configuration-not-found') {
+          toast({
+            variant: "destructive",
+            title: "Microsoft Provider Disabled",
+            description: "Enable Microsoft in your Firebase Console (Authentication > Sign-in method), or use Google Calendar.",
+          });
+        } else {
+          toast({ variant: 'destructive', title: 'Outlook Connection Failed', description: e.message || 'Could not connect Outlook Calendar.' });
+        }
       }
-      toast({ title: 'Outlook Calendar Connected', description: 'Microsoft Teams & Outlook schedule linked successfully.' });
     }
   };
 

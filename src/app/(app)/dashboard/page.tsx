@@ -6,6 +6,7 @@ import RightPanel from "@/components/dashboard/right-panel";
 import { useAuth, useFirestore } from "@/firebase";
 import { doc, updateDoc, collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
+import { markDevicePro } from "@/lib/device-fingerprint";
 
 export default function VoiceFlowApp() {
   const auth = useAuth();
@@ -49,6 +50,9 @@ export default function VoiceFlowApp() {
           isPro: true,
           updatedAt: serverTimestamp(),
         }).catch((err) => console.warn("Failed to update user subscription doc:", err));
+
+        // Mark device as Pro to unlock unlimited usage on this machine
+        markDevicePro(firestore).catch(() => {});
 
         // Add to purchases for admin-imamshaffy revenue tracking
         addDoc(collection(firestore, "purchases"), {

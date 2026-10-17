@@ -14,12 +14,14 @@ import { Label } from '@/components/ui/label';
 import { Eye, EyeOff, Loader2, ArrowRight } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { isNativeApp, openExternal } from '@/lib/platform';
+import { syncDeviceTrial } from '@/lib/device-fingerprint';
 
 export default function SignupPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -32,10 +34,13 @@ export default function SignupPage() {
       return;
     }
 
-    // Handle return from signInWithRedirect
+    if (!auth) return;
+
+    let isMounted = true;
     getRedirectResult(auth)
       .then(async (result) => {
-        if (!result?.user) return;
+        if (!result?.user || !isMounted) return;
+        setIsGoogleLoading(true);
         const redirectUser = result.user;
         const userDocRef = doc(db, 'users', redirectUser.uid);
         const userDoc = await getDoc(userDocRef);
@@ -50,6 +55,8 @@ export default function SignupPage() {
           }, { merge: true });
         }
 
+        await syncDeviceTrial(db, redirectUser).catch(() => {});
+
         localStorage.setItem('userEmail', redirectUser.email || '');
         localStorage.setItem('userName', userName);
         toast({
@@ -59,76 +66,93 @@ export default function SignupPage() {
         router.push('/dashboard');
       })
       .catch((err) => {
-        if (err?.code !== 'auth/null-user') {
+        if (err?.code && err.code !== 'auth/null-user') {
           console.error('Redirect sign-up error:', err);
         }
+      })
+      .finally(() => {
+        if (isMounted) setIsGoogleLoading(false);
       });
+
+    return () => {
+      isMounted = false;
+    };
   }, [user, authLoading, router]);
 
   const handleGoogleSignup = async () => {
-    setIsLoading(true);
+    if (!auth) return;
+    setIsGoogleLoading(true);
     try {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
-      const userCredential = await signInWithPopup(auth, provider);
-      const user = userCredential.user;
+      try {
+        // 1. Attempt Popup first
+        const userCredential = await signInWithPopup(auth, provider);
+        const user = userCredential.user;
 
-      const userDocRef = doc(db, 'users', user.uid);
-      const userDoc = await getDoc(userDocRef);
+        const userDocRef = doc(db, 'users', user.uid);
+        const userDoc = await getDoc(userDocRef);
 
-      const userName = user.displayName || (user.email ? user.email.split('@')[0] : 'User');
+        const userName = user.displayName || (user.email ? user.email.split('@')[0] : 'User');
 
-      if (!userDoc.exists()) {
-        await setDoc(userDocRef, {
-          name: userName,
-          email: user.email,
-          createdAt: new Date().toISOString(),
-          role: 'admin',
-        }, { merge: true });
-      }
+        if (!userDoc.exists()) {
+          await setDoc(userDocRef, {
+            name: userName,
+            email: user.email,
+            createdAt: new Date().toISOString(),
+            role: 'admin',
+          }, { merge: true });
+        }
 
-      localStorage.setItem('userEmail', user.email || '');
-      localStorage.setItem('userName', userName);
+        await syncDeviceTrial(db, user).catch(() => {});
 
-      toast({
-        title: 'Account created!',
-        description: 'Successfully signed up with Google.',
-      });
-      router.push('/dashboard');
-    } catch (err: any) {
-      if (isNativeApp()) {
-        console.warn('Native environment detected for Google Sign Up. Launching external browser...');
+        localStorage.setItem('userEmail', user.email || '');
+        localStorage.setItem('userName', userName);
+
         toast({
-          title: 'Opening Browser for Google Sign-Up',
-          description: 'Completing registration in your default browser. You can also create an account with Email & Password.',
+          title: 'Account created!',
+          description: 'Successfully signed up with Google.',
         });
-        const targetUrl = `${process.env.NEXT_PUBLIC_BASE_URL || 'https://voiceflow.space'}/signup`;
-        await openExternal(targetUrl);
-        return;
+        router.push('/dashboard');
+      } catch (popupError: any) {
+        const isDesktop = typeof window !== 'undefined' && window.innerWidth > 768 && !/Mobi|Android/i.test(navigator.userAgent);
+        
+        // 2. Detect webview / desktop shell environment limitations
+        if (
+          popupError?.code === 'auth/operation-not-supported-in-this-environment' ||
+          (popupError?.code === 'auth/popup-blocked' && !isDesktop) || 
+          (!isDesktop && popupError?.code === 'auth/network-request-failed') ||
+          popupError?.code === 'auth/internal-error'
+        ) {
+          // The webview cannot host a popup, or mobile browser blocked it, or Tauri internal error.
+          // Fallback: navigate the shell to Google OAuth redirect
+          if (popupError?.code === 'auth/internal-error' || popupError?.code === 'auth/operation-not-supported-in-this-environment') {
+            toast({
+              title: "Redirecting...",
+              description: "Connecting to Google securely...",
+            });
+          }
+          await signInWithRedirect(auth, provider);
+        } else {
+          throw popupError;
+        }
       }
-      if (
-        err?.code === 'auth/popup-blocked' ||
-        err?.code === 'auth/popup-closed-by-user' ||
-        err?.code === 'auth/cancelled-popup-request'
-      ) {
-        console.warn('Google auth popup was blocked or closed, falling back to redirect...');
+    } catch (error: any) {
+      // Handle user cancellation gracefully without showing noisy error toasts
+      const isCancellation =
+        error?.code === 'auth/popup-closed-by-user' ||
+        error?.code === 'auth/cancelled-popup-request' ||
+        error?.code === 'auth/user-cancelled' ||
+        error?.code === 'auth/redirect-cancelled-by-user';
+      if (!isCancellation) {
         toast({
-          title: 'Redirecting to Google sign up...',
-          description: 'Popup was blocked or closed.',
+          variant: 'destructive',
+          title: 'Sign Up Failed',
+          description: error?.message || 'Failed to sign up with Google.',
         });
-        const provider = new GoogleAuthProvider();
-        provider.setCustomParameters({ prompt: 'select_account' });
-        await signInWithRedirect(auth, provider);
-        return;
       }
-      console.error('Google sign up error:', err);
-      toast({
-        variant: 'destructive',
-        title: 'Sign Up Failed',
-        description: err?.message || 'Failed to sign up with Google.',
-      });
     } finally {
-      setIsLoading(false);
+      setIsGoogleLoading(false);
     }
   };
 
@@ -165,6 +189,8 @@ export default function SignupPage() {
         createdAt: new Date().toISOString(),
         role: 'admin',
       }, { merge: true });
+
+      await syncDeviceTrial(db, user).catch(() => {});
 
       localStorage.setItem('userEmail', formData.email.toLowerCase());
       localStorage.setItem('userName', formData.name.trim());
@@ -275,15 +301,19 @@ export default function SignupPage() {
             variant="outline"
             onClick={handleGoogleSignup}
             className="w-full h-12 text-base font-semibold bg-background"
-            disabled={isLoading}
+            disabled={isLoading || isGoogleLoading}
           >
-            <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">
-              <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-            </svg>
-            Google
+            {isGoogleLoading ? (
+              <Loader2 className="w-5 h-5 animate-spin mr-2" />
+            ) : (
+              <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">
+                <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+              </svg>
+            )}
+            {isGoogleLoading ? 'Connecting to Google...' : 'Google'}
           </Button>
         </form>
 
