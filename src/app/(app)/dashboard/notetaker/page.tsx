@@ -276,8 +276,26 @@ export default function NotetakerPage() {
                 <Loader2 className="w-6 h-6 animate-spin text-voiceflow-orange" />
               </div>
             ) : meetings.length === 0 ? (
-              <div className="text-center text-sm text-muted-foreground py-8">
-                No recent transcripts found.
+              <div className="py-2 space-y-3">
+                <div className="text-center text-xs text-muted-foreground pb-1">
+                  No meeting recordings yet.
+                </div>
+                <Link 
+                  href="/dashboard/meeting?id=sample"
+                  className="block group p-3.5 border border-dashed border-voiceflow-orange/40 bg-voiceflow-orange/5 rounded-xl hover:border-voiceflow-orange hover:bg-voiceflow-orange/10 transition-all cursor-pointer"
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-voiceflow-orange">Sample Meeting Note</span>
+                    <span className="text-[10px] text-muted-foreground">Demo</span>
+                  </div>
+                  <h4 className="text-xs font-bold text-foreground mb-1 group-hover:text-voiceflow-orange transition-colors truncate">
+                    Q3 Product Strategy & AI Roadmap Sync
+                  </h4>
+                  <div className="flex flex-wrap gap-y-1 gap-x-2 text-[11px] text-muted-foreground">
+                    <div className="flex items-center gap-1"><Calendar size={11} /> Today</div>
+                    <div className="flex items-center gap-1"><Clock size={11} /> 25 mins • Google Meet</div>
+                  </div>
+                </Link>
               </div>
             ) : (
               meetings.map((meeting) => {
