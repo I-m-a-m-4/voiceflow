@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { ChevronDown, MessageSquare, Play, Video, Share, Settings2, FileText, Loader2, Calendar, RefreshCw, Search, Trash2, Clock, Sparkles } from 'lucide-react';
 import { useAuth } from '@/firebase';
@@ -89,14 +89,82 @@ export default function MeetingsFeed() {
     return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   };
 
-  const filteredMeetings = meetings.filter((meeting) => {
-    if (!searchQuery.trim()) return true;
-    const query = searchQuery.toLowerCase();
-    const text = (meeting.transcript || '').toLowerCase();
-    const sum = (meeting.summary || '').toLowerCase();
-    const type = (meeting.type || '').toLowerCase();
-    return text.includes(query) || sum.includes(query) || type.includes(query);
-  });
+  const [selectedType, setSelectedType] = useState<'all' | 'meeting' | 'dictation' | 'with_summary' | 'with_actions'>('all');
+  const [selectedSort, setSelectedSort] = useState<'newest' | 'oldest' | 'duration'>('newest');
+  const [selectedPlatform, setSelectedPlatform] = useState<string>('all');
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const filterRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (filterRef.current && !filterRef.current.contains(e.target as Node)) {
+        setIsFilterOpen(false);
+      }
+    };
+    if (isFilterOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isFilterOpen]);
+
+  const activeFilterCount = (selectedType !== 'all' ? 1 : 0) + (selectedSort !== 'newest' ? 1 : 0) + (selectedPlatform !== 'all' ? 1 : 0);
+
+  const filteredMeetings = useMemo(() => {
+    const result = meetings.filter((meeting) => {
+      // Search query filter
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase();
+        const text = (meeting.transcript || '').toLowerCase();
+        const sum = (meeting.summary || '').toLowerCase();
+        const type = (meeting.type || '').toLowerCase();
+        const title = ((meeting as any).title || '').toLowerCase();
+        if (!text.includes(query) && !sum.includes(query) && !type.includes(query) && !title.includes(query)) {
+          return false;
+        }
+      }
+
+      // Type filter
+      if (selectedType === 'meeting' && meeting.type === 'dictation') return false;
+      if (selectedType === 'dictation' && meeting.type !== 'dictation') return false;
+      if (selectedType === 'with_summary' && !meeting.summary) return false;
+      if (selectedType === 'with_actions') {
+        const summary = (meeting.summary || '').toLowerCase();
+        if (!summary.includes('action item') && !summary.includes('- [ ]') && !summary.includes('next steps')) {
+          return false;
+        }
+      }
+
+      // Platform filter
+      if (selectedPlatform !== 'all') {
+        const p = ((meeting as any).platform || '').toLowerCase();
+        const text = (((meeting as any).title || '') + ' ' + (meeting.summary || '')).toLowerCase();
+        if (!p.includes(selectedPlatform) && !text.includes(selectedPlatform)) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+
+    // Sorting
+    result.sort((a, b) => {
+      const dateA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt || 0).getTime();
+      const dateB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt || 0).getTime();
+
+      if (selectedSort === 'oldest') {
+        return dateA - dateB;
+      } else if (selectedSort === 'duration') {
+        const durA = (a as any).durationSeconds || ((a as any).durationMinutes ? (a as any).durationMinutes * 60 : 0);
+        const durB = (b as any).durationSeconds || ((b as any).durationMinutes ? (b as any).durationMinutes * 60 : 0);
+        return durB - durA;
+      }
+      return dateB - dateA;
+    });
+
+    return result;
+  }, [meetings, searchQuery, selectedType, selectedSort, selectedPlatform]);
 
   return (
     <div className="flex-1 flex flex-col min-w-0 bg-background h-full overflow-y-auto relative">
@@ -126,9 +194,121 @@ export default function MeetingsFeed() {
                 className="pl-8 pr-3 py-1.5 text-xs bg-muted/60 hover:bg-muted/80 focus:bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-voiceflow-orange transition-all w-60 sm:w-72 font-dm-sans"
               />
             </div>
-            <button className="flex items-center gap-1 text-xs font-semibold text-foreground hover:bg-muted px-3 py-1.5 rounded-lg border border-border transition-colors shrink-0 font-dm-sans">
-              Filter <ChevronDown size={14} className="text-muted-foreground" />
-            </button>
+            
+            {/* Filter Dropdown */}
+            <div className="relative" ref={filterRef}>
+              <button 
+                onClick={() => setIsFilterOpen(!isFilterOpen)}
+                className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all shrink-0 font-dm-sans ${
+                  isFilterOpen || activeFilterCount > 0
+                    ? 'border-voiceflow-orange text-voiceflow-orange bg-voiceflow-orange/10'
+                    : 'border-border text-foreground hover:bg-muted'
+                }`}
+              >
+                <span>Filter</span>
+                {activeFilterCount > 0 && (
+                  <span className="w-4 h-4 rounded-full bg-voiceflow-orange text-white text-[10px] font-bold flex items-center justify-center">
+                    {activeFilterCount}
+                  </span>
+                )}
+                <ChevronDown size={14} className={`text-muted-foreground transition-transform ${isFilterOpen ? 'rotate-180 text-voiceflow-orange' : ''}`} />
+              </button>
+
+              {isFilterOpen && (
+                <div className="absolute right-0 top-full mt-2 w-72 bg-popover text-popover-foreground border border-border rounded-xl shadow-xl z-50 p-3 space-y-3 font-dm-sans animate-in fade-in zoom-in-95 duration-100">
+                  <div className="flex items-center justify-between pb-2 border-b border-border text-xs">
+                    <span className="font-bold text-foreground">Filter & Sort</span>
+                    {activeFilterCount > 0 && (
+                      <button 
+                        onClick={() => {
+                          setSelectedType('all');
+                          setSelectedSort('newest');
+                          setSelectedPlatform('all');
+                        }}
+                        className="text-voiceflow-orange hover:underline text-[11px] font-medium"
+                      >
+                        Reset all
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Type Filter */}
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Type</label>
+                    <div className="grid grid-cols-2 gap-1 text-xs">
+                      {[
+                        { id: 'all', label: 'All Types' },
+                        { id: 'meeting', label: 'Meetings' },
+                        { id: 'dictation', label: 'Dictations' },
+                        { id: 'with_summary', label: 'With Summary' },
+                        { id: 'with_actions', label: 'With Actions' },
+                      ].map((t) => (
+                        <button
+                          key={t.id}
+                          onClick={() => setSelectedType(t.id as any)}
+                          className={`px-2 py-1.5 rounded-lg text-left text-xs transition-colors ${
+                            selectedType === t.id
+                              ? 'bg-voiceflow-orange text-white font-semibold'
+                              : 'hover:bg-muted text-foreground'
+                          }`}
+                        >
+                          {t.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Sort Order */}
+                  <div className="space-y-1.5 pt-2 border-t border-border">
+                    <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Sort By</label>
+                    <div className="grid grid-cols-3 gap-1 text-xs">
+                      {[
+                        { id: 'newest', label: 'Newest' },
+                        { id: 'oldest', label: 'Oldest' },
+                        { id: 'duration', label: 'Duration' },
+                      ].map((s) => (
+                        <button
+                          key={s.id}
+                          onClick={() => setSelectedSort(s.id as any)}
+                          className={`px-2 py-1.5 rounded-lg text-center text-xs transition-colors ${
+                            selectedSort === s.id
+                              ? 'bg-voiceflow-orange text-white font-semibold'
+                              : 'hover:bg-muted text-foreground'
+                          }`}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Platform Filter */}
+                  <div className="space-y-1.5 pt-2 border-t border-border">
+                    <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Platform</label>
+                    <div className="grid grid-cols-2 gap-1 text-xs">
+                      {[
+                        { id: 'all', label: 'All Platforms' },
+                        { id: 'meet', label: 'Google Meet' },
+                        { id: 'zoom', label: 'Zoom' },
+                        { id: 'teams', label: 'MS Teams' },
+                      ].map((p) => (
+                        <button
+                          key={p.id}
+                          onClick={() => setSelectedPlatform(p.id)}
+                          className={`px-2 py-1.5 rounded-lg text-left text-xs transition-colors ${
+                            selectedPlatform === p.id
+                              ? 'bg-voiceflow-orange text-white font-semibold'
+                              : 'hover:bg-muted text-foreground'
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
