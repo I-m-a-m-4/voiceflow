@@ -608,6 +608,11 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
   // --- Real Sign Out & Quit ---
   const handleSignOut = async () => {
     try {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('voiceflow_auth_session');
+        localStorage.removeItem('userEmail');
+        localStorage.removeItem('userName');
+      }
       await signOut(auth);
       onClose();
       window.location.href = '/login';

@@ -33,6 +33,14 @@ export default function LoginPage() {
     } catch {
       router.push('/dashboard');
     }
+    // Safety fallback if client router transition does not fire in desktop environment
+    if (typeof window !== 'undefined') {
+      setTimeout(() => {
+        if (window.location.pathname.includes('/login') || window.location.pathname.includes('/signup')) {
+          window.location.href = '/dashboard';
+        }
+      }, 500);
+    }
   };
 
   useEffect(() => {
@@ -232,8 +240,20 @@ export default function LoginPage() {
       
       await syncDeviceTrial(db, user).catch(() => {});
 
-      localStorage.setItem('userEmail', formData.email.toLowerCase());
-      localStorage.setItem('userName', userName);
+      const sessionData = {
+        uid: user.uid,
+        email: user.email,
+        displayName: userName,
+        photoURL: user.photoURL,
+        isAnonymous: user.isAnonymous,
+        emailVerified: user.emailVerified,
+        isCached: true,
+      };
+      try {
+        localStorage.setItem('voiceflow_auth_session', JSON.stringify(sessionData));
+        localStorage.setItem('userEmail', formData.email.toLowerCase());
+        localStorage.setItem('userName', userName);
+      } catch {}
       
       toast({
         title: 'Welcome back!',
