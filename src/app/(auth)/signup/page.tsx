@@ -31,14 +31,20 @@ export default function SignupPage() {
   const goToDashboard = () => {
     try {
       router.replace('/dashboard');
-    } catch {}
-    if (typeof window !== 'undefined') {
-      window.location.href = '/dashboard';
+    } catch {
+      router.push('/dashboard');
     }
   };
 
   useEffect(() => {
-    if (!authLoading && user) {
+    let hasCachedSession = false;
+    if (typeof window !== 'undefined') {
+      try {
+        hasCachedSession = !!localStorage.getItem('voiceflow_auth_session');
+      } catch {}
+    }
+
+    if ((!authLoading && user) || hasCachedSession) {
       goToDashboard();
       return;
     }
@@ -137,11 +143,11 @@ export default function SignupPage() {
     try {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
-      try {
-        // 1. Attempt Popup first
-        const userCredential = await signInWithPopup(auth, provider);
-        const user = userCredential.user;
-        const fallbackName = user.displayName || (user.email ? user.email.split('@')[0] : 'User');
+
+      // Attempt Popup
+      const userCredential = await signInWithPopup(auth, provider);
+      const user = userCredential.user;
+      const fallbackName = user.displayName || (user.email ? user.email.split('@')[0] : 'User');
 
         const sessionData = {
           uid: user.uid,
@@ -182,47 +188,19 @@ export default function SignupPage() {
           }
         })();
 
-        goToDashboard();
-      } catch (popupError: any) {
-        // User cancelled popup explicitly
-        if (
-          popupError?.code === 'auth/popup-closed-by-user' ||
-          popupError?.code === 'auth/cancelled-popup-request' ||
-          popupError?.code === 'auth/user-cancelled'
-        ) {
-          setIsGoogleLoading(false);
-          return;
-        }
-
-        // Whenever popup is blocked or unsupported (desktop WebView2, browser popup blocker, etc.)
-        if (
-          popupError?.code === 'auth/popup-blocked' ||
-          popupError?.code === 'auth/operation-not-supported-in-this-environment' ||
-          popupError?.code === 'auth/network-request-failed' ||
-          popupError?.code === 'auth/internal-error'
-        ) {
-          toast({
-            title: "Redirecting...",
-            description: "Connecting to Google securely...",
-          });
-          await signInWithRedirect(auth, provider);
-          return;
-        }
-
-        throw popupError;
-      }
-    } catch (error: any) {
-      // Handle user cancellation gracefully without showing noisy error toasts
+      goToDashboard();
+    } catch (popupError: any) {
       const isCancellation =
-        error?.code === 'auth/popup-closed-by-user' ||
-        error?.code === 'auth/cancelled-popup-request' ||
-        error?.code === 'auth/user-cancelled' ||
-        error?.code === 'auth/redirect-cancelled-by-user';
+        popupError?.code === 'auth/popup-closed-by-user' ||
+        popupError?.code === 'auth/cancelled-popup-request' ||
+        popupError?.code === 'auth/user-cancelled';
+
       if (!isCancellation) {
+        console.error('Google Sign-Up Error:', popupError);
         toast({
           variant: 'destructive',
-          title: 'Sign Up Failed',
-          description: error?.message || 'Failed to sign up with Google.',
+          title: 'Google Sign Up',
+          description: popupError?.message || 'Could not complete Google sign-up. You can also sign up with email & password below.',
         });
       }
     } finally {

@@ -30,14 +30,20 @@ export default function LoginPage() {
   const goToDashboard = () => {
     try {
       router.replace('/dashboard');
-    } catch {}
-    if (typeof window !== 'undefined') {
-      window.location.href = '/dashboard';
+    } catch {
+      router.push('/dashboard');
     }
   };
 
   useEffect(() => {
-    if (!authLoading && user) {
+    let hasCachedSession = false;
+    if (typeof window !== 'undefined') {
+      try {
+        hasCachedSession = !!localStorage.getItem('voiceflow_auth_session');
+      } catch {}
+    }
+
+    if ((!authLoading && user) || hasCachedSession) {
       goToDashboard();
       return;
     }
@@ -135,91 +141,63 @@ export default function LoginPage() {
     try {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
+      
+      const userCredential = await signInWithPopup(auth, provider);
+      const user = userCredential.user;
+      const fallbackName = user.displayName || (user.email ? user.email.split('@')[0] : 'User');
+
+      const sessionData = {
+        uid: user.uid,
+        email: user.email,
+        displayName: fallbackName,
+        photoURL: user.photoURL,
+        isAnonymous: user.isAnonymous,
+        emailVerified: user.emailVerified,
+        isCached: true,
+      };
       try {
-        // 1. Attempt Popup first
-        const userCredential = await signInWithPopup(auth, provider);
-        const user = userCredential.user;
-        const fallbackName = user.displayName || (user.email ? user.email.split('@')[0] : 'User');
+        localStorage.setItem('voiceflow_auth_session', JSON.stringify(sessionData));
+        localStorage.setItem('userEmail', user.email || '');
+        localStorage.setItem('userName', fallbackName);
+      } catch {}
+      
+      toast({
+        title: 'Successfully logged in with Google!',
+      });
 
-        const sessionData = {
-          uid: user.uid,
-          email: user.email,
-          displayName: fallbackName,
-          photoURL: user.photoURL,
-          isAnonymous: user.isAnonymous,
-          emailVerified: user.emailVerified,
-          isCached: true,
-        };
+      // Background sync to Firestore without delaying navigation
+      (async () => {
         try {
-          localStorage.setItem('voiceflow_auth_session', JSON.stringify(sessionData));
-          localStorage.setItem('userEmail', user.email || '');
-          localStorage.setItem('userName', fallbackName);
-        } catch {}
-        
-        toast({
-          title: 'Successfully logged in with Google!',
-        });
-
-        // Background sync to Firestore without delaying navigation
-        (async () => {
-          try {
-            const userDocRef = doc(db, 'users', user.uid);
-            const userDoc = await getDoc(userDocRef);
-            if (!userDoc.exists()) {
-              await setDoc(userDocRef, {
-                name: fallbackName,
-                email: user.email,
-                createdAt: new Date().toISOString(),
-                role: 'admin',
-              }, { merge: true });
-            }
-            await syncDeviceTrial(db, user).catch(() => {});
-          } catch (e) {
-            console.error('Background user sync error:', e);
+          const userDocRef = doc(db, 'users', user.uid);
+          const userDoc = await getDoc(userDocRef);
+          if (!userDoc.exists()) {
+            await setDoc(userDocRef, {
+              name: fallbackName,
+              email: user.email,
+              createdAt: new Date().toISOString(),
+              role: 'admin',
+            }, { merge: true });
           }
-        })();
-
-        goToDashboard();
-      } catch (popupError: any) {
-        // User cancelled popup explicitly
-        if (
-          popupError?.code === 'auth/popup-closed-by-user' ||
-          popupError?.code === 'auth/cancelled-popup-request' ||
-          popupError?.code === 'auth/user-cancelled'
-        ) {
-          setIsGoogleLoading(false);
-          return;
+          await syncDeviceTrial(db, user).catch(() => {});
+        } catch (e) {
+          console.error('Background user sync error:', e);
         }
+      })();
 
-        // Whenever popup is blocked or unsupported (desktop WebView2, browser popup blocker, etc.)
-        if (
-          popupError?.code === 'auth/popup-blocked' ||
-          popupError?.code === 'auth/operation-not-supported-in-this-environment' ||
-          popupError?.code === 'auth/network-request-failed' ||
-          popupError?.code === 'auth/internal-error'
-        ) {
-          toast({
-            title: "Redirecting...",
-            description: "Connecting to Google securely...",
-          });
-          await signInWithRedirect(auth, provider);
-          return;
-        }
-
-        throw popupError;
-      }
-    } catch (error: any) {
-      // Handle user cancellation gracefully without showing noisy error toasts
+      goToDashboard();
+    } catch (popupError: any) {
+      // User cancelled popup explicitly
       const isCancellation =
-        error?.code === 'auth/popup-closed-by-user' ||
-        error?.code === 'auth/cancelled-popup-request' ||
-        error?.code === 'auth/user-cancelled' ||
-        error?.code === 'auth/redirect-cancelled-by-user';
+        popupError?.code === 'auth/popup-closed-by-user' ||
+        popupError?.code === 'auth/cancelled-popup-request' ||
+        popupError?.code === 'auth/user-cancelled';
+
       if (!isCancellation) {
+        console.error('Google Sign-In Error:', popupError);
         toast({
           variant: 'destructive',
-          title: 'Sign In Failed',
-          description: error?.message || 'Failed to sign in with Google. Please try again.',
+          title: 'Google Sign In',
+          description: popupError?.message || 'Could not complete Google sign-in. You can also sign in directly with email & password below.',
         });
       }
     } finally {

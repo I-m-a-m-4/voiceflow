@@ -16,11 +16,26 @@ export default function AuthenticatedLayout({
   const pathname = usePathname();
   const isDashboard = pathname === '/dashboard';
 
+  // Optimistic cached user so we never falsely bounce authenticated users on refresh or sign-in transition
+  const [cachedUser] = useState<any>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('voiceflow_auth_session');
+        return raw ? JSON.parse(raw) : null;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  });
+
+  const effectiveUser = user || cachedUser;
+
   useEffect(() => {
-    if (!isUserLoading && !user) {
+    if (!isUserLoading && !effectiveUser) {
       router.replace('/login');
     }
-  }, [user, isUserLoading, router]);
+  }, [effectiveUser, isUserLoading, router]);
 
   const [isRecording, setIsRecording] = useState(false);
 
@@ -32,7 +47,7 @@ export default function AuthenticatedLayout({
     return () => window.removeEventListener('voiceflow-record-state', handleRecordState);
   }, []);
 
-  if (isUserLoading && !user) {
+  if (isUserLoading && !effectiveUser) {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-3">
@@ -43,7 +58,7 @@ export default function AuthenticatedLayout({
     );
   }
 
-  if (!user) return null;
+  if (!effectiveUser) return null;
 
   return (
     <div className={`flex flex-1 min-h-0 h-full w-full overflow-hidden font-jakarta text-foreground selection:bg-primary/20 ${isRecording ? 'bg-transparent' : 'bg-background'}`}>

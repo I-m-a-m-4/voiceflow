@@ -135,7 +135,7 @@ export default function AppSidebar() {
       )}
 
       <aside 
-        className={`fixed md:relative top-0 inset-y-0 left-0 z-50 md:z-auto h-full bg-[#F9F9F9] border-r border-gray-200 flex flex-col shrink-0 overflow-y-auto overflow-x-hidden transition-all duration-300 ease-in-out dark:bg-muted/50 dark:border-border select-none ${
+        className={`fixed md:relative top-0 inset-y-0 left-0 z-50 md:z-auto h-full bg-[#F9F9F9] border-r border-gray-200 flex flex-col shrink-0 overflow-y-auto overflow-x-hidden transition-all duration-300 ease-in-out dark:bg-muted/50 dark:border-border ${
           isMobileOpen 
             ? 'translate-x-0 w-[256px] shadow-2xl' 
             : '-translate-x-full md:translate-x-0'
@@ -191,31 +191,31 @@ export default function AppSidebar() {
           </button>
         </nav>
 
-        {/* Bottom section with reference cards */}
-        <div className="mt-auto pt-4 px-3 pb-8 sm:pb-10 shrink-0">
+        {/* Bottom section with Voiceflow brand orange cards */}
+        <div className="mt-auto pt-4 px-3 pb-8 sm:pb-10 shrink-0 select-text">
           {!isCollapsed ? (
             <div className="space-y-3">
               {/* Referrals / Dash Credits link */}
               <button
                 type="button"
                 onClick={handleReferralsClick}
-                className="w-full flex items-center gap-2 px-1 py-0.5 text-stone-700 dark:text-stone-300 font-semibold text-xs hover:text-stone-900 dark:hover:text-white transition-colors cursor-pointer group text-left"
+                className="w-full flex items-center gap-2 px-1 py-0.5 text-stone-700 dark:text-stone-300 font-semibold text-xs hover:text-voiceflow-orange dark:hover:text-voiceflow-orange transition-colors cursor-pointer group text-left"
               >
                 <span className="text-pink-500 text-sm group-hover:scale-110 transition-transform">🎁</span>
                 <span>{isAdmin ? 'Dash Credits' : 'Referrals'}</span>
               </button>
 
-              {/* Card 1: Credits / Usage Card */}
-              <div className="rounded-2xl border border-stone-200/90 bg-white p-3.5 shadow-xs dark:bg-[#18181B] dark:border-stone-800">
+              {/* Card 1: Voiceflow Credits / Usage Card (Brand Orange) */}
+              <div className="rounded-2xl border border-stone-200/90 bg-white p-3.5 shadow-xs dark:bg-[#18181B] dark:border-stone-800 select-text">
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-1.5 pt-0.5">
-                    <Coins size={16} className="text-[#0D6B5C] dark:text-[#2dd4bf]" />
+                    <Coins size={16} className="text-voiceflow-orange" />
                     <span className="font-bold text-xs text-stone-800 dark:text-stone-100 tracking-tight">
                       Voiceflow credits
                     </span>
                   </div>
                   <div className="flex items-baseline gap-0.5">
-                    <span className="text-2xl font-black text-[#0D6B5C] dark:text-[#2dd4bf] tracking-tight leading-none">
+                    <span className="text-2xl font-black text-voiceflow-orange tracking-tight leading-none">
                       {isPro ? '∞' : availableCredits}
                     </span>
                     <span className="text-xs font-semibold text-stone-400 dark:text-stone-500">
@@ -224,16 +224,16 @@ export default function AppSidebar() {
                   </div>
                 </div>
 
-                {/* Progress bar */}
-                <div className="w-full bg-[#E5EBEA] dark:bg-stone-800 h-2 rounded-full my-3 overflow-hidden">
+                {/* Progress bar in warm Voiceflow orange */}
+                <div className="w-full bg-orange-100/70 dark:bg-stone-800 h-2 rounded-full my-3 overflow-hidden">
                   <div 
-                    className="h-full bg-[#0D6B5C] dark:bg-[#14b8a6] rounded-full transition-all duration-500"
+                    className="h-full bg-gradient-to-r from-amber-500 via-orange-500 to-voiceflow-orange rounded-full transition-all duration-500 shadow-xs"
                     style={{ width: `${creditPercent}%` }}
                   />
                 </div>
 
-                {/* Explanatory copy */}
-                <p className="text-xs font-semibold text-stone-800 dark:text-stone-200 leading-snug">
+                {/* Explanatory copy (selectable) */}
+                <p className="text-xs font-semibold text-stone-800 dark:text-stone-200 leading-snug select-text">
                   {isPro 
                     ? 'Your credits are unlimited.' 
                     : availableCredits === maxMinutes 
@@ -242,7 +242,7 @@ export default function AppSidebar() {
                         ? 'Monthly credits depleted.' 
                         : `${availableCredits} credits remaining.`}
                 </p>
-                <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-1 leading-snug">
+                <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-1 leading-snug select-text">
                   {isPro
                     ? 'Pro includes unlimited recording, AI summaries & live assistance.'
                     : `A meeting uses 1 credit per min. Free includes ${maxMinutes} a month.`}
@@ -255,42 +255,42 @@ export default function AppSidebar() {
                     setSettingsTab('billing');
                     setIsSettingsModalOpen(true);
                   }}
-                  className="w-full mt-3 py-2 px-3 rounded-full bg-[#F3F4F6] hover:bg-[#E5E7EB] dark:bg-stone-800 dark:hover:bg-stone-700/80 text-stone-700 dark:text-stone-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                  className="w-full mt-3 py-2 px-3 rounded-full bg-stone-100 hover:bg-orange-50 hover:text-voiceflow-orange hover:border-orange-200 border border-transparent dark:bg-stone-800 dark:hover:bg-orange-950/30 text-stone-700 dark:text-stone-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <span>View usage</span>
                   <ChevronRight size={13} className="text-stone-500" />
                 </button>
 
-                {/* Secondary link */}
+                {/* Secondary link in Voiceflow Orange */}
                 <button
                   type="button"
                   onClick={() => setIsBillingModalOpen(true)}
-                  className="w-full text-center text-xs font-semibold text-[#0D6B5C] dark:text-[#2dd4bf] hover:underline mt-2.5 transition-colors cursor-pointer"
+                  className="w-full text-center text-xs font-semibold text-voiceflow-orange hover:underline mt-2.5 transition-colors cursor-pointer"
                 >
                   Learn more
                 </button>
               </div>
 
-              {/* Card 2: Subscription Card */}
-              <div className="rounded-2xl border border-stone-200/90 bg-[#F4F9F8] p-3.5 shadow-xs dark:bg-[#121B19] dark:border-stone-800">
+              {/* Card 2: Subscription Card (Brand Orange) */}
+              <div className="rounded-2xl border border-orange-200/70 bg-gradient-to-b from-[#FFFDFB] to-[#FFF6EE] p-3.5 shadow-xs dark:bg-gradient-to-b dark:from-[#1A1512] dark:to-[#17120E] dark:border-orange-950/60 select-text">
                 <div className="flex items-start gap-2.5">
-                  <div className="w-10 h-10 rounded-2xl bg-[#0D6B5C] dark:bg-[#134E44] flex items-center justify-center text-white shrink-0 shadow-xs relative">
-                    <Crown size={18} className="text-white" />
-                    <span className="absolute -top-1 -right-0.5 text-[9px] font-black text-emerald-300 leading-none">
+                  <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-voiceflow-orange to-amber-600 flex items-center justify-center text-white shrink-0 shadow-sm shadow-orange-500/20 relative">
+                    <Crown size={18} className="text-white drop-shadow-xs" />
+                    <span className="absolute -top-1 -right-0.5 text-[9px] font-black text-amber-100 leading-none">
                       +
                     </span>
                   </div>
                   <div className="min-w-0 flex-1">
-                    <h4 className="font-bold text-xs text-stone-900 dark:text-stone-100 truncate leading-tight">
+                    <h4 className="font-bold text-xs text-stone-900 dark:text-stone-100 truncate leading-tight select-text">
                       {isPro ? 'Voiceflow Pro' : 'Voiceflow Pro'}
                     </h4>
-                    <p className="text-xs font-bold text-[#0D6B5C] dark:text-[#2dd4bf] mt-0.5">
+                    <p className="text-xs font-bold text-voiceflow-orange mt-0.5 select-text">
                       {formatPrice(12500, 11.99)} per month
                     </p>
                   </div>
                 </div>
 
-                <p className="text-[11px] text-stone-600 dark:text-stone-400 mt-2.5 leading-relaxed">
+                <p className="text-[11px] text-stone-600 dark:text-stone-300 mt-2.5 leading-relaxed select-text">
                   {isPro
                     ? 'All premium AI features, private notes & screen intelligence active.'
                     : 'More room across every meeting and transcription tool.'}
@@ -299,16 +299,16 @@ export default function AppSidebar() {
                 <button
                   type="button"
                   onClick={() => setIsBillingModalOpen(true)}
-                  className="w-full mt-3 py-2 px-3 rounded-full border border-[#0D6B5C]/35 bg-[#E8F5F2] hover:bg-[#D4EFE9] dark:bg-[#0D6B5C]/20 dark:border-[#0D6B5C]/40 text-[#0D6B5C] dark:text-teal-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+                  className="w-full mt-3 py-2 px-3 rounded-full border border-voiceflow-orange/40 bg-orange-100/70 hover:bg-orange-200/80 dark:bg-orange-950/40 dark:border-orange-500/50 text-voiceflow-orange dark:text-orange-400 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer"
                 >
                   <span>{isPro ? 'Manage Pro' : 'Choose Pro'}</span>
-                  <Zap size={12} className="text-[#0D6B5C] dark:text-teal-300 fill-current" />
+                  <Zap size={12} className="text-voiceflow-orange dark:text-orange-400 fill-current" />
                 </button>
 
                 <button
                   type="button"
                   onClick={handleInviteFriends}
-                  className="w-full text-center text-xs text-stone-500 hover:text-stone-800 dark:text-stone-400 dark:hover:text-stone-200 font-medium hover:underline mt-2.5 transition-colors cursor-pointer"
+                  className="w-full text-center text-xs text-stone-500 hover:text-voiceflow-orange dark:text-stone-400 dark:hover:text-voiceflow-orange font-medium hover:underline mt-2.5 transition-colors cursor-pointer"
                 >
                   Invite friends
                 </button>
@@ -324,10 +324,10 @@ export default function AppSidebar() {
                   setIsSettingsModalOpen(true);
                 }}
                 title={`Voiceflow Credits: ${isPro ? 'Unlimited' : `${availableCredits}/${maxMinutes}`}`}
-                className="w-10 h-10 rounded-xl bg-white dark:bg-[#18181B] border border-stone-200 dark:border-stone-800 flex flex-col items-center justify-center shadow-xs hover:border-[#0D6B5C] transition-all cursor-pointer"
+                className="w-10 h-10 rounded-xl bg-white dark:bg-[#18181B] border border-stone-200 dark:border-stone-800 flex flex-col items-center justify-center shadow-xs hover:border-voiceflow-orange transition-all cursor-pointer"
               >
-                <Coins size={16} className="text-[#0D6B5C] dark:text-[#2dd4bf]" />
-                <span className="text-[9px] font-black text-[#0D6B5C] dark:text-[#2dd4bf] leading-none mt-0.5">
+                <Coins size={16} className="text-voiceflow-orange" />
+                <span className="text-[9px] font-black text-voiceflow-orange leading-none mt-0.5">
                   {isPro ? '∞' : availableCredits}
                 </span>
               </button>
@@ -337,10 +337,10 @@ export default function AppSidebar() {
                 type="button"
                 onClick={() => setIsBillingModalOpen(true)}
                 title={isPro ? "Voiceflow Pro Active • Manage" : "Voiceflow Pro • Choose Plan"}
-                className="w-10 h-10 rounded-xl bg-[#0D6B5C] dark:bg-[#134E44] text-white flex items-center justify-center shadow-xs hover:opacity-90 transition-all relative cursor-pointer"
+                className="w-10 h-10 rounded-xl bg-gradient-to-br from-voiceflow-orange to-amber-600 text-white flex items-center justify-center shadow-sm shadow-orange-500/20 hover:opacity-90 transition-all relative cursor-pointer"
               >
                 <Crown size={17} className="text-white" />
-                <span className="absolute -top-1 -right-0.5 text-[9px] font-black text-emerald-300 leading-none">
+                <span className="absolute -top-1 -right-0.5 text-[9px] font-black text-amber-100 leading-none">
                   +
                 </span>
               </button>

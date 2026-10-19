@@ -30,7 +30,7 @@ fn main() {
       if std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").is_err() {
           std::env::set_var(
               "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-              "--enable-features=ClipboardSanitizedWrite --disable-features=PermissionPrompt",
+              "--enable-features=ClipboardSanitizedWrite --disable-features=PermissionPrompt --disable-popup-blocking",
           );
       }
   }
