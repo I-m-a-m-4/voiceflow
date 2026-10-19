@@ -315,6 +315,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
           {/* Right controls */}
           <div className="ml-auto flex items-center gap-2 shrink-0">
+            <Link
+              href="/dashboard"
+              className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-border hover:bg-accent text-foreground flex items-center gap-1.5 transition-colors"
+              title="Return to Voiceflow Dashboard"
+            >
+              ← Back to App
+            </Link>
             <Button
               variant="outline"
               size="icon"

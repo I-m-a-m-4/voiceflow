@@ -126,8 +126,9 @@ export default function ForgotPasswordPage() {
         <Image
           src="/voiceflow-forgot-password-premium.png"
           alt={t('auth.backgroundAlt')}
-          width="1920"
-          height="1080"
+          width={1920}
+          height={1080}
+          unoptimized
           className="h-full w-full object-cover opacity-90 transition-transform [transition-duration:20s] hover:scale-110"
           priority
         />

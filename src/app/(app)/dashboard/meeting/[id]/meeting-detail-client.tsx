@@ -24,7 +24,8 @@ import {
 import { useAuth } from '@/firebase';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { apiBase } from '@/lib/platform';
+import { apiBase, openExternal } from '@/lib/platform';
+import { copyToClipboard } from '@/lib/clipboard';
 import { formatDuration, estimateDurationFromTranscript, formatRawSummaryToMarkdown } from '@/lib/utils';
 
 interface TranscriptItem {
@@ -85,14 +86,44 @@ export default function MeetingDetailClient({ id }: { id?: string }) {
 
     let summaryPoints = '';
     if (currentSummary) {
-      const bulletLines = currentSummary
+      const allLines = currentSummary
         .split('\n')
         .map(l => l.trim())
-        .filter(l => l.startsWith('•') || l.startsWith('-') || l.startsWith('*') || l.match(/^\d+\./))
-        .slice(0, 4)
-        .join('\n');
-      if (bulletLines) {
-        summaryPoints = `\n\nKey Takeaways & Decisions:\n${bulletLines}`;
+        .filter(Boolean);
+
+      // Prioritize bullet or numbered lines; fallback to non-header content lines
+      const bulletCandidates = allLines.filter(l => 
+        l.startsWith('•') || l.startsWith('-') || l.startsWith('*') || l.match(/^\d+\./)
+      );
+
+      const targetLines = bulletCandidates.length > 0
+        ? bulletCandidates.slice(0, 5)
+        : allLines.filter(l => !l.startsWith('#')).slice(0, 4);
+
+      if (targetLines.length > 0) {
+        const cleanedBullets = targetLines.map(line => {
+          let cleaned = line
+            // Clean markdown bold syntax (**text** or __text__)
+            .replace(/\*\*(.*?)\*\*/g, '$1')
+            .replace(/__(.*?)__/g, '$1')
+            // Clean markdown italic syntax (*text* or _text_)
+            .replace(/\*(.*?)\*/g, '$1')
+            .replace(/_(.*?)_/g, '$1')
+            // Clean inline code backticks (`text`)
+            .replace(/`([^`]+)`/g, '$1')
+            // Standardize bullet points to a clean bullet character
+            .replace(/^[-*•]\s*/, '• ')
+            .trim();
+
+          if (!cleaned.startsWith('•') && !cleaned.match(/^\d+\./)) {
+            cleaned = `• ${cleaned}`;
+          }
+          return cleaned;
+        }).join('\n');
+
+        if (cleanedBullets) {
+          summaryPoints = `\n\nKey Takeaways & Decisions:\n${cleanedBullets}`;
+        }
       }
     }
 
@@ -405,14 +436,14 @@ export default function MeetingDetailClient({ id }: { id?: string }) {
   const handleCopySummary = async () => {
     const textToCopy = formattedSummary || meeting?.summary;
     if (!textToCopy) return;
-    await navigator.clipboard.writeText(textToCopy);
+    await copyToClipboard(textToCopy);
     setCopiedSummary(true);
     setTimeout(() => setCopiedSummary(false), 2000);
   };
 
   const handleCopyTranscript = async () => {
     if (!meeting?.transcript) return;
-    await navigator.clipboard.writeText(meeting.transcript);
+    await copyToClipboard(meeting.transcript);
     setCopiedTranscript(true);
     setTimeout(() => setCopiedTranscript(false), 2000);
   };
@@ -601,14 +632,14 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
   };
 
   // Follow-up Email Handlers
-  const handleSendWithGmail = () => {
+  const handleSendWithGmail = async () => {
     const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(emailTo)}&su=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
-    window.open(gmailUrl, '_blank');
+    await openExternal(gmailUrl);
   };
 
-  const handleSendWithDefaultClient = () => {
+  const handleSendWithDefaultClient = async () => {
     const mailtoUrl = `mailto:${encodeURIComponent(emailTo)}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
-    window.location.href = mailtoUrl;
+    await openExternal(mailtoUrl);
   };
 
   const handleResetEmail = () => {
@@ -618,14 +649,14 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
     setEmailBody(dynamicEmail.body);
   };
 
-  const handleCopyEmail = () => {
+  const handleCopyEmail = async () => {
     const fullText = `Subject: ${emailSubject}\n\n${emailBody}`;
-    navigator.clipboard.writeText(fullText);
+    await copyToClipboard(fullText);
     setHasCopiedEmail(true);
     setTimeout(() => setHasCopiedEmail(false), 2000);
   };
 
-  const handleExportToDocs = (format: 'docx' | 'gdocs' | 'markdown') => {
+  const handleExportToDocs = async (format: 'docx' | 'gdocs' | 'markdown') => {
     const title = displayTitle;
     const dateStr = formattedDate;
     const durStr = meeting?.durationSeconds 
@@ -663,8 +694,8 @@ ${meeting?.transcript ? meeting.transcript : '_No transcript recorded._'}
     }
 
     if (format === 'gdocs') {
-      navigator.clipboard.writeText(markdownContent);
-      window.open('https://docs.google.com/document/create', '_blank');
+      await copyToClipboard(markdownContent);
+      await openExternal('https://docs.google.com/document/create');
       setShowExportMenu(false);
       return;
     }

@@ -5,10 +5,14 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { 
   Home, Settings, FileText, Sparkles, 
-  PanelLeftClose, PanelLeftOpen, Gift, Mic 
+  PanelLeftClose, PanelLeftOpen, Gift, Mic,
+  Coins, Crown, Zap, ChevronRight
 } from 'lucide-react';
 import { useAuth } from '@/firebase';
 import { usePlanUsage } from '@/hooks/use-plan-usage';
+import { useCurrencyGeo } from '@/hooks/use-currency-geo';
+import { useToast } from '@/hooks/use-toast';
+import { copyToClipboard } from '@/lib/clipboard';
 import { BillingModal } from './billing-modal';
 import { SettingsModal } from './settings-modal';
 
@@ -78,7 +82,46 @@ export default function AppSidebar() {
     };
   }, []);
 
-  const { isPro, sessionCount, usedMinutes, maxMinutes, maxFreeSessions, isLimitReached, screenCaptureCount } = usePlanUsage();
+  const { isPro, isAdmin, sessionCount, usedMinutes, maxMinutes, maxFreeSessions, isLimitReached, screenCaptureCount } = usePlanUsage();
+  const { formatPrice } = useCurrencyGeo();
+  const { toast } = useToast();
+
+  const availableCredits = Math.max(0, maxMinutes - usedMinutes);
+  const creditPercent = isPro ? 100 : Math.min(100, Math.max(availableCredits > 0 ? 6 : 0, Math.round((availableCredits / maxMinutes) * 100)));
+
+  const handleInviteFriends = async () => {
+    const inviteUrl = typeof window !== 'undefined' 
+      ? `${window.location.origin}/signup?ref=${encodeURIComponent(auth?.currentUser?.uid || 'referral')}`
+      : 'https://voiceflow.app';
+    try {
+      const success = await copyToClipboard(inviteUrl);
+      if (success) {
+        toast({
+          title: "Invite Link Copied!",
+          description: "Share this link with your team or friends to invite them to Voiceflow.",
+        });
+      } else {
+        toast({
+          title: "Invite Friends",
+          description: inviteUrl,
+        });
+      }
+    } catch {
+      toast({
+        title: "Invite Friends",
+        description: "Invite colleagues to experience Voiceflow AI.",
+      });
+    }
+  };
+
+  const handleReferralsClick = () => {
+    if (isAdmin) {
+      setSettingsTab('admin-dash');
+      setIsSettingsModalOpen(true);
+    } else {
+      handleInviteFriends();
+    }
+  };
 
   return (
     <>
@@ -94,10 +137,10 @@ export default function AppSidebar() {
       <aside 
         className={`fixed md:relative top-0 inset-y-0 left-0 z-50 md:z-auto h-full bg-[#F9F9F9] border-r border-gray-200 flex flex-col shrink-0 overflow-y-auto overflow-x-hidden transition-all duration-300 ease-in-out dark:bg-muted/50 dark:border-border select-none ${
           isMobileOpen 
-            ? 'translate-x-0 w-[240px] shadow-2xl' 
+            ? 'translate-x-0 w-[256px] shadow-2xl' 
             : '-translate-x-full md:translate-x-0'
         } ${
-          isCollapsed ? 'md:w-[68px]' : 'md:w-[240px]'
+          isCollapsed ? 'md:w-[68px]' : 'md:w-[256px]'
         }`}
       >
         {/* Brand Header */}
@@ -148,111 +191,161 @@ export default function AppSidebar() {
           </button>
         </nav>
 
-        {/* Bottom section */}
-        <div className="mt-auto pt-4 px-2.5 pb-8 sm:pb-10 shrink-0">
-          <div className="border-t border-gray-200 pt-3 dark:border-border">
-            {!isCollapsed ? (
-              <>
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs font-bold text-gray-900 dark:text-gray-200 flex items-center gap-1.5">
-                    {isPro ? (
-                      <>
-                        <Sparkles size={13} className="text-voiceflow-orange fill-voiceflow-orange" />
-                        <span>Voiceflow Pro</span>
-                      </>
-                    ) : (
-                      <span>Basic Plan</span>
-                    )}
-                  </span>
-                  {!isPro && (
-                    <span className="text-[10px] font-semibold text-gray-400">
-                      {sessionCount}/{maxFreeSessions} sessions
+        {/* Bottom section with reference cards */}
+        <div className="mt-auto pt-4 px-3 pb-8 sm:pb-10 shrink-0">
+          {!isCollapsed ? (
+            <div className="space-y-3">
+              {/* Referrals / Dash Credits link */}
+              <button
+                type="button"
+                onClick={handleReferralsClick}
+                className="w-full flex items-center gap-2 px-1 py-0.5 text-stone-700 dark:text-stone-300 font-semibold text-xs hover:text-stone-900 dark:hover:text-white transition-colors cursor-pointer group text-left"
+              >
+                <span className="text-pink-500 text-sm group-hover:scale-110 transition-transform">🎁</span>
+                <span>{isAdmin ? 'Dash Credits' : 'Referrals'}</span>
+              </button>
+
+              {/* Card 1: Credits / Usage Card */}
+              <div className="rounded-2xl border border-stone-200/90 bg-white p-3.5 shadow-xs dark:bg-[#18181B] dark:border-stone-800">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-1.5 pt-0.5">
+                    <Coins size={16} className="text-[#0D6B5C] dark:text-[#2dd4bf]" />
+                    <span className="font-bold text-xs text-stone-800 dark:text-stone-100 tracking-tight">
+                      Voiceflow credits
                     </span>
-                  )}
+                  </div>
+                  <div className="flex items-baseline gap-0.5">
+                    <span className="text-2xl font-black text-[#0D6B5C] dark:text-[#2dd4bf] tracking-tight leading-none">
+                      {isPro ? '∞' : availableCredits}
+                    </span>
+                    <span className="text-xs font-semibold text-stone-400 dark:text-stone-500">
+                      /{isPro ? '∞' : maxMinutes}
+                    </span>
+                  </div>
                 </div>
 
-                <div className="text-[11px] text-gray-500 mb-1 dark:text-gray-400">
-                  {isPro ? "Unlimited monthly mins" : `${usedMinutes} of ${maxMinutes} monthly mins used`}
-                </div>
-                {!isPro && (
-                  <div className="text-[10px] text-gray-500 mb-2 dark:text-gray-400 flex items-center justify-between">
-                    <span>Screen captures:</span>
-                    <span className="font-semibold text-gray-700 dark:text-gray-300">{Math.min(screenCaptureCount, 3)}/3 used</span>
-                  </div>
-                )}
-                
-                <div className="w-full bg-gray-200 h-1.5 rounded-full mb-2.5 overflow-hidden dark:bg-gray-700">
+                {/* Progress bar */}
+                <div className="w-full bg-[#E5EBEA] dark:bg-stone-800 h-2 rounded-full my-3 overflow-hidden">
                   <div 
-                    className={`h-full transition-all duration-500 ${isPro ? "bg-emerald-500" : "bg-voiceflow-orange"}`} 
-                    style={{ 
-                      width: isPro ? '100%' : `${Math.min(100, Math.max(usedMinutes > 0 ? 5 : 0, Math.round((usedMinutes / maxMinutes) * 100)))}%` 
-                    }}
+                    className="h-full bg-[#0D6B5C] dark:bg-[#14b8a6] rounded-full transition-all duration-500"
+                    style={{ width: `${creditPercent}%` }}
                   />
                 </div>
-                
-                {isPro ? (
-                  <button 
-                    onClick={() => setIsBillingModalOpen(true)}
-                    className="w-full py-1.5 px-3 rounded-full text-xs font-bold transition-all shadow-sm bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 hover:bg-emerald-500/20 dark:text-emerald-400"
-                  >
-                    Pro Active • Manage
-                  </button>
-                ) : isLimitReached ? (
-                  <div className="relative p-[1.5px] rounded-full overflow-hidden shadow-[0_0_20px_rgba(255,107,0,0.38)] group">
-                    {/* Slow-motion rolling light orangish glow beam */}
-                    <div 
-                      className="absolute inset-[-150%] bg-[conic-gradient(from_0deg,transparent_0_300deg,#fff2e5_330deg,#ffa040_348deg,#ff6b00_360deg)] animate-spin"
-                      style={{ animationDuration: '9s' }}
-                    />
-                    <button 
-                      onClick={() => setIsBillingModalOpen(true)}
-                      className="relative w-full py-2 px-3 rounded-full bg-slate-950 dark:bg-black text-white text-xs font-extrabold flex items-center justify-center gap-1.5 hover:bg-slate-900 transition-colors tracking-wide"
-                    >
-                      <Sparkles size={13} className="text-voiceflow-orange fill-voiceflow-orange animate-pulse" />
-                      <span className="font-nexa font-bold">Upgrade</span>
-                    </button>
-                  </div>
-                ) : (
-                  <button 
-                    onClick={() => setIsBillingModalOpen(true)}
-                    className="w-full py-1.5 px-3 rounded-full text-xs font-bold transition-all shadow-sm border border-voiceflow-orange text-voiceflow-orange hover:bg-orange-50 dark:hover:bg-orange-500/10"
-                  >
-                    Upgrade to Pro
-                  </button>
-                )}
-              </>
-            ) : (
-              <div className="flex flex-col items-center gap-2">
-                {isLimitReached && !isPro ? (
-                  <div className="relative p-[1.5px] rounded-full overflow-hidden shadow-[0_0_16px_rgba(255,107,0,0.35)]">
-                    <div 
-                      className="absolute inset-[-150%] bg-[conic-gradient(from_0deg,transparent_0_300deg,#fff2e5_330deg,#ffa040_348deg,#ff6b00_360deg)] animate-spin"
-                      style={{ animationDuration: '9s' }}
-                    />
-                    <button
-                      onClick={() => setIsBillingModalOpen(true)}
-                      title="Upgrade"
-                      className="relative w-10 h-10 rounded-full flex items-center justify-center bg-slate-950 dark:bg-black text-voiceflow-orange hover:scale-105 transition-all"
-                    >
-                      <Sparkles size={16} className="fill-voiceflow-orange" />
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setIsBillingModalOpen(true)}
-                    title={isPro ? "Voiceflow Pro Active" : "Upgrade to Pro"}
-                    className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
-                      isPro 
-                        ? "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 hover:scale-105"
-                        : "bg-orange-500/10 text-voiceflow-orange border border-voiceflow-orange/30 hover:scale-105"
-                    }`}
-                  >
-                    <Sparkles size={16} />
-                  </button>
-                )}
+
+                {/* Explanatory copy */}
+                <p className="text-xs font-semibold text-stone-800 dark:text-stone-200 leading-snug">
+                  {isPro 
+                    ? 'Your credits are unlimited.' 
+                    : availableCredits === maxMinutes 
+                      ? 'Your credits are full.' 
+                      : availableCredits === 0 
+                        ? 'Monthly credits depleted.' 
+                        : `${availableCredits} credits remaining.`}
+                </p>
+                <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-1 leading-snug">
+                  {isPro
+                    ? 'Pro includes unlimited recording, AI summaries & live assistance.'
+                    : `A meeting uses 1 credit per min. Free includes ${maxMinutes} a month.`}
+                </p>
+
+                {/* Pill action button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSettingsTab('billing');
+                    setIsSettingsModalOpen(true);
+                  }}
+                  className="w-full mt-3 py-2 px-3 rounded-full bg-[#F3F4F6] hover:bg-[#E5E7EB] dark:bg-stone-800 dark:hover:bg-stone-700/80 text-stone-700 dark:text-stone-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <span>View usage</span>
+                  <ChevronRight size={13} className="text-stone-500" />
+                </button>
+
+                {/* Secondary link */}
+                <button
+                  type="button"
+                  onClick={() => setIsBillingModalOpen(true)}
+                  className="w-full text-center text-xs font-semibold text-[#0D6B5C] dark:text-[#2dd4bf] hover:underline mt-2.5 transition-colors cursor-pointer"
+                >
+                  Learn more
+                </button>
               </div>
-            )}
-          </div>
+
+              {/* Card 2: Subscription Card */}
+              <div className="rounded-2xl border border-stone-200/90 bg-[#F4F9F8] p-3.5 shadow-xs dark:bg-[#121B19] dark:border-stone-800">
+                <div className="flex items-start gap-2.5">
+                  <div className="w-10 h-10 rounded-2xl bg-[#0D6B5C] dark:bg-[#134E44] flex items-center justify-center text-white shrink-0 shadow-xs relative">
+                    <Crown size={18} className="text-white" />
+                    <span className="absolute -top-1 -right-0.5 text-[9px] font-black text-emerald-300 leading-none">
+                      +
+                    </span>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h4 className="font-bold text-xs text-stone-900 dark:text-stone-100 truncate leading-tight">
+                      {isPro ? 'Voiceflow Pro' : 'Voiceflow Pro'}
+                    </h4>
+                    <p className="text-xs font-bold text-[#0D6B5C] dark:text-[#2dd4bf] mt-0.5">
+                      {formatPrice(12500, 11.99)} per month
+                    </p>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-stone-600 dark:text-stone-400 mt-2.5 leading-relaxed">
+                  {isPro
+                    ? 'All premium AI features, private notes & screen intelligence active.'
+                    : 'More room across every meeting and transcription tool.'}
+                </p>
+
+                <button
+                  type="button"
+                  onClick={() => setIsBillingModalOpen(true)}
+                  className="w-full mt-3 py-2 px-3 rounded-full border border-[#0D6B5C]/35 bg-[#E8F5F2] hover:bg-[#D4EFE9] dark:bg-[#0D6B5C]/20 dark:border-[#0D6B5C]/40 text-[#0D6B5C] dark:text-teal-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+                >
+                  <span>{isPro ? 'Manage Pro' : 'Choose Pro'}</span>
+                  <Zap size={12} className="text-[#0D6B5C] dark:text-teal-300 fill-current" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleInviteFriends}
+                  className="w-full text-center text-xs text-stone-500 hover:text-stone-800 dark:text-stone-400 dark:hover:text-stone-200 font-medium hover:underline mt-2.5 transition-colors cursor-pointer"
+                >
+                  Invite friends
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-2.5">
+              {/* Compact Credits */}
+              <button
+                type="button"
+                onClick={() => {
+                  setSettingsTab('billing');
+                  setIsSettingsModalOpen(true);
+                }}
+                title={`Voiceflow Credits: ${isPro ? 'Unlimited' : `${availableCredits}/${maxMinutes}`}`}
+                className="w-10 h-10 rounded-xl bg-white dark:bg-[#18181B] border border-stone-200 dark:border-stone-800 flex flex-col items-center justify-center shadow-xs hover:border-[#0D6B5C] transition-all cursor-pointer"
+              >
+                <Coins size={16} className="text-[#0D6B5C] dark:text-[#2dd4bf]" />
+                <span className="text-[9px] font-black text-[#0D6B5C] dark:text-[#2dd4bf] leading-none mt-0.5">
+                  {isPro ? '∞' : availableCredits}
+                </span>
+              </button>
+
+              {/* Compact Pro */}
+              <button
+                type="button"
+                onClick={() => setIsBillingModalOpen(true)}
+                title={isPro ? "Voiceflow Pro Active • Manage" : "Voiceflow Pro • Choose Plan"}
+                className="w-10 h-10 rounded-xl bg-[#0D6B5C] dark:bg-[#134E44] text-white flex items-center justify-center shadow-xs hover:opacity-90 transition-all relative cursor-pointer"
+              >
+                <Crown size={17} className="text-white" />
+                <span className="absolute -top-1 -right-0.5 text-[9px] font-black text-emerald-300 leading-none">
+                  +
+                </span>
+              </button>
+            </div>
+          )}
         </div>
       </aside>
 

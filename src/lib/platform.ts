@@ -216,6 +216,14 @@ export async function openExternal(url: string): Promise<void> {
   if (isNativeApp()) {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
+      // 1. First attempt native Rust open_url command (handles https, mailto, etc. reliably without scope restrictions)
+      try {
+        await invoke('open_url', { url });
+        return;
+      } catch (nativeErr) {
+        console.warn('Native open_url failed, falling back to shell plugin:', nativeErr);
+      }
+
       const deepLink = storeProtocol(url);
       if (deepLink) {
         try {

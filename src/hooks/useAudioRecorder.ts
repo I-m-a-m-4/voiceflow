@@ -3,6 +3,7 @@ import { useUser } from "@/firebase/provider";
 import { saveMeeting } from "@/firebase/meetings";
 import { apiBase } from "@/lib/platform";
 import { recordDeviceSession } from "@/lib/device-fingerprint";
+import { copyToClipboard } from "@/lib/clipboard";
 
 const SILENCE_THRESHOLD = 5; // Very low volume threshold (0-255 scale)
 const SILENCE_DURATION = 2000; // 2 seconds of silence before pausing
@@ -468,7 +469,7 @@ export function useAudioRecorder() {
 
       // 4. Auto Copy to Clipboard
       if (type === "dictation") {
-        await navigator.clipboard.writeText(finalOutput);
+        await copyToClipboard(finalOutput);
       }
       
     } catch (err) {

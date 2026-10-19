@@ -25,5 +25,15 @@ fn main() {
       let _ = std::io::stdin().read_line(&mut input);
   }));
 
+  #[cfg(target_os = "windows")]
+  {
+      if std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").is_err() {
+          std::env::set_var(
+              "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+              "--enable-features=ClipboardSanitizedWrite --disable-features=PermissionPrompt",
+          );
+      }
+  }
+
   app_lib::run();
 }

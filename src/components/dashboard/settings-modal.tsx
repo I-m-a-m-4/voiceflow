@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { 
@@ -35,6 +36,7 @@ interface SettingsModalProps {
 }
 
 export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: SettingsModalProps) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState(initialTab || 'general');
   const { theme, setTheme } = useTheme();
   const auth = useAuth();
@@ -1309,14 +1311,16 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
                     <Gift className="text-voiceflow-orange" size={22} />
                     Dash People Credit
                   </h2>
-                  <a
-                    href="/admin-imamshaffy/users"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-xs text-voiceflow-orange hover:underline font-semibold"
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      router.push('/admin-imamshaffy/users');
+                    }}
+                    className="text-xs text-voiceflow-orange hover:underline font-semibold flex items-center gap-1 cursor-pointer bg-transparent border-0 p-0"
                   >
                     Open Full Admin Portal →
-                  </a>
+                  </button>
                 </div>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
                   As the Voiceflow founder, you can gift Lifetime Pro, bonus minutes, or reset usage for any user by their email address.
