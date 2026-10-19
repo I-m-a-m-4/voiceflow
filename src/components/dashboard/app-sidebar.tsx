@@ -156,7 +156,7 @@ export default function AppSidebar() {
         </div>
 
         {/* Main Navigation */}
-        <nav className="px-2 mt-2 space-y-1">
+        <nav className="px-2.5 mt-5 space-y-1.5">
           {navItems.map((item) => {
             const isActive = item.href === '/dashboard' 
               ? pathname === '/dashboard' 
