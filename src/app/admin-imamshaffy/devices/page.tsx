@@ -14,25 +14,40 @@ import {
 import { 
   Laptop, 
   ShieldAlert, 
-  ShieldCheck, 
   AlertTriangle, 
   Sparkles, 
   RefreshCw, 
   Search, 
-  Filter, 
   Globe, 
   Mail, 
-  Clock, 
   Lock, 
   Unlock, 
   Trash2, 
-  UserCheck, 
-  ExternalLink,
   ChevronRight,
-  Info
+  UserCheck,
+  CheckCircle2,
+  Copy,
+  Check
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { 
+  Card, 
+  CardContent, 
+  CardHeader, 
+  CardTitle, 
+  CardDescription 
+} from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogHeader, 
+  DialogTitle, 
+  DialogDescription, 
+  DialogFooter 
+} from '@/components/ui/dialog';
 
 export interface DeviceRecord {
   id: string;
@@ -59,21 +74,23 @@ export default function AdminDevicesPage() {
   const { toast } = useToast();
 
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMode, setFilterMode] = useState<'all' | 'hoppers' | 'exhausted' | 'pro'>('all');
+  const [copiedEmail, setCopiedEmail] = useState<string | null>(null);
   
   // Selected device for modal inspection & management
-  const [selectedDevice, setSelectedDevice] = useState<DeviceRecord | null>(null);
+  const [selectedDevice, setSelectedDevice] = useState<any | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
-  // Real-time listener for devices collection
+  // Real-time listener for devices & users collections
   useEffect(() => {
     if (!firestore) return;
     setLoading(true);
 
-    const unsubscribe = onSnapshot(collection(firestore, 'devices'), (snapshot) => {
+    const unsubDevices = onSnapshot(collection(firestore, 'devices'), (snapshot) => {
       const records: DeviceRecord[] = snapshot.docs.map((d) => ({
         id: d.id,
         ...(d.data() as any),
@@ -93,18 +110,99 @@ export default function AdminDevicesPage() {
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    const unsubUsers = onSnapshot(collection(firestore, 'users'), (snapshot) => {
+      const uList = snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+      setUsers(uList);
+    }, (err) => {
+      console.error('Failed to load users for device matching:', err);
+    });
+
+    return () => {
+      unsubDevices();
+      unsubUsers();
+    };
   }, [firestore]);
+
+  // Helper to cross-reference and discover all emails tied to a device
+  const getDeviceEmails = (dev: DeviceRecord): string[] => {
+    const emailSet = new Set<string>();
+
+    if (dev.primaryEmail && dev.primaryEmail.trim()) {
+      emailSet.add(dev.primaryEmail.toLowerCase().trim());
+    }
+    if (Array.isArray(dev.registeredEmails)) {
+      dev.registeredEmails.forEach((e) => {
+        if (e && typeof e === 'string' && e.trim()) {
+          emailSet.add(e.toLowerCase().trim());
+        }
+      });
+    }
+
+    // Cross-reference with all users from users collection
+    users.forEach((u) => {
+      if (!u.email) return;
+      const cleanEmail = u.email.toLowerCase().trim();
+
+      const matchesDeviceId = 
+        u.deviceId === dev.id || 
+        u.deviceId === dev.deviceId ||
+        (u.deviceId && dev.id && (u.deviceId.includes(dev.id) || dev.id.includes(u.deviceId)));
+
+      const matchesUid = 
+        u.id === dev.primaryUid || 
+        (Array.isArray(dev.registeredUids) && dev.registeredUids.includes(u.id));
+
+      const matchesIp = u.ip && dev.ip && u.ip === dev.ip;
+
+      if (matchesDeviceId || matchesUid || matchesIp) {
+        emailSet.add(cleanEmail);
+      }
+    });
+
+    return Array.from(emailSet);
+  };
+
+  // Enriched devices with real resolved emails
+  const enrichedDevices = useMemo(() => {
+    return devices.map((dev) => {
+      const allEmails = getDeviceEmails(dev);
+      return {
+        ...dev,
+        resolvedEmails: allEmails,
+        isHopper: allEmails.length > 1,
+      };
+    });
+  }, [devices, users]);
+
+  // Automatic backfill: persist discovered emails onto device docs in Firestore
+  useEffect(() => {
+    if (!firestore || enrichedDevices.length === 0 || users.length === 0) return;
+
+    enrichedDevices.forEach(async (dev) => {
+      if (dev.resolvedEmails.length > 0) {
+        const storedEmails = Array.isArray(dev.registeredEmails) ? dev.registeredEmails : [];
+        const hasMissing = dev.resolvedEmails.some((e) => !storedEmails.includes(e));
+        if (hasMissing) {
+          try {
+            await updateDoc(doc(firestore, 'devices', dev.id), {
+              registeredEmails: dev.resolvedEmails,
+              primaryEmail: dev.primaryEmail || dev.resolvedEmails[0],
+            });
+          } catch {}
+        }
+      }
+    });
+  }, [enrichedDevices, firestore, users]);
 
   // Derived metrics
   const stats = useMemo(() => {
-    const totalDevices = devices.length;
-    const multiAccountDevices = devices.filter((d) => (d.registeredEmails && d.registeredEmails.length > 1));
-    const trialExhaustedDevices = devices.filter((d) => {
+    const totalDevices = enrichedDevices.length;
+    const multiAccountDevices = enrichedDevices.filter((d) => d.isHopper);
+    const trialExhaustedDevices = enrichedDevices.filter((d) => {
       const isPro = d.hasPro === true || d.isPro === true;
       return !isPro && (d.trialExceeded === true || (d.sessionCount || 0) >= 3 || (d.usedMinutes || 0) >= 30);
     });
-    const proDevices = devices.filter((d) => d.hasPro === true || d.isPro === true);
+    const proDevices = enrichedDevices.filter((d) => d.hasPro === true || d.isPro === true);
 
     return {
       totalDevices,
@@ -112,11 +210,11 @@ export default function AdminDevicesPage() {
       trialExhaustedCount: trialExhaustedDevices.length,
       proCount: proDevices.length,
     };
-  }, [devices]);
+  }, [enrichedDevices]);
 
   // Filtered devices
   const filteredDevices = useMemo(() => {
-    return devices.filter((d) => {
+    return enrichedDevices.filter((d) => {
       // 1. Text search
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
@@ -124,7 +222,7 @@ export default function AdminDevicesPage() {
         const matchesIp = d.ip?.toLowerCase().includes(q);
         const matchesPlatform = d.platform?.toLowerCase().includes(q);
         const matchesPrimary = d.primaryEmail?.toLowerCase().includes(q);
-        const matchesAnyEmail = d.registeredEmails?.some((em) => em.toLowerCase().includes(q));
+        const matchesAnyEmail = d.resolvedEmails?.some((em: string) => em.toLowerCase().includes(q));
 
         if (!matchesId && !matchesIp && !matchesPlatform && !matchesPrimary && !matchesAnyEmail) {
           return false;
@@ -134,7 +232,7 @@ export default function AdminDevicesPage() {
       // 2. Filter mode
       const isPro = d.hasPro === true || d.isPro === true;
       const isExhausted = !isPro && (d.trialExceeded === true || (d.sessionCount || 0) >= 3 || (d.usedMinutes || 0) >= 30);
-      const isHopper = (d.registeredEmails && d.registeredEmails.length > 1);
+      const isHopper = d.isHopper;
 
       if (filterMode === 'hoppers') return isHopper;
       if (filterMode === 'exhausted') return isExhausted;
@@ -142,10 +240,10 @@ export default function AdminDevicesPage() {
 
       return true;
     });
-  }, [devices, searchQuery, filterMode]);
+  }, [enrichedDevices, searchQuery, filterMode]);
 
   // Actions
-  const handleResetDeviceTrial = async (dev: DeviceRecord) => {
+  const handleResetDeviceTrial = async (dev: any) => {
     if (!firestore) return;
     setActionLoading(true);
     try {
@@ -167,7 +265,7 @@ export default function AdminDevicesPage() {
     }
   };
 
-  const handleLockDevice = async (dev: DeviceRecord) => {
+  const handleLockDevice = async (dev: any) => {
     if (!firestore) return;
     setActionLoading(true);
     try {
@@ -189,7 +287,7 @@ export default function AdminDevicesPage() {
     }
   };
 
-  const handleTogglePro = async (dev: DeviceRecord) => {
+  const handleTogglePro = async (dev: any) => {
     if (!firestore) return;
     setActionLoading(true);
     const newPro = !(dev.hasPro === true || dev.isPro === true);
@@ -212,7 +310,7 @@ export default function AdminDevicesPage() {
     }
   };
 
-  const handleDeleteDevice = async (dev: DeviceRecord) => {
+  const handleDeleteDevice = async (dev: any) => {
     if (!firestore) return;
     if (!window.confirm(`Are you sure you want to delete device record ${dev.id}?`)) return;
     setActionLoading(true);
@@ -230,6 +328,13 @@ export default function AdminDevicesPage() {
     }
   };
 
+  const copyEmailToClipboard = (email: string) => {
+    navigator.clipboard.writeText(email);
+    setCopiedEmail(email);
+    toast({ title: 'Copied', description: `${email} copied to clipboard.` });
+    setTimeout(() => setCopiedEmail(null), 2000);
+  };
+
   const formatDate = (val: any) => {
     if (!val) return 'Never';
     const date = val?.toDate ? val.toDate() : new Date(val);
@@ -243,19 +348,19 @@ export default function AdminDevicesPage() {
   };
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="p-4 sm:p-6 md:p-8 w-full max-w-[1800px] mx-auto space-y-6 animate-fade-in font-jakarta">
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-orange-500/10 dark:bg-orange-500/20 rounded-xl text-voiceflow-orange">
-              <ShieldAlert size={24} />
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-orange-500/10 dark:bg-orange-500/20 rounded-2xl text-voiceflow-orange">
+              <ShieldAlert size={28} />
             </div>
             <div>
-              <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white font-clash">
+              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground font-clash">
                 Hardware Fraud Shield & Device Trial Ledger
               </h1>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
+              <p className="text-sm text-muted-foreground mt-0.5">
                 Permanent machine fingerprinting & multi-account evasion tracking.
               </p>
             </div>
@@ -263,355 +368,383 @@ export default function AdminDevicesPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          <button
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => {
               if (firestore) {
                 setLoading(true);
-                getDocs(collection(firestore, 'devices')).then((snap) => {
-                  setDevices(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })));
+                Promise.all([
+                  getDocs(collection(firestore, 'devices')),
+                  getDocs(collection(firestore, 'users'))
+                ]).then(([dSnap, uSnap]) => {
+                  setDevices(dSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })));
+                  setUsers(uSnap.docs.map((u) => ({ id: u.id, ...(u.data() as any) })));
                   setLoading(false);
+                  toast({ title: 'Ledger Refreshed', description: 'Updated device and user bindings.' });
                 });
               }
             }}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-gray-100 hover:bg-gray-200 dark:bg-muted dark:hover:bg-muted/80 text-gray-700 dark:text-gray-300 transition-colors"
+            className="gap-2"
           >
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
             Refresh Ledger
-          </button>
+          </Button>
         </div>
       </div>
 
-      {/* Metrics Row */}
+      {/* Metrics Row - Styled cleanly with Card */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-4 rounded-2xl bg-white dark:bg-card border border-gray-200 dark:border-border shadow-sm flex items-center justify-between">
-          <div>
-            <div className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+        <Card className="border border-border/80 shadow-xs hover:shadow-sm transition-all bg-card">
+          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+            <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
               Unique Machines
+            </CardTitle>
+            <div className="p-2 bg-blue-500/10 rounded-xl text-blue-600 dark:text-blue-400">
+              <Laptop size={18} />
             </div>
-            <div className="text-2xl font-black text-gray-900 dark:text-white mt-1">
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-black tracking-tight text-foreground font-clash">
               {stats.totalDevices}
             </div>
-            <div className="text-[11px] text-gray-500 mt-0.5">Identified hardware fingerprints</div>
-          </div>
-          <div className="p-3 bg-blue-50 dark:bg-blue-500/10 rounded-2xl text-blue-600 dark:text-blue-400">
-            <Laptop size={22} />
-          </div>
-        </div>
+            <p className="text-xs text-muted-foreground mt-1">Identified hardware fingerprints</p>
+          </CardContent>
+        </Card>
 
-        <div className="p-4 rounded-2xl bg-white dark:bg-card border border-red-200 dark:border-red-900/30 shadow-sm flex items-center justify-between">
-          <div>
-            <div className="text-xs font-bold uppercase tracking-wider text-red-600 dark:text-red-400 flex items-center gap-1">
-              <AlertTriangle size={13} /> Multi-Account Hoppers
+        <Card className="border border-red-200/80 dark:border-red-900/40 shadow-xs hover:shadow-sm transition-all bg-card">
+          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+            <CardTitle className="text-xs font-bold uppercase tracking-wider text-red-600 dark:text-red-400 flex items-center gap-1.5">
+              <AlertTriangle size={14} /> Multi-Account Hoppers
+            </CardTitle>
+            <div className="p-2 bg-red-500/10 rounded-xl text-red-600 dark:text-red-400">
+              <ShieldAlert size={18} />
             </div>
-            <div className="text-2xl font-black text-red-600 dark:text-red-400 mt-1">
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-black tracking-tight text-red-600 dark:text-red-400 font-clash">
               {stats.multiAccountCount}
             </div>
-            <div className="text-[11px] text-gray-500 mt-0.5">Machines with 2+ Gmail accounts</div>
-          </div>
-          <div className="p-3 bg-red-50 dark:bg-red-500/10 rounded-2xl text-red-600 dark:text-red-400">
-            <ShieldAlert size={22} />
-          </div>
-        </div>
+            <p className="text-xs text-muted-foreground mt-1">Machines with 2+ Gmail accounts</p>
+          </CardContent>
+        </Card>
 
-        <div className="p-4 rounded-2xl bg-white dark:bg-card border border-orange-200 dark:border-orange-900/30 shadow-sm flex items-center justify-between">
-          <div>
-            <div className="text-xs font-bold uppercase tracking-wider text-voiceflow-orange">
+        <Card className="border border-orange-200/80 dark:border-orange-900/40 shadow-xs hover:shadow-sm transition-all bg-card">
+          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+            <CardTitle className="text-xs font-bold uppercase tracking-wider text-voiceflow-orange">
               Trials Exhausted
+            </CardTitle>
+            <div className="p-2 bg-orange-500/10 rounded-xl text-voiceflow-orange">
+              <Lock size={18} />
             </div>
-            <div className="text-2xl font-black text-voiceflow-orange mt-1">
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-black tracking-tight text-voiceflow-orange font-clash">
               {stats.trialExhaustedCount}
             </div>
-            <div className="text-[11px] text-gray-500 mt-0.5">Hit 30m / 3s limit (locked)</div>
-          </div>
-          <div className="p-3 bg-orange-50 dark:bg-orange-500/10 rounded-2xl text-voiceflow-orange">
-            <Lock size={22} />
-          </div>
-        </div>
+            <p className="text-xs text-muted-foreground mt-1">Hit 30m / 3s limit (locked)</p>
+          </CardContent>
+        </Card>
 
-        <div className="p-4 rounded-2xl bg-white dark:bg-card border border-emerald-200 dark:border-emerald-900/30 shadow-sm flex items-center justify-between">
-          <div>
-            <div className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+        <Card className="border border-emerald-200/80 dark:border-emerald-900/40 shadow-xs hover:shadow-sm transition-all bg-card">
+          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+            <CardTitle className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
               Pro Machines
+            </CardTitle>
+            <div className="p-2 bg-emerald-500/10 rounded-xl text-emerald-600 dark:text-emerald-400">
+              <Sparkles size={18} />
             </div>
-            <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1">
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-black tracking-tight text-emerald-600 dark:text-emerald-400 font-clash">
               {stats.proCount}
             </div>
-            <div className="text-[11px] text-gray-500 mt-0.5">Active paid subscriptions</div>
-          </div>
-          <div className="p-3 bg-emerald-50 dark:bg-emerald-500/10 rounded-2xl text-emerald-600 dark:text-emerald-400">
-            <Sparkles size={22} />
-          </div>
-        </div>
+            <p className="text-xs text-muted-foreground mt-1">Active paid subscriptions</p>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Multi-Account Hoppers Callout Radar */}
+      {/* Multi-Account Hoppers Radar Callout Card */}
       {stats.multiAccountCount > 0 && (
-        <div className="p-4 rounded-2xl bg-gradient-to-r from-red-500/10 via-orange-500/10 to-amber-500/10 border border-red-500/30">
-          <div className="flex items-center gap-2 mb-2">
-            <AlertTriangle className="text-red-600 dark:text-red-400 shrink-0" size={18} />
-            <h3 className="text-sm font-bold text-red-900 dark:text-red-300">
-              Multi-Account Evasion Radar Active ({stats.multiAccountCount} laptops flagged)
-            </h3>
-          </div>
-          <p className="text-xs text-red-800 dark:text-red-300/80 mb-3">
-            These physical machines attempted to create or login with multiple Gmail accounts to bypass the 30-minute / 3-session free trial limit. Our hardware fingerprinting automatically enforces the limit across all subsequent accounts on these machines.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {devices
-              .filter((d) => d.registeredEmails && d.registeredEmails.length > 1)
-              .slice(0, 6)
-              .map((d) => (
-                <div
-                  key={d.id}
-                  onClick={() => {
-                    setSelectedDevice(d);
-                    setIsDetailOpen(true);
-                  }}
-                  className="cursor-pointer bg-white/80 dark:bg-card/80 hover:bg-white dark:hover:bg-card border border-red-200 dark:border-red-800/40 px-3 py-1.5 rounded-xl text-xs flex items-center gap-2 shadow-xs transition-all"
-                >
-                  <Laptop size={13} className="text-red-500" />
-                  <span className="font-mono font-bold text-[11px] text-gray-900 dark:text-gray-200">
-                    {d.id.slice(0, 16)}...
-                  </span>
-                  <span className="bg-red-100 dark:bg-red-900/50 text-red-800 dark:text-red-300 px-1.5 py-0.5 rounded-full font-bold text-[10px]">
-                    {d.registeredEmails?.length} emails
-                  </span>
-                </div>
-              ))}
-          </div>
-        </div>
+        <Card className="border border-red-500/30 bg-gradient-to-r from-red-500/10 via-orange-500/5 to-transparent shadow-xs">
+          <CardContent className="p-4 sm:p-5">
+            <div className="flex items-center gap-2 mb-1.5">
+              <AlertTriangle className="text-red-600 dark:text-red-400 shrink-0" size={18} />
+              <h3 className="text-sm font-bold text-red-900 dark:text-red-300">
+                Multi-Account Evasion Radar Active ({stats.multiAccountCount} laptops flagged)
+              </h3>
+            </div>
+            <p className="text-xs text-red-800/90 dark:text-red-300/80 mb-3 leading-relaxed">
+              These physical machines attempted to create or login with multiple Gmail accounts to bypass the 30-minute / 3-session free trial limit. Our hardware fingerprinting automatically enforces the limit across all subsequent accounts on these machines.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {enrichedDevices
+                .filter((d) => d.isHopper)
+                .slice(0, 6)
+                .map((d) => (
+                  <div
+                    key={d.id}
+                    onClick={() => {
+                      setSelectedDevice(d);
+                      setIsDetailOpen(true);
+                    }}
+                    className="cursor-pointer bg-card hover:bg-muted/80 border border-red-200 dark:border-red-800/50 px-3 py-1.5 rounded-xl text-xs flex items-center gap-2 shadow-xs transition-all"
+                  >
+                    <Laptop size={13} className="text-red-500" />
+                    <span className="font-mono font-bold text-[11px] text-foreground">
+                      {d.id.slice(0, 16)}...
+                    </span>
+                    <Badge variant="destructive" className="text-[10px] py-0 px-1.5 font-bold">
+                      {d.resolvedEmails?.length} emails
+                    </Badge>
+                  </div>
+                ))}
+            </div>
+          </CardContent>
+        </Card>
       )}
 
-      {/* Filter and Search Bar */}
-      <div className="flex flex-col sm:flex-row gap-3 items-center justify-between bg-white dark:bg-card p-3 rounded-2xl border border-gray-200 dark:border-border shadow-xs">
-        <div className="relative w-full sm:w-80">
-          <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search by device ID, IP, or email..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-4 py-1.5 text-xs bg-gray-50 dark:bg-muted border border-gray-200 dark:border-border rounded-xl focus:outline-hidden focus:ring-1 focus:ring-voiceflow-orange text-gray-900 dark:text-white"
-          />
-        </div>
+      {/* Main Ledger Card */}
+      <Card className="border border-border/80 shadow-xs bg-card overflow-hidden">
+        <CardHeader className="p-4 sm:p-5 border-b border-border/60 bg-muted/20">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            {/* Search Input */}
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground w-4 h-4" />
+              <Input
+                type="text"
+                placeholder="Search by device ID, IP, or email..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 h-9 text-xs bg-background"
+              />
+            </div>
 
-        <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
-          <button
-            onClick={() => setFilterMode('all')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-              filterMode === 'all'
-                ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900'
-                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-muted'
-            }`}
-          >
-            All ({devices.length})
-          </button>
-          <button
-            onClick={() => setFilterMode('hoppers')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${
-              filterMode === 'hoppers'
-                ? 'bg-red-600 text-white'
-                : 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10'
-            }`}
-          >
-            <AlertTriangle size={12} /> Hoppers ({stats.multiAccountCount})
-          </button>
-          <button
-            onClick={() => setFilterMode('exhausted')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${
-              filterMode === 'exhausted'
-                ? 'bg-voiceflow-orange text-white'
-                : 'text-voiceflow-orange hover:bg-orange-50 dark:hover:bg-orange-500/10'
-            }`}
-          >
-            <Lock size={12} /> Limit Reached ({stats.trialExhaustedCount})
-          </button>
-          <button
-            onClick={() => setFilterMode('pro')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${
-              filterMode === 'pro'
-                ? 'bg-emerald-600 text-white'
-                : 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-500/10'
-            }`}
-          >
-            <Sparkles size={12} /> Pro ({stats.proCount})
-          </button>
-        </div>
-      </div>
+            {/* Filter Pills */}
+            <div className="flex items-center gap-1.5 overflow-x-auto">
+              <Button
+                variant={filterMode === 'all' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setFilterMode('all')}
+                className="h-8 text-xs font-semibold px-3"
+              >
+                All ({enrichedDevices.length})
+              </Button>
+              <Button
+                variant={filterMode === 'hoppers' ? 'destructive' : 'outline'}
+                size="sm"
+                onClick={() => setFilterMode('hoppers')}
+                className="h-8 text-xs font-semibold px-3 gap-1.5"
+              >
+                <AlertTriangle size={12} /> Hoppers ({stats.multiAccountCount})
+              </Button>
+              <Button
+                variant={filterMode === 'exhausted' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setFilterMode('exhausted')}
+                className={`h-8 text-xs font-semibold px-3 gap-1.5 ${filterMode === 'exhausted' ? 'bg-voiceflow-orange hover:bg-orange-600 text-white' : ''}`}
+              >
+                <Lock size={12} /> Limit Reached ({stats.trialExhaustedCount})
+              </Button>
+              <Button
+                variant={filterMode === 'pro' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setFilterMode('pro')}
+                className={`h-8 text-xs font-semibold px-3 gap-1.5 ${filterMode === 'pro' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : ''}`}
+              >
+                <Sparkles size={12} /> Pro ({stats.proCount})
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
 
-      {/* Main Ledger Table */}
-      {loading ? (
-        <div className="p-16 text-center text-gray-500 bg-white dark:bg-card rounded-2xl border border-gray-200 dark:border-border">
-          <RefreshCw size={24} className="animate-spin mx-auto mb-2 text-voiceflow-orange" />
-          Loading hardware ledger...
-        </div>
-      ) : filteredDevices.length === 0 ? (
-        <div className="p-16 text-center text-gray-500 bg-white dark:bg-card rounded-2xl border border-gray-200 dark:border-border">
-          <Laptop size={32} className="mx-auto mb-2 text-gray-400 opacity-60" />
-          <p className="font-semibold text-gray-700 dark:text-gray-300">No matching devices found</p>
-          <p className="text-xs text-gray-400 mt-1">Try modifying your search or filter query.</p>
-        </div>
-      ) : (
-        <div className="border border-gray-200 dark:border-border rounded-2xl overflow-hidden bg-white dark:bg-card shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm border-collapse">
-              <thead className="bg-gray-50/80 dark:bg-muted/50 border-b border-gray-200 dark:border-border text-gray-700 dark:text-gray-300 text-[11px] font-bold uppercase tracking-wider">
-                <tr>
-                  <th className="p-3.5">Device & Hardware ID</th>
-                  <th className="p-3.5">IP & Platform</th>
-                  <th className="p-3.5">Registered Emails</th>
-                  <th className="p-3.5">Usage (Sessions / Mins)</th>
-                  <th className="p-3.5">Trial Status</th>
-                  <th className="p-3.5">Last Active</th>
-                  <th className="p-3.5 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-border text-xs">
-                {filteredDevices.map((dev) => {
-                  const isPro = dev.hasPro === true || dev.isPro === true;
-                  const isExhausted = !isPro && (dev.trialExceeded === true || (dev.sessionCount || 0) >= 3 || (dev.usedMinutes || 0) >= 30);
-                  const isHopper = dev.registeredEmails && dev.registeredEmails.length > 1;
-                  const sessions = dev.sessionCount || 0;
-                  const mins = dev.usedMinutes || 0;
+        <CardContent className="p-0">
+          {loading ? (
+            <div className="p-16 text-center text-muted-foreground">
+              <RefreshCw size={24} className="animate-spin mx-auto mb-2 text-voiceflow-orange" />
+              Loading hardware ledger & user bindings...
+            </div>
+          ) : filteredDevices.length === 0 ? (
+            <div className="p-16 text-center text-muted-foreground">
+              <Laptop size={32} className="mx-auto mb-2 opacity-50" />
+              <p className="font-semibold text-foreground">No matching devices found</p>
+              <p className="text-xs text-muted-foreground mt-1">Try modifying your search or filter query.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm border-collapse">
+                <thead className="bg-muted/40 border-b border-border text-muted-foreground text-[11px] font-bold uppercase tracking-wider">
+                  <tr>
+                    <th className="p-3.5">Device & Hardware ID</th>
+                    <th className="p-3.5">IP & Platform</th>
+                    <th className="p-3.5">Registered Emails</th>
+                    <th className="p-3.5">Usage (Sessions / Mins)</th>
+                    <th className="p-3.5">Trial Status</th>
+                    <th className="p-3.5">Last Active</th>
+                    <th className="p-3.5 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/60 text-xs">
+                  {filteredDevices.map((dev) => {
+                    const isPro = dev.hasPro === true || dev.isPro === true;
+                    const isExhausted = !isPro && (dev.trialExceeded === true || (dev.sessionCount || 0) >= 3 || (dev.usedMinutes || 0) >= 30);
+                    const isHopper = dev.isHopper;
+                    const sessions = dev.sessionCount || 0;
+                    const mins = dev.usedMinutes || 0;
+                    const emails = dev.resolvedEmails || [];
 
-                  return (
-                    <tr 
-                      key={dev.id} 
-                      className={`hover:bg-gray-50/80 dark:hover:bg-muted/30 transition-colors ${
-                        isHopper ? 'bg-red-500/5' : ''
-                      }`}
-                    >
-                      {/* Device & ID */}
-                      <td className="p-3.5">
-                        <div className="flex items-center gap-2">
-                          <div className={`p-2 rounded-xl shrink-0 ${
-                            isPro ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400' :
-                            isHopper ? 'bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400' :
-                            'bg-gray-100 text-gray-700 dark:bg-muted dark:text-gray-300'
-                          }`}>
-                            <Laptop size={16} />
-                          </div>
-                          <div>
-                            <div className="font-mono font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
-                              {dev.id.startsWith('hw_') ? (
-                                <>
-                                  <span className="text-[10px] bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300 px-1.5 py-0.2 rounded font-sans font-semibold">
-                                    MachineGuid
-                                  </span>
-                                  <span>{dev.id.replace('hw_', '').slice(0, 16)}...</span>
-                                </>
-                              ) : (
-                                <span>{dev.id.slice(0, 18)}...</span>
-                              )}
+                    return (
+                      <tr 
+                        key={dev.id} 
+                        className={`hover:bg-muted/30 transition-colors ${
+                          isHopper ? 'bg-red-500/[0.03]' : ''
+                        }`}
+                      >
+                        {/* Device & Hardware ID */}
+                        <td className="p-3.5">
+                          <div className="flex items-center gap-2.5">
+                            <div className={`p-2 rounded-xl shrink-0 ${
+                              isPro ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' :
+                              isHopper ? 'bg-red-500/10 text-red-600 dark:text-red-400' :
+                              'bg-muted text-muted-foreground'
+                            }`}>
+                              <Laptop size={17} />
                             </div>
-                            <div className="text-[10px] text-gray-400 font-sans mt-0.5 truncate max-w-[180px]">
-                              First seen: {formatDate(dev.firstSeen)}
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* IP & Platform */}
-                      <td className="p-3.5">
-                        <div className="flex items-center gap-1.5 text-gray-800 dark:text-gray-200 font-medium">
-                          <Globe size={13} className="text-gray-400 shrink-0" />
-                          <span className="font-mono text-[11px]">{dev.ip || 'Unknown'}</span>
-                        </div>
-                        <div className="text-[10px] text-gray-400 mt-0.5">
-                          {dev.platform || 'Desktop App'}
-                        </div>
-                      </td>
-
-                      {/* Registered Emails */}
-                      <td className="p-3.5">
-                        <div className="space-y-1 max-w-[240px]">
-                          {dev.registeredEmails && dev.registeredEmails.length > 0 ? (
-                            dev.registeredEmails.map((email, idx) => (
-                              <div 
-                                key={idx} 
-                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium mr-1.5 mb-0.5 ${
-                                  idx === 0 
-                                    ? 'bg-gray-100 text-gray-800 dark:bg-muted dark:text-gray-200' 
-                                    : 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300 border border-red-200 dark:border-red-800/40'
-                                }`}
-                              >
-                                <Mail size={11} className="shrink-0 opacity-70" />
-                                <span className="truncate max-w-[150px]">{email}</span>
-                                {idx > 0 && (
-                                  <span className="text-[9px] font-bold text-red-600 dark:text-red-400 uppercase">
-                                    (Hopper)
-                                  </span>
+                            <div>
+                              <div className="font-mono font-bold text-foreground flex items-center gap-1.5">
+                                {dev.id.startsWith('hw_') ? (
+                                  <>
+                                    <Badge variant="secondary" className="text-[10px] font-mono px-1.5 py-0">
+                                      MachineGuid
+                                    </Badge>
+                                    <span>{dev.id.replace('hw_', '').slice(0, 16)}...</span>
+                                  </>
+                                ) : (
+                                  <span>{dev.id.slice(0, 18)}...</span>
                                 )}
                               </div>
-                            ))
+                              <div className="text-[10px] text-muted-foreground font-sans mt-0.5 truncate max-w-[180px]">
+                                First seen: {formatDate(dev.firstSeen)}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* IP & Platform */}
+                        <td className="p-3.5">
+                          <div className="flex items-center gap-1.5 text-foreground font-medium">
+                            <Globe size={13} className="text-muted-foreground shrink-0" />
+                            <span className="font-mono text-[11px]">{dev.ip || 'Unknown'}</span>
+                          </div>
+                          <div className="text-[10px] text-muted-foreground mt-0.5">
+                            {dev.platform || 'Desktop App'}
+                          </div>
+                        </td>
+
+                        {/* Registered Emails - Live Resolved */}
+                        <td className="p-3.5">
+                          <div className="space-y-1 max-w-[280px]">
+                            {emails.length > 0 ? (
+                              emails.map((email: string, idx: number) => {
+                                const isCopied = copiedEmail === email;
+                                return (
+                                  <div 
+                                    key={idx} 
+                                    className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[11px] font-medium mr-1.5 mb-1 group transition-colors ${
+                                      idx === 0 
+                                        ? 'bg-muted text-foreground border border-border/80' 
+                                        : 'bg-red-50 text-red-800 dark:bg-red-950/40 dark:text-red-300 border border-red-200 dark:border-red-800/40'
+                                    }`}
+                                  >
+                                    <Mail size={11} className="shrink-0 opacity-70" />
+                                    <span className="truncate max-w-[180px] font-mono">{email}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => copyEmailToClipboard(email)}
+                                      title="Copy email"
+                                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity"
+                                    >
+                                      {isCopied ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                                    </button>
+                                    {idx > 0 && (
+                                      <span className="text-[9px] font-bold text-red-600 dark:text-red-400 uppercase tracking-tight">
+                                        (Hopper)
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })
+                            ) : (
+                              <span className="text-muted-foreground italic text-[11px]">No account recorded</span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Usage */}
+                        <td className="p-3.5">
+                          <div className="font-semibold text-foreground">
+                            {sessions}/3 sessions • {mins}/30 mins
+                          </div>
+                          <div className="w-24 bg-muted h-1.5 rounded-full mt-1.5 overflow-hidden">
+                            <div 
+                              className={`h-full ${
+                                isPro ? 'bg-emerald-500' : isExhausted ? 'bg-red-500' : 'bg-voiceflow-orange'
+                              }`}
+                              style={{ width: `${Math.min(100, Math.round((mins / 30) * 100))}%` }}
+                            />
+                          </div>
+                        </td>
+
+                        {/* Status */}
+                        <td className="p-3.5">
+                          {isPro ? (
+                            <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/20 border-emerald-500/30 gap-1 text-[11px]">
+                              <Sparkles size={11} /> Pro Active
+                            </Badge>
+                          ) : isExhausted ? (
+                            <Badge variant="destructive" className="gap-1 text-[11px]">
+                              <Lock size={11} /> Limit Reached
+                            </Badge>
                           ) : (
-                            <span className="text-gray-400 italic">No account recorded</span>
+                            <Badge variant="secondary" className="gap-1 text-[11px] text-blue-600 dark:text-blue-400 border-blue-500/30">
+                              <Unlock size={11} /> Trial Active
+                            </Badge>
                           )}
-                        </div>
-                      </td>
+                        </td>
 
-                      {/* Usage */}
-                      <td className="p-3.5">
-                        <div className="font-semibold text-gray-900 dark:text-white">
-                          {sessions}/3 sessions • {mins}/30 mins
-                        </div>
-                        <div className="w-24 bg-gray-200 dark:bg-gray-700 h-1.5 rounded-full mt-1.5 overflow-hidden">
-                          <div 
-                            className={`h-full ${
-                              isPro ? 'bg-emerald-500' : isExhausted ? 'bg-red-500' : 'bg-voiceflow-orange'
-                            }`}
-                            style={{ width: `${Math.min(100, Math.round((mins / 30) * 100))}%` }}
-                          />
-                        </div>
-                      </td>
+                        {/* Last Active */}
+                        <td className="p-3.5 text-muted-foreground whitespace-nowrap">
+                          {formatDate(dev.lastSeen)}
+                        </td>
 
-                      {/* Status */}
-                      <td className="p-3.5">
-                        {isPro ? (
-                          <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 text-[11px] font-bold px-2.5 py-1 rounded-full border border-emerald-200 dark:border-emerald-800">
-                            <Sparkles size={11} /> Pro Active
-                          </span>
-                        ) : isExhausted ? (
-                          <span className="inline-flex items-center gap-1 bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300 text-[11px] font-bold px-2.5 py-1 rounded-full border border-red-200 dark:border-red-800">
-                            <Lock size={11} /> Limit Reached
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 text-[11px] font-bold px-2.5 py-1 rounded-full border border-blue-200 dark:border-blue-800">
-                            <Unlock size={11} /> Trial Active
-                          </span>
-                        )}
-                      </td>
-
-                      {/* Last Active */}
-                      <td className="p-3.5 text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                        {formatDate(dev.lastSeen)}
-                      </td>
-
-                      {/* Actions */}
-                      <td className="p-3.5 text-right whitespace-nowrap">
-                        <button
-                          onClick={() => {
-                            setSelectedDevice(dev);
-                            setIsDetailOpen(true);
-                          }}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold bg-orange-50 hover:bg-orange-100 text-voiceflow-orange border border-orange-200 dark:bg-orange-500/10 dark:hover:bg-orange-500/20 dark:border-orange-500/30 transition-colors"
-                        >
-                          Inspect & Manage
-                          <ChevronRight size={13} />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+                        {/* Actions */}
+                        <td className="p-3.5 text-right whitespace-nowrap">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedDevice(dev);
+                              setIsDetailOpen(true);
+                            }}
+                            className="h-8 text-xs font-semibold gap-1 text-voiceflow-orange hover:text-voiceflow-orange border-orange-200/80 dark:border-orange-500/30"
+                          >
+                            Inspect & Manage
+                            <ChevronRight size={13} />
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Inspect & Manage Dialog */}
       <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
-        <DialogContent className="max-w-xl">
+        <DialogContent className="max-w-xl bg-card border border-border">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-lg font-clash">
               <Laptop size={20} className="text-voiceflow-orange" />
@@ -623,123 +756,135 @@ export default function AdminDevicesPage() {
           </DialogHeader>
 
           {selectedDevice && (
-            <div className="space-y-4 py-2">
+            <div className="space-y-4 py-2 font-jakarta">
               {/* ID & Hardware */}
-              <div className="p-3 bg-gray-50 dark:bg-muted/50 rounded-xl space-y-1.5 text-xs">
+              <div className="p-3.5 bg-muted/40 rounded-xl space-y-2 text-xs border border-border/60">
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-500">Device ID / GUID:</span>
-                  <span className="font-mono font-bold text-gray-900 dark:text-white select-all">
+                  <span className="text-muted-foreground">Device ID / GUID:</span>
+                  <span className="font-mono font-bold text-foreground select-all">
                     {selectedDevice.id}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-500">Public IP:</span>
-                  <span className="font-mono text-gray-900 dark:text-white select-all">
+                  <span className="text-muted-foreground">Public IP:</span>
+                  <span className="font-mono text-foreground select-all">
                     {selectedDevice.ip || 'Unknown'}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-500">Platform / OS:</span>
-                  <span className="text-gray-900 dark:text-white">
+                  <span className="text-muted-foreground">Platform / OS:</span>
+                  <span className="text-foreground">
                     {selectedDevice.platform || 'Desktop App'}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-500">First Identified:</span>
-                  <span className="text-gray-700 dark:text-gray-300">
+                  <span className="text-muted-foreground">First Identified:</span>
+                  <span className="text-foreground">
                     {formatDate(selectedDevice.firstSeen)}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-500">Last Active Heartbeat:</span>
-                  <span className="text-gray-700 dark:text-gray-300">
+                  <span className="text-muted-foreground">Last Active Heartbeat:</span>
+                  <span className="text-foreground">
                     {formatDate(selectedDevice.lastSeen)}
                   </span>
                 </div>
               </div>
 
               {/* Linked Accounts */}
-              <div className="border border-gray-200 dark:border-border rounded-xl p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
+              <div className="border border-border rounded-xl p-3.5 bg-card">
+                <div className="flex items-center justify-between mb-2.5">
+                  <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
                     <Mail size={14} className="text-voiceflow-orange" />
-                    Linked Accounts on this Laptop ({selectedDevice.registeredEmails?.length || 0})
+                    Linked Accounts on this Laptop ({selectedDevice.resolvedEmails?.length || 0})
                   </span>
-                  {selectedDevice.registeredEmails && selectedDevice.registeredEmails.length > 1 && (
-                    <span className="text-[10px] font-bold bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300 px-2 py-0.5 rounded-full">
+                  {selectedDevice.isHopper && (
+                    <Badge variant="destructive" className="text-[10px] py-0 px-2 font-bold">
                       Multi-Account Evasion Detected
-                    </span>
+                    </Badge>
                   )}
                 </div>
 
-                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                  {selectedDevice.registeredEmails?.map((em, idx) => (
-                    <div 
-                      key={idx}
-                      className="flex items-center justify-between p-2 rounded-lg bg-gray-50 dark:bg-muted/40 text-xs"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                          idx === 0 ? 'bg-orange-100 text-voiceflow-orange' : 'bg-red-100 text-red-700'
-                        }`}>
-                          {idx + 1}
+                <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                  {selectedDevice.resolvedEmails && selectedDevice.resolvedEmails.length > 0 ? (
+                    selectedDevice.resolvedEmails.map((em: string, idx: number) => (
+                      <div 
+                        key={idx}
+                        className="flex items-center justify-between p-2 rounded-lg bg-muted/40 text-xs border border-border/50"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                            idx === 0 ? 'bg-orange-100 text-voiceflow-orange dark:bg-orange-950 dark:text-orange-300' : 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300'
+                          }`}>
+                            {idx + 1}
+                          </span>
+                          <span className="font-mono font-medium text-foreground">{em}</span>
+                        </div>
+                        <span className="text-[10px] text-muted-foreground font-semibold">
+                          {idx === 0 ? 'Primary Creator' : 'Hopper Account'}
                         </span>
-                        <span className="font-medium text-gray-800 dark:text-gray-200">{em}</span>
                       </div>
-                      <span className="text-[10px] text-gray-400 font-semibold">
-                        {idx === 0 ? 'Primary Creator' : 'Hopper Account'}
-                      </span>
+                    ))
+                  ) : (
+                    <div className="text-xs text-muted-foreground italic py-2 text-center">
+                      No user accounts recorded on this machine yet.
                     </div>
-                  ))}
+                  )}
                 </div>
               </div>
 
               {/* Usage & Trial Stats */}
               <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 bg-gray-50 dark:bg-muted/40 rounded-xl">
-                  <div className="text-[11px] text-gray-500">Device Session Count</div>
-                  <div className="text-lg font-black text-gray-900 dark:text-white mt-0.5">
+                <div className="p-3 bg-muted/40 rounded-xl border border-border/50">
+                  <div className="text-[11px] text-muted-foreground">Device Session Count</div>
+                  <div className="text-lg font-black text-foreground mt-0.5 font-clash">
                     {selectedDevice.sessionCount || 0} / 3 sessions
                   </div>
                 </div>
-                <div className="p-3 bg-gray-50 dark:bg-muted/40 rounded-xl">
-                  <div className="text-[11px] text-gray-500">Device Minutes Used</div>
-                  <div className="text-lg font-black text-gray-900 dark:text-white mt-0.5">
+                <div className="p-3 bg-muted/40 rounded-xl border border-border/50">
+                  <div className="text-[11px] text-muted-foreground">Device Minutes Used</div>
+                  <div className="text-lg font-black text-foreground mt-0.5 font-clash">
                     {selectedDevice.usedMinutes || 0} / 30 mins
                   </div>
                 </div>
               </div>
 
               {/* Admin Management Actions */}
-              <div className="pt-2 border-t border-gray-100 dark:border-border space-y-2">
-                <div className="text-xs font-bold text-gray-700 dark:text-gray-300">
+              <div className="pt-2 border-t border-border space-y-2">
+                <div className="text-xs font-bold text-foreground">
                   Administrative Overrides:
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <button
+                  <Button
+                    variant="outline"
+                    size="sm"
                     disabled={actionLoading}
                     onClick={() => handleResetDeviceTrial(selectedDevice)}
-                    className="flex items-center justify-center gap-1.5 p-2 rounded-xl text-xs font-bold bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-500/10 dark:text-blue-400 transition-colors"
+                    className="text-xs font-bold gap-1.5 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40"
                   >
                     <Unlock size={14} />
                     Reset Free Trial
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
                     disabled={actionLoading}
                     onClick={() => handleLockDevice(selectedDevice)}
-                    className="flex items-center justify-center gap-1.5 p-2 rounded-xl text-xs font-bold bg-orange-50 text-voiceflow-orange hover:bg-orange-100 dark:bg-orange-500/10 dark:text-orange-400 transition-colors"
+                    className="text-xs font-bold gap-1.5 text-voiceflow-orange hover:bg-orange-50 dark:hover:bg-orange-950/40"
                   >
                     <Lock size={14} />
                     Force Lock (Limit)
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
                     disabled={actionLoading}
                     onClick={() => handleTogglePro(selectedDevice)}
-                    className="flex items-center justify-center gap-1.5 p-2 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 transition-colors"
+                    className="text-xs font-bold gap-1.5 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
                   >
                     <Sparkles size={14} />
                     {selectedDevice.hasPro || selectedDevice.isPro ? 'Revoke Pro' : 'Grant Pro'}
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>
@@ -747,20 +892,24 @@ export default function AdminDevicesPage() {
 
           <DialogFooter className="flex justify-between items-center sm:justify-between w-full">
             {selectedDevice && (
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 disabled={actionLoading}
                 onClick={() => handleDeleteDevice(selectedDevice)}
-                className="text-xs text-red-600 hover:text-red-700 font-bold flex items-center gap-1 transition-colors"
+                className="text-xs text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/40 font-bold gap-1"
               >
                 <Trash2 size={13} /> Delete Record
-              </button>
+              </Button>
             )}
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => setIsDetailOpen(false)}
-              className="px-4 py-2 text-xs font-bold bg-gray-100 hover:bg-gray-200 dark:bg-muted dark:hover:bg-muted/80 rounded-xl transition-colors"
+              className="text-xs font-bold"
             >
               Close
-            </button>
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
