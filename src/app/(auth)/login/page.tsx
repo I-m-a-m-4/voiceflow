@@ -29,10 +29,10 @@ export default function LoginPage() {
 
   const goToDashboard = () => {
     try {
-      router.push('/dashboard/');
+      router.replace('/dashboard');
     } catch {}
     if (typeof window !== 'undefined') {
-      window.location.replace('/dashboard/');
+      window.location.href = '/dashboard';
     }
   };
 
@@ -44,6 +44,28 @@ export default function LoginPage() {
 
     if (!auth) return;
 
+    // Listen directly to auth state to redirect the very millisecond a session is confirmed
+    const unsubscribe = auth.onAuthStateChanged((firebaseUser) => {
+      if (firebaseUser) {
+        const fallbackName = firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'User');
+        const sessionData = {
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
+          displayName: fallbackName,
+          photoURL: firebaseUser.photoURL,
+          isAnonymous: firebaseUser.isAnonymous,
+          emailVerified: firebaseUser.emailVerified,
+          isCached: true,
+        };
+        try {
+          localStorage.setItem('voiceflow_auth_session', JSON.stringify(sessionData));
+          localStorage.setItem('userEmail', firebaseUser.email || '');
+          localStorage.setItem('userName', fallbackName);
+        } catch {}
+        goToDashboard();
+      }
+    });
+
     let isMounted = true;
     getRedirectResult(auth)
       .then(async (result) => {
@@ -52,8 +74,21 @@ export default function LoginPage() {
         const redirectUser = result.user;
         const fallbackName = redirectUser.displayName || (redirectUser.email ? redirectUser.email.split('@')[0] : 'User');
 
-        localStorage.setItem('userEmail', redirectUser.email || '');
-        localStorage.setItem('userName', fallbackName);
+        const sessionData = {
+          uid: redirectUser.uid,
+          email: redirectUser.email,
+          displayName: fallbackName,
+          photoURL: redirectUser.photoURL,
+          isAnonymous: redirectUser.isAnonymous,
+          emailVerified: redirectUser.emailVerified,
+          isCached: true,
+        };
+        try {
+          localStorage.setItem('voiceflow_auth_session', JSON.stringify(sessionData));
+          localStorage.setItem('userEmail', redirectUser.email || '');
+          localStorage.setItem('userName', fallbackName);
+        } catch {}
+
         toast({
           title: 'Successfully logged in with Google!',
         });
@@ -90,6 +125,7 @@ export default function LoginPage() {
 
     return () => {
       isMounted = false;
+      unsubscribe();
     };
   }, [user, authLoading, router]);
 
@@ -105,8 +141,20 @@ export default function LoginPage() {
         const user = userCredential.user;
         const fallbackName = user.displayName || (user.email ? user.email.split('@')[0] : 'User');
 
-        localStorage.setItem('userEmail', user.email || '');
-        localStorage.setItem('userName', fallbackName);
+        const sessionData = {
+          uid: user.uid,
+          email: user.email,
+          displayName: fallbackName,
+          photoURL: user.photoURL,
+          isAnonymous: user.isAnonymous,
+          emailVerified: user.emailVerified,
+          isCached: true,
+        };
+        try {
+          localStorage.setItem('voiceflow_auth_session', JSON.stringify(sessionData));
+          localStorage.setItem('userEmail', user.email || '');
+          localStorage.setItem('userName', fallbackName);
+        } catch {}
         
         toast({
           title: 'Successfully logged in with Google!',

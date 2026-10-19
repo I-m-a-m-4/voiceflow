@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { useAuth } from '@/firebase';
+import { useUser } from '@/firebase';
 import AppSidebar from '@/components/dashboard/app-sidebar';
 import AppHeader from '@/components/dashboard/app-header';
 
@@ -11,16 +11,16 @@ export default function AuthenticatedLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const user = useAuth();
+  const { user, isUserLoading } = useUser();
   const router = useRouter();
   const pathname = usePathname();
   const isDashboard = pathname === '/dashboard';
 
   useEffect(() => {
-    if (user === null) {
+    if (!isUserLoading && !user) {
       router.replace('/login');
     }
-  }, [user, router]);
+  }, [user, isUserLoading, router]);
 
   const [isRecording, setIsRecording] = useState(false);
 
@@ -32,7 +32,18 @@ export default function AuthenticatedLayout({
     return () => window.removeEventListener('voiceflow-record-state', handleRecordState);
   }, []);
 
-  if (!user) return null; // Or a loading spinner
+  if (isUserLoading && !user) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          <p className="text-xs text-muted-foreground font-medium">Loading workspace...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) return null;
 
   return (
     <div className={`flex flex-1 min-h-0 h-full w-full overflow-hidden font-jakarta text-foreground selection:bg-primary/20 ${isRecording ? 'bg-transparent' : 'bg-background'}`}>

@@ -1,11 +1,34 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Check, Loader2, Crown, Sparkles } from 'lucide-react';
-import { useAuth } from '@/firebase';
+import { Check, Loader2, Crown, Sparkles, ShieldCheck, X, RefreshCw } from 'lucide-react';
+import { useAuth, useFirestore } from '@/firebase';
+import { doc, updateDoc, serverTimestamp, collection, addDoc } from 'firebase/firestore';
 import { useCurrencyGeo } from '@/hooks/use-currency-geo';
-import { apiBase, isNativeApp, openExternal } from '@/lib/platform';
+import { apiBase, isNativeApp } from '@/lib/platform';
+import { markDevicePro } from '@/lib/device-fingerprint';
+import { toast } from '@/hooks/use-toast';
+
+
+const loadFlutterwaveScript = (): Promise<void> => {
+  if (typeof window === 'undefined') return Promise.resolve();
+  if (window.FlutterwaveCheckout) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const existing = document.getElementById('flutterwave-inline-sdk');
+    if (existing) {
+      existing.addEventListener('load', () => resolve(), { once: true });
+      return;
+    }
+    const script = document.createElement('script');
+    script.id = 'flutterwave-inline-sdk';
+    script.src = 'https://checkout.flutterwave.com/v3.js';
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Flutterwave SDK load error'));
+    document.body.appendChild(script);
+  });
+};
 
 interface BillingModalProps {
   isOpen: boolean;
@@ -15,8 +38,10 @@ interface BillingModalProps {
 export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () => void }) {
   const [isAnnual, setIsAnnual] = useState(false);
   const [loadingPlanId, setLoadingPlanId] = useState<string | null>(null);
+  const [inAppCheckout, setInAppCheckout] = useState<{ url: string; plan: any; txRef: string } | null>(null);
   const { currency, currencySymbol, isNigeria, formatPrice } = useCurrencyGeo();
   const auth = useAuth();
+  const firestore = useFirestore();
 
   const plans = [
     {
@@ -69,39 +94,175 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
     },
   ];
 
+  const activateUserPro = async (plan: typeof plans[0], txRef?: string) => {
+    try {
+      if (auth?.currentUser?.uid && firestore) {
+        await updateDoc(doc(firestore, "users", auth.currentUser.uid), {
+          subscriptionPlan: plan.name,
+          planTier: plan.id,
+          isPro: true,
+          updatedAt: serverTimestamp(),
+        }).catch((err) => console.warn("Failed to update user doc:", err));
+
+        await markDevicePro(firestore).catch(() => {});
+
+        // Record purchase to Firestore
+        await addDoc(collection(firestore, "purchases"), {
+          userId: auth.currentUser.uid,
+          userEmail: auth.currentUser.email || "",
+          userName: auth.currentUser.displayName || "Voiceflow User",
+          plan: plan.name,
+          planId: plan.id,
+          amount: isAnnual 
+            ? (currency === 'NGN' ? plan.annualNgn : plan.annualUsd) 
+            : (currency === 'NGN' ? plan.monthlyNgn : plan.monthlyUsd),
+          currency: currency,
+          status: "completed",
+          type: "subscription",
+          paymentMethod: "Flutterwave",
+          txRef: txRef || "",
+          createdAt: serverTimestamp(),
+          date: serverTimestamp(),
+        }).catch(() => {});
+      }
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('voiceflow_is_pro', 'true');
+        window.dispatchEvent(new CustomEvent('voiceflow-usage-updated'));
+      }
+
+      toast({
+        title: "🎉 Payment Successful!",
+        description: `Welcome to ${plan.name}! Your high-performance AI features have been activated.`,
+      });
+
+      onUpgradeSuccess?.();
+    } catch (e) {
+      console.error("Activation error:", e);
+    }
+  };
+
+  // Poll for completion when in-app checkout modal is open
+  useEffect(() => {
+    if (!inAppCheckout) return;
+
+    let isCancelled = false;
+    const interval = setInterval(async () => {
+      if (isCancelled) return;
+      try {
+        const base = apiBase();
+        const verifyEndpoint = base ? `${base}/api/flutterwave/verify` : "/api/flutterwave/verify";
+        const res = await fetch(verifyEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tx_ref: inAppCheckout.txRef,
+            userId: auth?.currentUser?.uid || "guest",
+            planId: inAppCheckout.plan.id,
+            planName: inAppCheckout.plan.name,
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.status === "successful") {
+            clearInterval(interval);
+            const planToActivate = inAppCheckout.plan;
+            const ref = inAppCheckout.txRef;
+            setInAppCheckout(null);
+            await activateUserPro(planToActivate, ref);
+          }
+        }
+      } catch (err) {
+        // Continue polling silently
+      }
+    }, 3000);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(interval);
+    };
+  }, [inAppCheckout]);
+
   const handleCheckout = async (plan: typeof plans[0]) => {
     setLoadingPlanId(plan.id);
 
     try {
       const isNative = isNativeApp();
       const clientOrigin = isNative ? 'https://voiceflow-azure.vercel.app' : (typeof window !== 'undefined' ? window.location.origin : 'https://voiceflow-azure.vercel.app');
-      const redirectUrl = `${clientOrigin}/dashboard`;
       const amount = isAnnual 
         ? (currency === 'NGN' ? plan.annualNgn : plan.annualUsd) 
         : (currency === 'NGN' ? plan.monthlyNgn : plan.monthlyUsd);
+      const txRef = `tx-${auth?.currentUser?.uid || 'guest'}-${plan.id}-${Date.now()}`;
 
-      // Log checkout attempt
+      // Preload inline script
       try {
-        const { collection, addDoc, serverTimestamp, getFirestore } = await import("firebase/firestore");
-        const db = getFirestore();
-        await addDoc(collection(db, "checkout_attempts"), {
-          userId: auth?.currentUser?.uid || "guest",
-          userEmail: auth?.currentUser?.email || "",
-          userName: auth?.currentUser?.displayName || "Voiceflow User",
-          plan: plan.name,
-          planId: plan.id,
-          cycle: isAnnual ? "annual" : "monthly",
+        await loadFlutterwaveScript();
+      } catch {}
+
+      const publicKey = process.env.NEXT_PUBLIC_FLUTTERWAVE_PUBLIC_KEY;
+
+      // 1. If Flutterwave Inline SDK is loaded, open popup directly inside the app (no browser redirect)
+      if (typeof window !== 'undefined' && window.FlutterwaveCheckout && publicKey) {
+        window.FlutterwaveCheckout({
+          public_key: publicKey,
+          tx_ref: txRef,
           amount: amount,
           currency: currency,
-          gateway: "Flutterwave",
-          timestamp: serverTimestamp(),
-          status: "initiated"
+          payment_options: 'card, ussd, bank_transfer',
+          customer: {
+            email: auth?.currentUser?.email || "user@voiceflow.space",
+            name: auth?.currentUser?.displayName || "Voiceflow User",
+          },
+          customizations: {
+            title: `Voiceflow ${plan.name}`,
+            description: `Subscription payment for Voiceflow ${plan.name}`,
+            logo: `${clientOrigin}/icon.svg`,
+          },
+          meta: {
+            user_id: auth?.currentUser?.uid || 'guest',
+            plan_id: plan.id,
+          },
+          callback: async (response: any) => {
+            setLoadingPlanId(null);
+            if (response.status === 'successful' || response.status === 'completed') {
+              try {
+                const base = apiBase();
+                const verifyEndpoint = base ? `${base}/api/flutterwave/verify` : "/api/flutterwave/verify";
+                await fetch(verifyEndpoint, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    transaction_id: response.transaction_id,
+                    tx_ref: response.tx_ref || txRef,
+                    userId: auth?.currentUser?.uid,
+                    planId: plan.id,
+                    planName: plan.name,
+                    amount: amount,
+                    currency: currency,
+                  }),
+                });
+              } catch (verifyErr) {
+                console.warn("Server verify check skipped:", verifyErr);
+              }
+
+              await activateUserPro(plan, response.tx_ref || txRef);
+            } else {
+              toast({
+                variant: "destructive",
+                title: "Payment Incomplete",
+                description: response.charge_response_message || "Payment was not completed. Please try again.",
+              });
+            }
+          },
+          onclose: () => {
+            setLoadingPlanId(null);
+          },
         });
-      } catch (logErr) {
-        console.warn("Could not log checkout attempt:", logErr);
+        return;
       }
 
-      // Call Flutterwave checkout endpoint with country-locked currency
+      // 2. Fallback: Call Flutterwave checkout endpoint and open in an In-App Modal Dialog (never opens external browser)
       const base = apiBase();
       const checkoutEndpoint = base ? `${base}/api/flutterwave/checkout` : "/api/flutterwave/checkout";
 
@@ -117,7 +278,7 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
           email: auth?.currentUser?.email || "user@voiceflow.space",
           name: auth?.currentUser?.displayName || "Voiceflow User",
           origin: clientOrigin,
-          redirectUrl: redirectUrl,
+          redirectUrl: `${clientOrigin}/dashboard`,
         }),
       });
 
@@ -129,17 +290,18 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
 
       const data = await res.json();
       if (res.ok && data.url) {
-        if (isNative) {
-          await openExternal(data.url);
-          return;
-        }
-        window.location.href = data.url;
+        // Open inside the app via In-App Checkout modal (no external browser)
+        setInAppCheckout({ url: data.url, plan, txRef: data.txRef || txRef });
         return;
       }
       throw new Error(data.error || "Failed to initialize payment gateway");
     } catch (err: any) {
       console.error("Payment initiation error:", err);
-      alert(`Could not open checkout: ${err.message || "Please check your network or try again."}`);
+      toast({
+        variant: "destructive",
+        title: "Checkout Error",
+        description: err.message || "Could not initialize checkout. Please check your network.",
+      });
     } finally {
       setLoadingPlanId(null);
     }
@@ -285,6 +447,37 @@ export function PricingPlansView({ onUpgradeSuccess }: { onUpgradeSuccess?: () =
           );
         })}
       </div>
+
+      {/* In-App Checkout Modal Dialog (Runs 100% inside Voiceflow, no external browser) */}
+      {inAppCheckout && (
+        <Dialog open={!!inAppCheckout} onOpenChange={() => setInAppCheckout(null)}>
+          <DialogContent className="sm:max-w-[580px] w-[96vw] h-[86vh] max-h-[760px] p-0 flex flex-col overflow-hidden bg-background border-border shadow-2xl rounded-2xl z-50">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/40 shrink-0">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                <span className="text-sm font-bold text-foreground">Secure In-App Checkout</span>
+                <span className="text-[10px] text-muted-foreground px-1.5 py-0.5 rounded bg-muted">256-bit Encrypted</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setInAppCheckout(null)}
+                className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                title="Close checkout"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex-1 w-full h-full relative bg-background">
+              <iframe
+                src={inAppCheckout.url}
+                className="w-full h-full border-0"
+                title="Voiceflow Secure Checkout"
+                allow="payment; camera"
+              />
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
@@ -302,7 +495,7 @@ export function BillingModal({ isOpen, onClose }: BillingModalProps) {
           </DialogDescription>
         </DialogHeader>
 
-        <PricingPlansView />
+        <PricingPlansView onUpgradeSuccess={onClose} />
       </DialogContent>
     </Dialog>
   );

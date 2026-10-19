@@ -172,7 +172,7 @@ export const useFlutterwave = () => {
       meta: {
         plan: config.plan || '',
       },
-      callback: async (response) => {
+      callback: async (response: FlutterwaveResponse) => {
         setIsLoading(false);
         if (response.status === 'successful') {
           // Verify on server side
