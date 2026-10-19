@@ -285,7 +285,7 @@ export default function AppSidebar() {
                       {isPro ? 'Voiceflow Pro' : 'Voiceflow Pro'}
                     </h4>
                     <p className="text-xs font-bold text-voiceflow-orange mt-0.5 select-text">
-                      {formatPrice(12500, 11.99)} per month
+                      {formatPrice(11.99, 12500)} per month
                     </p>
                   </div>
                 </div>

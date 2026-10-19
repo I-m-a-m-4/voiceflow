@@ -73,6 +73,7 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
   // Calendar integration states
   const [googleConnected, setGoogleConnected] = useState(false);
   const [outlookConnected, setOutlookConnected] = useState(false);
+  const [upcomingMeetings, setUpcomingMeetings] = useState<any[]>([]);
 
   // Sync initialTab when modal opens
   useEffect(() => {
@@ -80,6 +81,34 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
       setActiveTab(initialTab);
     }
   }, [isOpen, initialTab]);
+
+  // Load upcoming meetings from local storage
+  useEffect(() => {
+    const loadMeetings = () => {
+      if (typeof window !== 'undefined') {
+        try {
+          const raw = localStorage.getItem('voiceflow_upcoming_meetings');
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              const cleaned = parsed.filter(
+                (m: any) =>
+                  m.title !== 'Product & Architecture Review' &&
+                  m.title !== 'Client Discovery & Scope Demo'
+              );
+              setUpcomingMeetings(cleaned);
+              return;
+            }
+          }
+        } catch {}
+        setUpcomingMeetings([]);
+      }
+    };
+
+    loadMeetings();
+    window.addEventListener('voiceflow-calendar-updated', loadMeetings);
+    return () => window.removeEventListener('voiceflow-calendar-updated', loadMeetings);
+  }, []);
 
   // Load Live Answers settings & custom context on mount
   useEffect(() => {
@@ -98,10 +127,8 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
 
       const g = localStorage.getItem('voiceflow_google_calendar_connected') === 'true';
       const o = localStorage.getItem('voiceflow_outlook_calendar_connected') === 'true';
-      const hasGoogle = auth?.currentUser?.providerData?.some(p => p.providerId === 'google.com') || (auth?.currentUser?.email?.endsWith('@gmail.com') ?? false);
-      const hasMicrosoft = auth?.currentUser?.providerData?.some(p => p.providerId === 'microsoft.com');
-      setGoogleConnected(g || Boolean(hasGoogle));
-      setOutlookConnected(o || Boolean(hasMicrosoft));
+      setGoogleConnected(g);
+      setOutlookConnected(o);
     }
 
     if (auth?.currentUser?.uid) {
@@ -1120,34 +1147,32 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
                     </span>
                     <button 
                       onClick={() => {
+                        window.dispatchEvent(new CustomEvent('voiceflow-calendar-updated'));
                         toast({ title: 'Calendar Synced', description: 'Meeting schedules updated from connected accounts.' });
                       }}
-                      className="text-[11px] text-voiceflow-orange hover:underline font-semibold flex items-center gap-1"
+                      className="text-[11px] text-voiceflow-orange hover:underline font-semibold flex items-center gap-1 cursor-pointer"
                     >
                       <RotateCcw size={11} /> Sync Now
                     </button>
                   </div>
                   
-                  {(googleConnected || outlookConnected) ? (
+                  {upcomingMeetings.length > 0 ? (
                     <div className="space-y-2">
-                      <div className="p-3 bg-white dark:bg-[#1E1E1E] rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                        <div>
-                          <div className="text-xs font-bold text-gray-900 dark:text-white">Product & Architecture Review</div>
-                          <div className="text-[11px] text-gray-500 dark:text-gray-400">Today • 10:00 AM – 10:45 AM (Google Meet)</div>
+                      {upcomingMeetings.map((m) => (
+                        <div key={m.id} className="p-3 bg-white dark:bg-[#1E1E1E] rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                          <div>
+                            <div className="text-xs font-bold text-gray-900 dark:text-white">{m.title}</div>
+                            <div className="text-[11px] text-gray-500 dark:text-gray-400">{m.time} • {m.platform}</div>
+                          </div>
+                          <span className="text-[10px] px-2 py-0.5 rounded font-semibold bg-emerald-500/10 text-emerald-600">Auto-Join Ready</span>
                         </div>
-                        <span className="text-[10px] px-2 py-0.5 rounded font-semibold bg-emerald-500/10 text-emerald-600">Auto-Join Ready</span>
-                      </div>
-                      <div className="p-3 bg-white dark:bg-[#1E1E1E] rounded-lg border border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                        <div>
-                          <div className="text-xs font-bold text-gray-900 dark:text-white">Client Discovery & Scope Demo</div>
-                          <div className="text-[11px] text-gray-500 dark:text-gray-400">Today • 02:30 PM – 03:00 PM (Microsoft Teams)</div>
-                        </div>
-                        <span className="text-[10px] px-2 py-0.5 rounded font-semibold bg-blue-500/10 text-blue-600">Auto-Join Ready</span>
-                      </div>
+                      ))}
                     </div>
                   ) : (
                     <div className="text-xs text-gray-500 dark:text-gray-400 py-3 text-center">
-                      Connect your Google or Outlook calendar above to view your upcoming meetings and enable automated joining.
+                      {googleConnected || outlookConnected
+                        ? 'No upcoming calendar meetings found. Sync or add custom meeting calls to enable automated joining.'
+                        : 'Connect your Google or Outlook calendar above to view your upcoming meetings and enable automated joining.'}
                     </div>
                   )}
                 </div>

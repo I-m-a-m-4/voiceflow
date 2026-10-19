@@ -48,13 +48,24 @@ export default function RightPanel() {
     if (typeof window !== 'undefined') {
       try {
         const saved = localStorage.getItem('voiceflow_upcoming_meetings');
-        if (saved) return JSON.parse(saved);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            // Strip out legacy mock/hardcoded meetings
+            const cleaned = parsed.filter(
+              (m: any) =>
+                m.title !== 'Product & Architecture Review' &&
+                m.title !== 'Client Discovery & Scope Demo'
+            );
+            if (cleaned.length !== parsed.length) {
+              localStorage.setItem('voiceflow_upcoming_meetings', JSON.stringify(cleaned));
+            }
+            return cleaned;
+          }
+        }
       } catch (e) {}
     }
-    return [
-      { id: '1', title: 'Product & Architecture Review', time: '10:00 AM', platform: 'Meet', url: 'https://meet.google.com/new' },
-      { id: '2', title: 'Client Discovery & Scope Demo', time: '02:30 PM', platform: 'Teams', url: 'https://teams.microsoft.com' },
-    ];
+    return [];
   });
 
   const [isAddingMeeting, setIsAddingMeeting] = useState(false);
@@ -68,14 +79,27 @@ export default function RightPanel() {
       if (typeof window !== 'undefined') {
         const g = localStorage.getItem('voiceflow_google_calendar_connected') === 'true';
         const o = localStorage.getItem('voiceflow_outlook_calendar_connected') === 'true';
-        const hasGoogle = auth?.currentUser?.providerData?.some(p => p.providerId === 'google.com') || (auth?.currentUser?.email?.endsWith('@gmail.com') ?? false);
-        const hasMicrosoft = auth?.currentUser?.providerData?.some(p => p.providerId === 'microsoft.com');
-        setGoogleConnected(g || Boolean(hasGoogle));
-        setOutlookConnected(o || Boolean(hasMicrosoft));
+        setGoogleConnected(g);
+        setOutlookConnected(o);
 
         try {
           const savedMeetings = localStorage.getItem('voiceflow_upcoming_meetings');
-          if (savedMeetings) setMeetings(JSON.parse(savedMeetings));
+          if (savedMeetings) {
+            const parsed = JSON.parse(savedMeetings);
+            if (Array.isArray(parsed)) {
+              const cleaned = parsed.filter(
+                (m: any) =>
+                  m.title !== 'Product & Architecture Review' &&
+                  m.title !== 'Client Discovery & Scope Demo'
+              );
+              setMeetings(cleaned);
+              if (cleaned.length !== parsed.length) {
+                localStorage.setItem('voiceflow_upcoming_meetings', JSON.stringify(cleaned));
+              }
+            }
+          } else {
+            setMeetings([]);
+          }
         } catch (e) {}
       }
     };
@@ -83,7 +107,7 @@ export default function RightPanel() {
     updateCalendarState();
     window.addEventListener('voiceflow-calendar-updated', updateCalendarState);
     return () => window.removeEventListener('voiceflow-calendar-updated', updateCalendarState);
-  }, [auth?.currentUser]);
+  }, []);
 
   // Check for session resumption on mount
   useEffect(() => {
@@ -607,8 +631,20 @@ export default function RightPanel() {
               ))}
             </div>
           ) : (
-            <div className="text-xs text-muted-foreground leading-relaxed mb-3">
-              No meetings scheduled. Click + to add your meeting link or connect your calendars below:
+            <div className="p-4 rounded-xl border border-dashed border-border bg-card/40 text-center mb-3">
+              <Calendar size={18} className="mx-auto text-muted-foreground/60 mb-1.5" />
+              <p className="text-xs font-semibold text-foreground">No upcoming meetings</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5 mb-2.5 leading-relaxed">
+                Connect your Google or Outlook calendar below, or click + to add a custom meeting link.
+              </p>
+              <button
+                type="button"
+                onClick={() => setIsAddingMeeting(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-voiceflow-orange/10 hover:bg-voiceflow-orange/20 text-voiceflow-orange font-bold text-xs transition-colors cursor-pointer"
+              >
+                <Plus size={13} />
+                <span>Add Meeting Call</span>
+              </button>
             </div>
           )}
 
