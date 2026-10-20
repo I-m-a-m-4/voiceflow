@@ -3,9 +3,10 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { signInWithEmailAndPassword, signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider } from 'firebase/auth';
+import { signInWithEmailAndPassword, signInWithPopup, signInWithRedirect, getRedirectResult, getAdditionalUserInfo, signOut, GoogleAuthProvider } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
+import { handleGoogleSignupSuccess } from '@/firebase/users';
 import { useAuth } from '@/context/auth-context';
 import AuthLayout from '@/components/auth-layout';
 import { Button } from '@/components/ui/button';
@@ -83,8 +84,23 @@ export default function LoginPage() {
     let isMounted = true;
     getRedirectResult(auth)
       .then(async (result) => {
-        if (!result?.user) return;
+        if (!result?.user || !isMounted) return;
         setIsGoogleLoading(true);
+
+        const addlInfo = getAdditionalUserInfo(result);
+        if (addlInfo?.isNewUser) {
+          // If on LOGIN page, prevent accidental signup:
+          await result.user.delete().catch(() => {});
+          await signOut(auth).catch(() => {});
+          toast({
+            variant: "destructive",
+            title: "Account not found",
+            description: "It looks like you don't have an account. Please sign up first."
+          });
+          setIsGoogleLoading(false);
+          return;
+        }
+
         const redirectUser = result.user;
         const fallbackName = redirectUser.displayName || (redirectUser.email ? redirectUser.email.split('@')[0] : 'User');
 
@@ -110,16 +126,7 @@ export default function LoginPage() {
         // Background sync to Firestore without delaying navigation
         (async () => {
           try {
-            const userDocRef = doc(db, 'users', redirectUser.uid);
-            const userDoc = await getDoc(userDocRef);
-            if (!userDoc.exists()) {
-              await setDoc(userDocRef, {
-                name: fallbackName,
-                email: redirectUser.email,
-                createdAt: new Date().toISOString(),
-                role: 'admin',
-              }, { merge: true });
-            }
+            await handleGoogleSignupSuccess(db, redirectUser);
             await syncDeviceTrial(db, redirectUser).catch(() => {});
           } catch (e) {
             console.error('Background user sync error:', e);
@@ -128,9 +135,18 @@ export default function LoginPage() {
 
         goToDashboard();
       })
-      .catch((err) => {
-        if (err?.code && err.code !== 'auth/null-user') {
-          console.error('Redirect sign-in error:', err);
+      .catch((error: any) => {
+        const isCancellation =
+          error?.code === 'auth/popup-closed-by-user' ||
+          error?.code === 'auth/redirect-cancelled-by-user' ||
+          error?.code === 'auth/null-user';
+        if (!isCancellation) {
+          console.error('Redirect sign-in error:', error);
+          toast({
+            variant: "destructive",
+            title: "Authentication Failed",
+            description: error.message || "Please try again.",
+          });
         }
       })
       .finally(() => {
@@ -146,12 +162,27 @@ export default function LoginPage() {
   const handleGoogleLogin = async () => {
     if (!auth) return;
     setIsGoogleLoading(true);
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+
     try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
-      
-      const userCredential = await signInWithPopup(auth, provider);
-      const user = userCredential.user;
+      // 1. Try popup first (best UX on standard web browsers)
+      const result = await signInWithPopup(auth, provider);
+      const addlInfo = getAdditionalUserInfo(result);
+
+      // If on LOGIN page, prevent accidental signup:
+      if (addlInfo?.isNewUser) {
+        await result.user.delete().catch(() => {});
+        await signOut(auth).catch(() => {});
+        toast({
+          variant: "destructive",
+          title: "Account not found",
+          description: "It looks like you don't have an account. Please sign up first."
+        });
+        return;
+      }
+
+      const user = result.user;
       const fallbackName = user.displayName || (user.email ? user.email.split('@')[0] : 'User');
 
       const sessionData = {
@@ -176,16 +207,7 @@ export default function LoginPage() {
       // Background sync to Firestore without delaying navigation
       (async () => {
         try {
-          const userDocRef = doc(db, 'users', user.uid);
-          const userDoc = await getDoc(userDocRef);
-          if (!userDoc.exists()) {
-            await setDoc(userDocRef, {
-              name: fallbackName,
-              email: user.email,
-              createdAt: new Date().toISOString(),
-              role: 'admin',
-            }, { merge: true });
-          }
+          await handleGoogleSignupSuccess(db, user);
           await syncDeviceTrial(db, user).catch(() => {});
         } catch (e) {
           console.error('Background user sync error:', e);
@@ -194,19 +216,34 @@ export default function LoginPage() {
 
       goToDashboard();
     } catch (popupError: any) {
-      // User cancelled popup explicitly
-      const isCancellation =
-        popupError?.code === 'auth/popup-closed-by-user' ||
-        popupError?.code === 'auth/cancelled-popup-request' ||
-        popupError?.code === 'auth/user-cancelled';
-
-      if (!isCancellation) {
-        console.error('Google Sign-In Error:', popupError);
+      const isDesktop = typeof window !== 'undefined' && window.innerWidth > 768 && !/Mobi|Android/i.test(navigator.userAgent);
+      // 2. Fall back to redirect if popup is blocked or unsupported in Tauri webview
+      if (
+        popupError?.code === 'auth/operation-not-supported-in-this-environment' ||
+        popupError?.code === 'auth/popup-blocked' ||
+        popupError?.code === 'auth/internal-error' ||
+        (!isDesktop && popupError?.code === 'auth/network-request-failed')
+      ) {
         toast({
-          variant: 'destructive',
-          title: 'Google Sign In',
-          description: popupError?.message || 'Could not complete Google sign-in. You can also sign in directly with email & password below.',
+          title: "Redirecting...",
+          description: "Redirecting to Google Sign-In...",
         });
+        await signInWithRedirect(auth, provider);
+      } else {
+        // 3. Handle user cancellations gracefully without alarming errors
+        const isCancellation =
+          popupError?.code === 'auth/popup-closed-by-user' ||
+          popupError?.code === 'auth/cancelled-popup-request' ||
+          popupError?.code === 'auth/user-cancelled';
+
+        if (!isCancellation) {
+          console.error('Google Sign-In Error:', popupError);
+          toast({
+            variant: 'destructive',
+            title: 'Google Sign-In Failed',
+            description: popupError?.message || 'Could not complete Google sign-in. You can also sign in directly with email & password below.',
+          });
+        }
       }
     } finally {
       setIsGoogleLoading(false);

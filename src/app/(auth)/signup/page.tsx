@@ -3,9 +3,10 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { createUserWithEmailAndPassword, signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider } from 'firebase/auth';
+import { createUserWithEmailAndPassword, signInWithPopup, signInWithRedirect, getRedirectResult, getAdditionalUserInfo, signOut, GoogleAuthProvider } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
+import { handleGoogleSignupSuccess } from '@/firebase/users';
 import { useAuth } from '@/context/auth-context';
 import AuthLayout from '@/components/auth-layout';
 import { Button } from '@/components/ui/button';
@@ -84,7 +85,7 @@ export default function SignupPage() {
     let isMounted = true;
     getRedirectResult(auth)
       .then(async (result) => {
-        if (!result?.user) return;
+        if (!result?.user || !isMounted) return;
         setIsGoogleLoading(true);
         const redirectUser = result.user;
         const fallbackName = redirectUser.displayName || (redirectUser.email ? redirectUser.email.split('@')[0] : 'User');
@@ -112,16 +113,7 @@ export default function SignupPage() {
         // Background sync to Firestore without delaying navigation
         (async () => {
           try {
-            const userDocRef = doc(db, 'users', redirectUser.uid);
-            const userDoc = await getDoc(userDocRef);
-            if (!userDoc.exists()) {
-              await setDoc(userDocRef, {
-                name: fallbackName,
-                email: redirectUser.email,
-                createdAt: new Date().toISOString(),
-                role: 'admin',
-              }, { merge: true });
-            }
+            await handleGoogleSignupSuccess(db, redirectUser);
             await syncDeviceTrial(db, redirectUser).catch(() => {});
           } catch (e) {
             console.error('Background user sync error:', e);
@@ -130,9 +122,18 @@ export default function SignupPage() {
 
         goToDashboard();
       })
-      .catch((err) => {
-        if (err?.code && err.code !== 'auth/null-user') {
-          console.error('Redirect sign-up error:', err);
+      .catch((error: any) => {
+        const isCancellation =
+          error?.code === 'auth/popup-closed-by-user' ||
+          error?.code === 'auth/redirect-cancelled-by-user' ||
+          error?.code === 'auth/null-user';
+        if (!isCancellation) {
+          console.error('Redirect sign-up error:', error);
+          toast({
+            variant: "destructive",
+            title: "Authentication Failed",
+            description: error.message || "Please try again.",
+          });
         }
       })
       .finally(() => {
@@ -148,68 +149,74 @@ export default function SignupPage() {
   const handleGoogleSignup = async () => {
     if (!auth) return;
     setIsGoogleLoading(true);
-    try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
 
-      // Attempt Popup
+    try {
+      // 1. Try popup first
       const userCredential = await signInWithPopup(auth, provider);
       const user = userCredential.user;
       const fallbackName = user.displayName || (user.email ? user.email.split('@')[0] : 'User');
 
-        const sessionData = {
-          uid: user.uid,
-          email: user.email,
-          displayName: fallbackName,
-          photoURL: user.photoURL,
-          isAnonymous: user.isAnonymous,
-          emailVerified: user.emailVerified,
-          isCached: true,
-        };
+      const sessionData = {
+        uid: user.uid,
+        email: user.email,
+        displayName: fallbackName,
+        photoURL: user.photoURL,
+        isAnonymous: user.isAnonymous,
+        emailVerified: user.emailVerified,
+        isCached: true,
+      };
+      try {
+        localStorage.setItem('voiceflow_auth_session', JSON.stringify(sessionData));
+        localStorage.setItem('userEmail', user.email || '');
+        localStorage.setItem('userName', fallbackName);
+      } catch {}
+
+      toast({
+        title: 'Account created!',
+        description: 'Successfully signed up with Google.',
+      });
+
+      // Background sync to Firestore without delaying navigation
+      (async () => {
         try {
-          localStorage.setItem('voiceflow_auth_session', JSON.stringify(sessionData));
-          localStorage.setItem('userEmail', user.email || '');
-          localStorage.setItem('userName', fallbackName);
-        } catch {}
-
-        toast({
-          title: 'Account created!',
-          description: 'Successfully signed up with Google.',
-        });
-
-        // Background sync to Firestore without delaying navigation
-        (async () => {
-          try {
-            const userDocRef = doc(db, 'users', user.uid);
-            const userDoc = await getDoc(userDocRef);
-            if (!userDoc.exists()) {
-              await setDoc(userDocRef, {
-                name: fallbackName,
-                email: user.email,
-                createdAt: new Date().toISOString(),
-                role: 'admin',
-              }, { merge: true });
-            }
-            await syncDeviceTrial(db, user).catch(() => {});
-          } catch (e) {
-            console.error('Background user sync error:', e);
-          }
-        })();
+          await handleGoogleSignupSuccess(db, user);
+          await syncDeviceTrial(db, user).catch(() => {});
+        } catch (e) {
+          console.error('Background user sync error:', e);
+        }
+      })();
 
       goToDashboard();
     } catch (popupError: any) {
-      const isCancellation =
-        popupError?.code === 'auth/popup-closed-by-user' ||
-        popupError?.code === 'auth/cancelled-popup-request' ||
-        popupError?.code === 'auth/user-cancelled';
-
-      if (!isCancellation) {
-        console.error('Google Sign-Up Error:', popupError);
+      const isDesktop = typeof window !== 'undefined' && window.innerWidth > 768 && !/Mobi|Android/i.test(navigator.userAgent);
+      // 2. Fall back to redirect if popup is blocked or unsupported in Tauri webview
+      if (
+        popupError?.code === 'auth/operation-not-supported-in-this-environment' ||
+        popupError?.code === 'auth/popup-blocked' ||
+        popupError?.code === 'auth/internal-error' ||
+        (!isDesktop && popupError?.code === 'auth/network-request-failed')
+      ) {
         toast({
-          variant: 'destructive',
-          title: 'Google Sign Up',
-          description: popupError?.message || 'Could not complete Google sign-up. You can also sign up with email & password below.',
+          title: "Redirecting...",
+          description: "Redirecting to Google Sign-In...",
         });
+        await signInWithRedirect(auth, provider);
+      } else {
+        const isCancellation =
+          popupError?.code === 'auth/popup-closed-by-user' ||
+          popupError?.code === 'auth/cancelled-popup-request' ||
+          popupError?.code === 'auth/user-cancelled';
+
+        if (!isCancellation) {
+          console.error('Google Sign-Up Error:', popupError);
+          toast({
+            variant: 'destructive',
+            title: 'Google Sign Up',
+            description: popupError?.message || 'Could not complete Google sign-up. You can also sign up with email & password below.',
+          });
+        }
       }
     } finally {
       setIsGoogleLoading(false);

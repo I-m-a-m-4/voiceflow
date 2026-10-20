@@ -162,4 +162,43 @@ export const waitForUserProfile = (firestore: Firestore, userId: string, timeout
     };
     check();
   });
+};/**
+ * Automatically provisions the user profile and business workspace in a Firestore
+ * batch transaction on first sign-in with Google.
+ */
+export const handleGoogleSignupSuccess = async (firestore: Firestore, user: User, businessName = '') => {
+  const userDocRef = doc(firestore, `users/${user.uid}`);
+  const userDocSnap = await getDoc(userDocRef);
+  if (!userDocSnap.exists()) {
+    const batch = writeBatch(firestore);
+    const businessDocRef = doc(collection(firestore, 'businessInstances'));
+    const businessId = businessDocRef.id;
+    let localTimezone = 'Africa/Lagos';
+    try {
+      localTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Africa/Lagos';
+    } catch (e) {}
+
+    batch.set(businessDocRef, {
+      name: businessName || user.displayName || 'My Workspace',
+      ownerId: user.uid,
+      plan: 'starter',
+      status: 'active',
+      createdAt: serverTimestamp(),
+      settings: { currency: 'USD', timezone: localTimezone, defaultTaxRate: 0 }
+    });
+
+    batch.set(userDocRef, {
+      email: user.email,
+      name: user.displayName || businessName || (user.email ? user.email.split('@')[0] : 'User'),
+      businessName: businessName,
+      businessId: businessId,
+      role: 'admin',
+      authProvider: 'google',
+      surveyCompleted: false,
+      status: 'active',
+      createdAt: serverTimestamp()
+    });
+
+    await batch.commit();
+  }
 };
