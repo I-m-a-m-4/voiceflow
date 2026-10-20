@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { signInWithEmailAndPassword, signInWithPopup, signInWithRedirect, getRedirectResult, getAdditionalUserInfo, signOut, GoogleAuthProvider } from 'firebase/auth';
+import { signInWithEmailAndPassword, signInWithPopup, signInWithRedirect, signInWithCredential, getRedirectResult, getAdditionalUserInfo, signOut, GoogleAuthProvider } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 import { handleGoogleSignupSuccess } from '@/firebase/users';
@@ -166,11 +166,101 @@ export default function LoginPage() {
   const handleGoogleLogin = async () => {
     if (!auth) return;
     setIsGoogleLoading(true);
+
+    // 1. If running inside Tauri Desktop shell, use the system browser OAuth loopback flow
+    if (isNativeApp()) {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const { listen } = await import('@tauri-apps/api/event');
+
+        // Start local loopback listener
+        const port = await invoke<number>('start_oauth_listener');
+
+        let unlistenFn: (() => void) | null = null;
+        const authPromise = new Promise<string>(async (resolve) => {
+          unlistenFn = await listen<string>('desktop-auth-callback', (event) => {
+            resolve(event.payload);
+          });
+        });
+
+        // Open user's default system browser (Chrome/Edge/Firefox)
+        const bridgeUrl = `https://voiceflow.space/auth/desktop-bridge?port=${port}`;
+        await openExternal(bridgeUrl);
+
+        toast({
+          title: "Browser Opened",
+          description: "Please complete Google Sign-In in your browser.",
+        });
+
+        // Await token from browser (timeout after 5 minutes)
+        const tokenString = await Promise.race([
+          authPromise,
+          new Promise<string>((_, reject) =>
+            setTimeout(() => reject(new Error('Sign-in timed out. Please try again.')), 300000)
+          ),
+        ]);
+
+        if (unlistenFn) (unlistenFn as any)();
+
+        let payload: any = null;
+        try {
+          payload = JSON.parse(atob(tokenString));
+        } catch {
+          payload = JSON.parse(tokenString);
+        }
+
+        if (payload?.idToken) {
+          const credential = GoogleAuthProvider.credential(payload.idToken, payload.accessToken || undefined);
+          const result = await signInWithCredential(auth, credential);
+          const user = result.user;
+          const fallbackName = user.displayName || payload.displayName || (user.email ? user.email.split('@')[0] : 'User');
+
+          const sessionData = {
+            uid: user.uid,
+            email: user.email,
+            displayName: fallbackName,
+            photoURL: user.photoURL || payload.photoURL,
+            isAnonymous: user.isAnonymous,
+            emailVerified: user.emailVerified,
+            isCached: true,
+          };
+          try {
+            localStorage.setItem('voiceflow_auth_session', JSON.stringify(sessionData));
+            localStorage.setItem('userEmail', user.email || '');
+            localStorage.setItem('userName', fallbackName);
+          } catch {}
+
+          toast({
+            title: "Successfully logged in with Google!",
+          });
+
+          try {
+            await handleGoogleSignupSuccess(db, user);
+            await syncDeviceTrial(db, user).catch(() => {});
+          } catch (e) {
+            console.error('User sync error:', e);
+          }
+
+          goToDashboard();
+        }
+      } catch (err: any) {
+        console.error('Desktop Google Sign-In error:', err);
+        toast({
+          variant: "destructive",
+          title: "Google Sign-In Failed",
+          description: err.message || "Could not complete desktop Google sign-in.",
+        });
+      } finally {
+        setIsGoogleLoading(false);
+      }
+      return;
+    }
+
+    // 2. Standard Web Browser: use signInWithPopup
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
 
     try {
-      // 1. Try popup first (best UX on standard web browsers)
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
       const fallbackName = user.displayName || (user.email ? user.email.split('@')[0] : 'User');
@@ -204,34 +294,18 @@ export default function LoginPage() {
 
       goToDashboard();
     } catch (popupError: any) {
-      const isDesktop = typeof window !== 'undefined' && window.innerWidth > 768 && !/Mobi|Android/i.test(navigator.userAgent);
-      // 2. Fall back to redirect if popup is blocked or unsupported in Tauri webview
-      if (
-        popupError?.code === 'auth/operation-not-supported-in-this-environment' ||
-        popupError?.code === 'auth/popup-blocked' ||
-        popupError?.code === 'auth/internal-error' ||
-        (!isDesktop && popupError?.code === 'auth/network-request-failed')
-      ) {
-        toast({
-          title: "Redirecting...",
-          description: "Redirecting to Google Sign-In...",
-        });
-        await signInWithRedirect(auth, provider);
-      } else {
-        // 3. Handle user cancellations gracefully without alarming errors
-        const isCancellation =
-          popupError?.code === 'auth/popup-closed-by-user' ||
-          popupError?.code === 'auth/cancelled-popup-request' ||
-          popupError?.code === 'auth/user-cancelled';
+      const isCancellation =
+        popupError?.code === 'auth/popup-closed-by-user' ||
+        popupError?.code === 'auth/cancelled-popup-request' ||
+        popupError?.code === 'auth/user-cancelled';
 
-        if (!isCancellation) {
-          console.error('Google Sign-In Error:', popupError);
-          toast({
-            variant: 'destructive',
-            title: 'Google Sign-In Failed',
-            description: popupError?.message || 'Could not complete Google sign-in. You can also sign in directly with email & password below.',
-          });
-        }
+      if (!isCancellation) {
+        console.error('Google Sign-In Error:', popupError);
+        toast({
+          variant: 'destructive',
+          title: 'Google Sign-In Failed',
+          description: popupError?.message || 'Could not complete Google sign-in. You can also sign in directly with email & password below.',
+        });
       }
     } finally {
       setIsGoogleLoading(false);

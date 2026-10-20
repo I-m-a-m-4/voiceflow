@@ -173,6 +173,55 @@ fn get_machine_guid() -> String {
 }
 
 #[tauri::command]
+async fn start_oauth_listener(app: tauri::AppHandle) -> Result<u16, String> {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+
+    let app_handle = app.clone();
+    std::thread::spawn(move || {
+        // Accept one connection from the browser callback
+        if let Ok((mut stream, _)) = listener.accept() {
+            let mut buffer = [0u8; 16384];
+            if let Ok(n) = stream.read(&mut buffer) {
+                let req = String::from_utf8_lossy(&buffer[..n]);
+                // Parse GET /callback?token=... HTTP/1.1
+                if let Some(pos) = req.find("token=") {
+                    let after = &req[pos + 6..];
+                    let raw_token = after.split_whitespace().next().unwrap_or("").split('&').next().unwrap_or("");
+                    
+                    // Percent-decode
+                    let mut decoded = Vec::new();
+                    let bytes = raw_token.as_bytes();
+                    let mut i = 0;
+                    while i < bytes.len() {
+                        if bytes[i] == b'%' && i + 2 < bytes.len() {
+                            if let Ok(val) = u8::from_str_radix(std::str::from_utf8(&bytes[i+1..=i+2]).unwrap_or(""), 16) {
+                                decoded.push(val);
+                                i += 3;
+                                continue;
+                            }
+                        }
+                        decoded.push(bytes[i]);
+                        i += 1;
+                    }
+                    let token_str = String::from_utf8_lossy(&decoded).to_string();
+                    let _ = app_handle.emit("desktop-auth-callback", token_str);
+                }
+            }
+
+            let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Voiceflow - Signed In</title><style>body{background:#09090b;color:#fafafa;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}.card{text-align:center;background:#18181b;border:1px solid #27272a;border-radius:16px;padding:36px 32px;max-width:400px;box-shadow:0 20px 25px -5px rgba(0,0,0,0.5)}.icon{width:52px;height:52px;background:#ea580c;color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:24px;font-weight:bold}h2{color:#fff;margin:0 0 8px;font-size:20px}p{color:#a1a1aa;margin:0;font-size:14px;line-height:1.5}</style></head><body><div class=\"card\"><div class=\"icon\">&#10003;</div><h2>Successfully Signed In!</h2><p>You have authenticated with Google. You can now close this tab and return to Voiceflow Desktop.</p></div><script>setTimeout(function(){window.close();},2000);</script></body></html>";
+            let _ = stream.write_all(response.as_bytes());
+            let _ = stream.flush();
+        }
+    });
+
+    Ok(port)
+}
+
+#[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
@@ -218,7 +267,8 @@ pub fn run() {
         win_grid::list_desktop_windows,
         win_grid::read_desktop_grid,
         screen_capture::capture_screen,
-        open_url
+        open_url,
+        start_oauth_listener
     ])
     .plugin(tauri_plugin_sql::Builder::default().build())
     .plugin(tauri_plugin_fs::init())
@@ -231,50 +281,6 @@ pub fn run() {
     .plugin(tauri_plugin_http::init())
     .plugin(tauri_plugin_notification::init())
     .plugin(tauri_plugin_clipboard_manager::init())
-    .plugin(
-        tauri::plugin::Builder::<tauri::Wry>::new("auth-navigation")
-            .on_page_load(|webview, payload| {
-                let url = payload.url().as_str();
-                if url.contains("accounts.google.com") || url.contains("google.com/o/oauth2") {
-                    let js = r#"
-                        (function() {
-                            function injectNav() {
-                                if (document.getElementById('voiceflow-auth-nav-bar')) return;
-                                var bar = document.createElement('div');
-                                bar.id = 'voiceflow-auth-nav-bar';
-                                bar.style.cssText = 'position:fixed;top:14px;left:16px;z-index:2147483647;display:flex;align-items:center;';
-                                
-                                var btn = document.createElement('button');
-                                btn.type = 'button';
-                                btn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg> Cancel &amp; Back to App';
-                                btn.style.cssText = 'background:#18181b;color:#f47125;border:1px solid rgba(244,113,37,0.4);padding:8px 16px;border-radius:9999px;font-size:12px;font-weight:600;cursor:pointer;';
-                                
-                                btn.onclick = function(e) {
-                                    e.preventDefault();
-                                    window.history.back();
-                                };
-                                
-                                window.addEventListener('keydown', function(e) {
-                                    if (e.key === 'Escape') {
-                                        window.history.back();
-                                    }
-                                });
-                                
-                                bar.appendChild(btn);
-                                if (document.body) {
-                                    document.body.appendChild(bar);
-                                }
-                            }
-                            injectNav();
-                            var interval = setInterval(injectNav, 300);
-                            setTimeout(function() { clearInterval(interval); }, 15000);
-                        })();
-                    "#;
-                    let _ = webview.eval(js);
-                }
-            })
-            .build()
-    )
     .plugin(
         tauri_plugin_global_shortcut::Builder::new()
             .with_handler(|app, shortcut, event| {
