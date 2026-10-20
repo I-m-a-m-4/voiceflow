@@ -20,10 +20,10 @@ export function NativeRedirectHandler() {
         
         if (user) {
             // Always redirect logged-in users to the dashboard (standard SaaS behavior)
-            router.replace('/dashboard');
+            router.replace(isNative ? '/dashboard/' : '/dashboard');
         } else if (isNative) {
             // Not logged in, but running in the native Desktop/Mobile app
-            router.replace('/signup');
+            router.replace('/signup/');
         }
     }, [router, user, isUserLoading]);
 

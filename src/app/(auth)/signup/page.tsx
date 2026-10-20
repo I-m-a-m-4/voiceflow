@@ -29,19 +29,35 @@ export default function SignupPage() {
     password: '',
   });
 
+  const isNavigatingRef = React.useRef(false);
+
   const goToDashboard = () => {
+    if (isNavigatingRef.current) return;
+    isNavigatingRef.current = true;
+
+    const isTauri = typeof window !== 'undefined' && (
+      window.location.protocol === 'tauri:' || 
+      window.location.origin.includes('tauri.localhost') || 
+      window.location.protocol === 'asset:' ||
+      (window as any).__TAURI_INTERNALS__ !== undefined
+    );
+    const destination = isTauri ? '/dashboard/' : '/dashboard';
+
     try {
-      router.replace('/dashboard');
+      router.replace(destination);
     } catch {
-      router.push('/dashboard');
+      try {
+        router.push(destination);
+      } catch {}
     }
-    // Safety fallback if client router transition does not fire in desktop environment
+
+    // Direct window.location fallback if client router has not transitioned after 250ms
     if (typeof window !== 'undefined') {
       setTimeout(() => {
-        if (window.location.pathname.includes('/login') || window.location.pathname.includes('/signup')) {
-          window.location.href = '/dashboard';
+        if (!window.location.pathname.includes('/dashboard')) {
+          window.location.href = destination;
         }
-      }, 500);
+      }, 250);
     }
   };
 
@@ -61,7 +77,7 @@ export default function SignupPage() {
     if (!auth) return;
 
     // Listen directly to auth state to redirect the very millisecond a session is confirmed
-    const unsubscribe = auth.onAuthStateChanged((firebaseUser) => {
+    const unsubscribe = auth.onAuthStateChanged(async (firebaseUser) => {
       if (firebaseUser) {
         const fallbackName = firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'User');
         const sessionData = {
@@ -77,6 +93,10 @@ export default function SignupPage() {
           localStorage.setItem('voiceflow_auth_session', JSON.stringify(sessionData));
           localStorage.setItem('userEmail', firebaseUser.email || '');
           localStorage.setItem('userName', fallbackName);
+        } catch {}
+        try {
+          await handleGoogleSignupSuccess(db, firebaseUser);
+          await syncDeviceTrial(db, firebaseUser).catch(() => {});
         } catch {}
         goToDashboard();
       }
@@ -110,15 +130,13 @@ export default function SignupPage() {
           description: 'Successfully signed up with Google.',
         });
 
-        // Background sync to Firestore without delaying navigation
-        (async () => {
-          try {
-            await handleGoogleSignupSuccess(db, redirectUser);
-            await syncDeviceTrial(db, redirectUser).catch(() => {});
-          } catch (e) {
-            console.error('Background user sync error:', e);
-          }
-        })();
+        // Ensure user profile is provisioned before navigating
+        try {
+          await handleGoogleSignupSuccess(db, redirectUser);
+          await syncDeviceTrial(db, redirectUser).catch(() => {});
+        } catch (e) {
+          console.error('User sync error:', e);
+        }
 
         goToDashboard();
       })
@@ -178,15 +196,13 @@ export default function SignupPage() {
         description: 'Successfully signed up with Google.',
       });
 
-      // Background sync to Firestore without delaying navigation
-      (async () => {
-        try {
-          await handleGoogleSignupSuccess(db, user);
-          await syncDeviceTrial(db, user).catch(() => {});
-        } catch (e) {
-          console.error('Background user sync error:', e);
-        }
-      })();
+      // Ensure user profile is provisioned before navigating
+      try {
+        await handleGoogleSignupSuccess(db, user);
+        await syncDeviceTrial(db, user).catch(() => {});
+      } catch (e) {
+        console.error('User sync error:', e);
+      }
 
       goToDashboard();
     } catch (popupError: any) {

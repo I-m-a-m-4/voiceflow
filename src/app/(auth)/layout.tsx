@@ -23,9 +23,27 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
   useEffect(() => {
     // If the user is authenticated and is no longer loading, redirect to the dashboard.
     if (user && !isUserLoading) {
-      router.replace('/dashboard');
+      const isTauri = typeof window !== 'undefined' && (
+        window.location.protocol === 'tauri:' || 
+        window.location.origin.includes('tauri.localhost') || 
+        window.location.protocol === 'asset:' ||
+        (window as any).__TAURI_INTERNALS__ !== undefined
+      );
+      const destination = isTauri ? '/dashboard/' : '/dashboard';
+
+      try {
+        router.replace(destination);
+      } catch {
+        router.push(destination);
+      }
+
       if (typeof window !== 'undefined') {
-        window.location.href = '/dashboard';
+        const timer = setTimeout(() => {
+          if (!window.location.pathname.includes('/dashboard')) {
+            window.location.href = destination;
+          }
+        }, 250);
+        return () => clearTimeout(timer);
       }
     }
   }, [user, isUserLoading, router, pathname]);
