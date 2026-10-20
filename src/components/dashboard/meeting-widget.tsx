@@ -26,7 +26,8 @@ import {
   Minus,
   Paperclip,
   X,
-  Image as ImageIcon
+  Image as ImageIcon,
+  StopCircle
 } from 'lucide-react';
 import { captureScreenBase64 } from '@/lib/capture-screen';
 import ReactMarkdown from 'react-markdown';
@@ -84,6 +85,17 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const lastImageBase64Ref = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const handleHaltGeneration = () => {
+    if (abortControllerRef.current) {
+      try {
+        abortControllerRef.current.abort();
+      } catch (e) {}
+      abortControllerRef.current = null;
+    }
+    setIsQuerying(false);
+  };
 
   // Sync transcript from props or live background Whisper events
   useEffect(() => {
@@ -267,6 +279,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
   };
 
   const handleStartOver = () => {
+    handleHaltGeneration();
     setMessages([]);
     lastImageBase64Ref.current = null;
     if (typeof window !== 'undefined') {
@@ -402,10 +415,14 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
     if (isHidden) setIsHidden(false);
 
     setIsQuerying(true);
+    // Set up new AbortController for this query
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
       // Detect if prompt requires visual screen inspection
       const wantsScreenAnalysis = includeScreenCapture || 
-        /\b(screen|slide|display|image|photo|visual|picture|diagram|look at this|see on|what's on my screen|screenshot)\b/i.test(promptToUse);
+        /\b(screen|slide|display|image|photo|visual|picture|diagram|look at this|see on|what's on my screen|screenshot|code)\b/i.test(promptToUse);
 
       let base64Image: string | null = null;
       if (wantsScreenAnalysis && !lastImageBase64Ref.current) {
@@ -436,6 +453,8 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
         }
       }
 
+      if (controller.signal.aborted) return;
+
       const effectiveImage = base64Image || lastImageBase64Ref.current || "";
       const customContext = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_custom_context') || '' : '';
       const activeTranscript = liveTranscript || transcript || (typeof window !== 'undefined' ? localStorage.getItem('voiceflow_live_transcript') || '' : '');
@@ -451,9 +470,17 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
 
       let cleanAnswer = "";
       try {
+        const fetchTimeoutController = new AbortController();
+        const timeoutId = setTimeout(() => fetchTimeoutController.abort(), 12000);
+        
+        // Link parent controller abort
+        const onParentAbort = () => fetchTimeoutController.abort();
+        controller.signal.addEventListener('abort', onParentAbort);
+
         const res = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          signal: fetchTimeoutController.signal,
           body: JSON.stringify({ 
             imageBase64: effectiveImage, 
             prompt: promptToUse,
@@ -462,6 +489,8 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
             history: historyPayload
           })
         });
+        clearTimeout(timeoutId);
+        controller.signal.removeEventListener('abort', onParentAbort);
         
         const contentType = res.headers.get("content-type") || "";
         if (res.ok && contentType.includes("application/json")) {
@@ -470,9 +499,12 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
             ? (data.text.content || JSON.stringify(data.text))
             : (data.text || "");
         }
-      } catch (remoteErr) {
-        console.warn("Server ask-screen endpoint failed, checking client fallback:", remoteErr);
+      } catch (remoteErr: any) {
+        if (controller.signal.aborted) return;
+        console.warn("Server ask-screen endpoint timed out or failed, checking client fallback:", remoteErr?.message || remoteErr);
       }
+
+      if (controller.signal.aborted) return;
 
       // Check for bogus error string or empty answer
       if (
@@ -490,10 +522,10 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
         const groqApiKey = process.env.NEXT_PUBLIC_GROQ_API_KEY || process.env.GROQ_API_KEY;
         const openRouterKey = process.env.NEXT_PUBLIC_OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY;
         const transcriptSnippet = (transcript || "").slice(-3000) || "None yet";
-        const systemPrompt = "You are Voiceflow AI, an articulate, intelligent, and natural live meeting co-pilot. When answering, be direct, conversational, and helpful. Use clean Markdown bullet points when listing ideas.";
+        const systemPrompt = "You are Voiceflow AI, an articulate, intelligent, and natural live meeting co-pilot and coding assistant. When answering, be direct, conversational, and helpful. Use clean Markdown code blocks or bullet points.";
 
         // Try client-side Groq first for ultra-fast (200ms) execution
-        if (groqApiKey) {
+        if (groqApiKey && !controller.signal.aborted) {
           const groqModels = [
             "openai/gpt-oss-120b",
             "qwen/qwen3.8-27b",
@@ -501,6 +533,12 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
           ];
 
           for (const gModel of groqModels) {
+            if (controller.signal.aborted) break;
+            const modelTimeout = new AbortController();
+            const tid = setTimeout(() => modelTimeout.abort(), 6000);
+            const onParent = () => modelTimeout.abort();
+            controller.signal.addEventListener('abort', onParent);
+
             try {
               const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                 method: "POST",
@@ -508,6 +546,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
                   "Content-Type": "application/json",
                   "Authorization": `Bearer ${groqApiKey}`,
                 },
+                signal: modelTimeout.signal,
                 body: JSON.stringify({
                   model: gModel,
                   messages: [
@@ -519,6 +558,8 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
                   max_tokens: 2048,
                 })
               });
+              clearTimeout(tid);
+              controller.signal.removeEventListener('abort', onParent);
 
               if (groqRes.ok) {
                 const groqData = await groqRes.json();
@@ -529,13 +570,17 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
                 }
               }
             } catch (gErr) {
+              clearTimeout(tid);
+              controller.signal.removeEventListener('abort', onParent);
               // try next model
             }
           }
         }
 
+        if (controller.signal.aborted) return;
+
         // Try client-side OpenRouter if Groq was empty
-        if (!cleanAnswer && openRouterKey) {
+        if (!cleanAnswer && openRouterKey && !controller.signal.aborted) {
           try {
             const messagesPayload: any[] = [
               { role: "system", content: systemPrompt },
@@ -573,6 +618,12 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
             const clientModels = effectiveImage ? clientVisionModels : clientTextModels;
 
             for (const model of clientModels) {
+              if (controller.signal.aborted) break;
+              const orTimeout = new AbortController();
+              const tid = setTimeout(() => orTimeout.abort(), 7000);
+              const onParent = () => orTimeout.abort();
+              controller.signal.addEventListener('abort', onParent);
+
               try {
                 const orRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
                   method: "POST",
@@ -582,6 +633,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
                     "HTTP-Referer": "https://voiceflow.space",
                     "X-Title": "Voiceflow Co-Pilot"
                   },
+                  signal: orTimeout.signal,
                   body: JSON.stringify({
                     model: model,
                     messages: messagesPayload,
@@ -589,6 +641,8 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
                     max_tokens: 2048,
                   })
                 });
+                clearTimeout(tid);
+                controller.signal.removeEventListener('abort', onParent);
 
                 if (orRes.ok) {
                   const orData = await orRes.json();
@@ -599,6 +653,8 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
                   }
                 }
               } catch (modelErr) {
+                clearTimeout(tid);
+                controller.signal.removeEventListener('abort', onParent);
                 // try next model
               }
             }
@@ -606,6 +662,8 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
             console.warn("Client OpenRouter fallback skipped:", e);
           }
         }
+
+        if (controller.signal.aborted) return;
 
         // Smart, natural conversational fallback based on intent
         if (!cleanAnswer) {
@@ -631,6 +689,8 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
         }
       }
 
+      if (controller.signal.aborted) return;
+
       const userMsg: ChatMessage = {
         id: `user-${Date.now()}`,
         sender: 'user',
@@ -648,6 +708,9 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
       setMessages((prev) => [...prev, userMsg, aiMsg]);
       if (!customPrompt) setQuery("");
     } catch (err: any) {
+      if (controller.signal.aborted || err?.name === 'AbortError') {
+        return; // Silent exit on user halt
+      }
       console.error("AI Error:", err);
       const displayErr = typeof err === 'string' 
         ? err 
@@ -661,6 +724,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
       };
       setMessages((prev) => [...prev, errMsg]);
     } finally {
+      abortControllerRef.current = null;
       setIsQuerying(false);
     }
   };
@@ -923,9 +987,19 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
                     <Bot size={11} /> Voiceflow AI
                   </span>
                 </div>
-                <div className="rounded-xl p-3 bg-[#212124] border border-white/10 text-white/70 text-[13px] flex items-center gap-2">
-                  <Loader2 size={14} className="animate-spin text-voiceflow-orange" />
-                  <span>Generating...</span>
+                <div className="rounded-xl p-3 bg-[#212124] border border-white/10 text-white/90 text-[13px] flex items-center justify-between w-full shadow-sm">
+                  <div className="flex items-center gap-2 text-white/80">
+                    <Loader2 size={14} className="animate-spin text-voiceflow-orange" />
+                    <span>Generating answer...</span>
+                  </div>
+                  <button
+                    onClick={handleHaltGeneration}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 hover:text-red-200 border border-red-500/30 text-xs font-semibold transition-all active:scale-95 shadow-sm"
+                    title="Stop / Cancel AI response generation"
+                  >
+                    <Square size={11} className="fill-current" />
+                    <span>Halt</span>
+                  </button>
                 </div>
               </div>
             )}
@@ -1063,17 +1137,24 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
               className="flex-1 bg-transparent border-none outline-none text-white text-xs px-2.5 placeholder:text-white/40 disabled:opacity-50"
             />
 
-            <button 
-              onClick={() => handleAskAI()}
-              disabled={isQuerying || (!query.trim() && !hasAttachedImage)}
-              className="w-8 h-8 rounded-full bg-voiceflow-orange hover:bg-orange-600 flex items-center justify-center transition-colors shadow-md disabled:opacity-40"
-            >
-              {isQuerying ? (
-                <Loader2 size={13} className="text-white animate-spin" />
-              ) : (
+            {isQuerying ? (
+              <button 
+                onClick={handleHaltGeneration}
+                className="w-8 h-8 rounded-full bg-red-600 hover:bg-red-700 flex items-center justify-center transition-all shadow-md active:scale-95 text-white"
+                title="Halt / Stop AI generation"
+              >
+                <Square size={12} className="fill-current text-white" />
+              </button>
+            ) : (
+              <button 
+                onClick={() => handleAskAI()}
+                disabled={!query.trim() && !hasAttachedImage}
+                className="w-8 h-8 rounded-full bg-voiceflow-orange hover:bg-orange-600 flex items-center justify-center transition-colors shadow-md disabled:opacity-40"
+                title="Send query"
+              >
                 <Play size={13} fill="currentColor" className="text-white ml-0.5" />
-              )}
-            </button>
+              </button>
+            )}
           </div>
 
         </div>

@@ -31,15 +31,72 @@ export interface MeetingData {
 }
 
 export async function saveMeeting(data: Omit<MeetingData, 'createdAt'>) {
-  if (!firestore) throw new Error("Firestore not initialized");
-  
-  const meetingsRef = collection(firestore, 'meetings');
-  const docRef = await addDoc(meetingsRef, {
-    ...data,
-    createdAt: serverTimestamp(),
-  });
-  
-  return docRef.id;
+  try {
+    if (firestore) {
+      const meetingsRef = collection(firestore, 'meetings');
+      const docRef = await addDoc(meetingsRef, {
+        ...data,
+        createdAt: serverTimestamp(),
+      });
+      return docRef.id;
+    }
+  } catch (err) {
+    console.warn("Remote saveMeeting failed (possibly offline). Saving locally:", err);
+  }
+
+  // Resilient offline fallback: save to localStorage so transcript is never lost
+  const localId = `offline-${Date.now()}`;
+  try {
+    if (typeof window !== 'undefined') {
+      const offlineList = JSON.parse(localStorage.getItem('voiceflow_offline_meetings') || '[]');
+      offlineList.unshift({
+        id: localId,
+        ...data,
+        createdAt: new Date().toISOString(),
+        isOfflineBackup: true,
+      });
+      localStorage.setItem('voiceflow_offline_meetings', JSON.stringify(offlineList.slice(0, 30)));
+    }
+  } catch (e) {
+    console.error("Critical: Failed to save offline meeting backup:", e);
+  }
+  return localId;
+}
+
+export function getOfflineMeetings(): (MeetingData & { id: string; isOfflineBackup?: boolean })[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    return JSON.parse(localStorage.getItem('voiceflow_offline_meetings') || '[]');
+  } catch {
+    return [];
+  }
+}
+
+export async function syncOfflineMeetings(): Promise<number> {
+  if (typeof window === 'undefined' || !firestore) return 0;
+  const offline = getOfflineMeetings();
+  if (offline.length === 0) return 0;
+
+  let synced = 0;
+  const remaining: any[] = [];
+
+  for (const item of offline) {
+    try {
+      const { id, isOfflineBackup, ...dataToSave } = item as any;
+      const meetingsRef = collection(firestore, 'meetings');
+      await addDoc(meetingsRef, {
+        ...dataToSave,
+        createdAt: serverTimestamp(),
+        syncedFromOffline: true,
+      });
+      synced++;
+    } catch (e) {
+      remaining.push(item);
+    }
+  }
+
+  localStorage.setItem('voiceflow_offline_meetings', JSON.stringify(remaining));
+  return synced;
 }
 
 export async function updateMeeting(meetingId: string, data: Partial<MeetingData>, userId?: string) {

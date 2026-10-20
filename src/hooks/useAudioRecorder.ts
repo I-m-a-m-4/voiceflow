@@ -191,6 +191,15 @@ export function useAudioRecorder() {
             if (currentText) {
               setTranscript(currentText);
               if (typeof window !== 'undefined') {
+                try {
+                  localStorage.setItem('voiceflow_live_transcript', currentText);
+                  // Also maintain an ongoing emergency backup of the current meeting in progress
+                  localStorage.setItem('voiceflow_current_meeting_backup', JSON.stringify({
+                    transcript: currentText,
+                    updatedAt: new Date().toISOString(),
+                    startTime: startTimeRef.current,
+                  }));
+                } catch (e) {}
                 window.dispatchEvent(new CustomEvent('voiceflow-live-transcript', { detail: { transcript: currentText } }));
               }
             }
@@ -307,6 +316,23 @@ export function useAudioRecorder() {
       }).catch((err) => {
         console.info("Audio auto-access warmup:", err);
       });
+    }
+
+    // Auto-sync any offline saved meetings when device goes online
+    const handleOnline = async () => {
+      try {
+        const { syncOfflineMeetings } = await import('@/firebase/meetings');
+        const count = await syncOfflineMeetings();
+        if (count > 0 && typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('voiceflow-meeting-saved'));
+        }
+      } catch (e) {
+        console.warn("Offline sync retry failed:", e);
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', handleOnline);
+      handleOnline(); // check on mount as well
     }
 
     return () => {
@@ -473,7 +499,33 @@ export function useAudioRecorder() {
       }
       
     } catch (err) {
-      console.error("Processing failed", err);
+      console.error("Processing failed (e.g. network lost), executing emergency offline transcript backup:", err);
+      // Emergency offline backup: if online transcribe/summarize failed, recover from live transcript or backup
+      try {
+        const cachedTranscript = transcript || (typeof window !== 'undefined' ? localStorage.getItem('voiceflow_live_transcript') || '' : '');
+        if (cachedTranscript.trim() && user?.uid) {
+          const rawChat = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_widget_messages') : null;
+          let currentChatMessages: any[] = [];
+          if (rawChat) {
+            try { currentChatMessages = JSON.parse(rawChat); } catch {}
+          }
+          await saveMeeting({
+            userId: user.uid,
+            transcript: cachedTranscript,
+            summary: `Meeting recorded offline (${new Date().toLocaleDateString()}). Real-time transcript preserved during network interruption.`,
+            durationSeconds: elapsedSecs,
+            durationMinutes: Math.max(1, Math.round(elapsedSecs / 60)),
+            type,
+            chatMessages: currentChatMessages,
+            title: `Session Backup (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`
+          });
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('voiceflow-meeting-saved'));
+          }
+        }
+      } catch (backupErr) {
+        console.error("Emergency backup write failed:", backupErr);
+      }
     } finally {
       setIsProcessing(false);
       if (typeof window !== 'undefined') {
