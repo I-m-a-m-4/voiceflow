@@ -157,7 +157,7 @@ Core Teleprompter Principles:
               method: "POST",
               headers: {
                 "Authorization": `Bearer ${openRouterKey}`,
-                "HTTP-Referer": "https://voiceflow.space",
+                "HTTP-Referer": "https://voiceflow-azure.vercel.app",
                 "X-Title": "Voiceflow Co-Pilot",
                 "Content-Type": "application/json"
               },
@@ -257,7 +257,7 @@ Core Teleprompter Principles:
             method: "POST",
             headers: {
               "Authorization": `Bearer ${openRouterKey}`,
-              "HTTP-Referer": "https://voiceflow.space",
+              "HTTP-Referer": "https://voiceflow-azure.vercel.app",
               "X-Title": "Voiceflow Co-Pilot",
               "Content-Type": "application/json"
             },

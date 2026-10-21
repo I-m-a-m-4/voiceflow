@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Eye, EyeOff, Loader2, ArrowRight } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
-import { isNativeApp, openExternal } from '@/lib/platform';
+import { isNativeApp, openExternal, getWebBaseUrl } from '@/lib/platform';
 import { syncDeviceTrial } from '@/lib/device-fingerprint';
 
 export default function LoginPage() {
@@ -184,7 +184,7 @@ export default function LoginPage() {
         });
 
         // Open user's default system browser (Chrome/Edge/Firefox)
-        const bridgeUrl = `https://voiceflow.space/auth/desktop-bridge?port=${port}`;
+        const bridgeUrl = `${getWebBaseUrl()}/auth/desktop-bridge?port=${port}`;
         await openExternal(bridgeUrl);
 
         toast({

@@ -42,7 +42,7 @@ import {
   type BehaviorSegment,
 } from '@/lib/behavior-segments';
 
-const BASE_URL = (process.env.NEXT_PUBLIC_BASE_URL || 'https://voiceflow.space').replace(/\/+$/, '');
+const BASE_URL = (process.env.NEXT_PUBLIC_BASE_URL || 'https://voiceflow-azure.vercel.app').replace(/\/+$/, '');
 
 /** The signature every campaign goes out under. */
 export const CAMPAIGN_FROM = 'Imam Shaffy <hello@voiceflow.space>';

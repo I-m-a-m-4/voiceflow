@@ -213,6 +213,7 @@ jobs:
             src-tauri/target/release/bundle/dmg/*.dmg
             src-tauri/target/release/bundle/macos/*.app
           if-no-files-found: warn
+          retention-days: 1
 
   release-android:
     name: Build & Release (Android)
@@ -444,6 +445,7 @@ jobs:
             ./zeneva-*-Android.apk
             ./zeneva-*-Android.aab
           if-no-files-found: warn
+          retention-days: 1
 
   release-ios:
     name: Build & Release (iOS)
@@ -546,3 +548,4 @@ jobs:
             src-tauri/gen/apple/build/**/*.app
             /Users/runner/Library/Developer/Xcode/DerivedData/**/Build/**/*.app
           if-no-files-found: warn
+          retention-days: 1

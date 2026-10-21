@@ -10,6 +10,8 @@ import {
 } from './push-log';
 import { INTERNAL_ACCOUNT_EMAILS } from '@/lib/platform-revenue';
 
+const BASE_URL = (process.env.NEXT_PUBLIC_BASE_URL || 'https://voiceflow-azure.vercel.app').replace(/\/+$/, '');
+
 /**
  * Push to one user's devices.
  *
@@ -67,8 +69,8 @@ export async function sendNotificationToUser(
             notification: {
                 title: payload.title,
                 body: payload.body,
-                // voiceflow.space, not voiceflow.app — the latter is not a host we serve.
-                imageUrl: 'https://voiceflow.space/icon.svg',
+                // voiceflow-azure.vercel.app host
+                imageUrl: `${BASE_URL}/icon.svg`,
             },
             data: {
                 url,
@@ -100,11 +102,11 @@ export async function sendNotificationToUser(
             },
             webpush: {
                 notification: {
-                    icon: 'https://voiceflow.space/icon.svg',
-                    badge: 'https://voiceflow.space/icon.svg',
+                    icon: `${BASE_URL}/icon.svg`,
+                    badge: `${BASE_URL}/icon.svg`,
                 },
                 fcmOptions: {
-                    link: `https://voiceflow.space${url.startsWith('/') ? url : '/' + url}`,
+                    link: `${BASE_URL}${url.startsWith('/') ? url : '/' + url}`,
                 },
             },
             tokens: tokens,
@@ -229,7 +231,7 @@ export async function broadcastToAllDevices(payload: {
             notification: {
                 title: payload.title,
                 body: payload.body,
-                imageUrl: 'https://voiceflow.space/icon.svg',
+                imageUrl: `${BASE_URL}/icon.svg`,
             },
             data: {
                 url,
@@ -253,11 +255,11 @@ export async function broadcastToAllDevices(payload: {
             },
             webpush: {
                 notification: {
-                    icon: 'https://voiceflow.space/icon.svg',
-                    badge: 'https://voiceflow.space/icon.svg',
+                    icon: `${BASE_URL}/icon.svg`,
+                    badge: `${BASE_URL}/icon.svg`,
                 },
                 fcmOptions: {
-                    link: `https://voiceflow.space${url.startsWith('/') ? url : '/' + url}`,
+                    link: `${BASE_URL}${url.startsWith('/') ? url : '/' + url}`,
                 },
             },
             tokens: chunk.map((t) => t.token),

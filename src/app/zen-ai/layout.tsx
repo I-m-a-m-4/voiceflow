@@ -12,7 +12,7 @@ export const metadata: Metadata = {
     title: 'Zen AI | Ask Your Shop Anything',
     description:
       'Stock, sales, customers and forecasts in plain words. Zen AI proposes; you approve. Nothing is written without you.',
-    url: 'https://voiceflow.space/zen-ai',
+    url: 'https://voiceflow-azure.vercel.app/zen-ai',
     type: 'website',
   },
   twitter: {

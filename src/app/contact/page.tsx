@@ -8,10 +8,10 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'Contact Voiceflow - Tactical Support for Retailers',
     description: 'Reach out to the Voiceflow team for support, pricing inquiries, or partnership opportunities.',
-    url: 'https://voiceflow.space/contact',
+    url: 'https://voiceflow-azure.vercel.app/contact',
     images: [
       {
-        url: 'https://voiceflow.space/herolytics.svg',
+        url: 'https://voiceflow-azure.vercel.app/herolytics.svg',
         width: 1200,
         height: 630,
         alt: 'Contact Voiceflow Support',
@@ -23,7 +23,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'Contact Voiceflow Operational Support',
     description: 'We are here to assist with your retail mission.',
-    images: ['https://voiceflow.space/herolytics.svg'],
+    images: ['https://voiceflow-azure.vercel.app/herolytics.svg'],
   },
 };
 

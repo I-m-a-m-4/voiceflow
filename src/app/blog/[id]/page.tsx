@@ -10,7 +10,7 @@ type Props = {
   searchParams?: Promise<{ [key: string]: string | string[] | undefined }>;
 };
 
-const siteUrl = 'https://voiceflow.space';
+const siteUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://voiceflow-azure.vercel.app';
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const resolvedParams = await params;

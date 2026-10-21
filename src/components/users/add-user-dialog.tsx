@@ -118,7 +118,7 @@ export default function AddUserDialog({ isOpen, onOpenChange, businessId, busine
             });
 
             const isDesktopOrLocal = window.location.origin.includes('localhost') || window.location.origin.includes('tauri.localhost') || window.location.origin.includes('127.0.0.1');
-            const baseUrl = isDesktopOrLocal ? 'https://voiceflow.space' : window.location.origin;
+            const baseUrl = isDesktopOrLocal ? (process.env.NEXT_PUBLIC_BASE_URL || 'https://voiceflow-azure.vercel.app') : window.location.origin;
             const invitationLink = `${baseUrl}/signup?invitationCode=${invitationCode}`;
 
             try {

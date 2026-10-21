@@ -630,7 +630,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
                   headers: {
                     "Content-Type": "application/json",
                     "Authorization": `Bearer ${openRouterKey}`,
-                    "HTTP-Referer": "https://voiceflow.space",
+                    "HTTP-Referer": "https://voiceflow-azure.vercel.app",
                     "X-Title": "Voiceflow Co-Pilot"
                   },
                   signal: orTimeout.signal,

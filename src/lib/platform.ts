@@ -39,6 +39,14 @@ export function apiBase(): string {
   return base.replace(/\/+$/, '');
 }
 
+/**
+ * Origin for web-hosted landing pages, OAuth loopback bridges, and web portal destinations.
+ */
+export function getWebBaseUrl(): string {
+  const base = process.env.NEXT_PUBLIC_BASE_URL || 'https://voiceflow-azure.vercel.app';
+  return base.replace(/\/+$/, '');
+}
+
 /** Running inside the Android or iOS build specifically - not desktop, not web. */
 export function isMobileApp(): boolean {
   if (!isNativeApp()) return false;

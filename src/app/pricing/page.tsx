@@ -8,11 +8,11 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'Voiceflow Pricing - Scale Your Retail Business',
     description: 'Affordable, high-fidelity inventory management and POS software tailored for Nigerian retailers.',
-    url: 'https://voiceflow.space/pricing',
+    url: 'https://voiceflow-azure.vercel.app/pricing',
     siteName: 'Voiceflow',
     images: [
       {
-        url: 'https://voiceflow.space/herolytics.svg',
+        url: 'https://voiceflow-azure.vercel.app/herolytics.svg',
         width: 1200,
         height: 630,
         alt: 'Voiceflow Pricing Plans',
@@ -25,7 +25,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'Voiceflow Pricing - Scale Your Retail Business',
     description: 'Start for free and automate your retail operations today.',
-    images: ['https://voiceflow.space/herolytics.svg'],
+    images: ['https://voiceflow-azure.vercel.app/herolytics.svg'],
   },
 };
 

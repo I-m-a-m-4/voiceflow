@@ -154,20 +154,20 @@ export default function BlogLandingPage() {
                 "@graph": [
                   {
                     "@type": "CollectionPage",
-                    "@id": "https://voiceflow.space/blog/#webpage",
-                    "url": "https://voiceflow.space/blog",
+                    "@id": "https://voiceflow-azure.vercel.app/blog/#webpage",
+                    "url": "https://voiceflow-azure.vercel.app/blog",
                     "name": "Voiceflow Blog - Master Your Retail Business",
                     "description": "Expert insights on retail growth, operations, and inventory intelligence.",
                     "isPartOf": {
-                      "@id": "https://voiceflow.space/#website"
+                      "@id": "https://voiceflow-azure.vercel.app/#website"
                     }
                   },
                   {
                     "@type": "Blog",
-                    "@id": "https://voiceflow.space/blog/#blog",
+                    "@id": "https://voiceflow-azure.vercel.app/blog/#blog",
                     "name": "Voiceflow Retail Insights",
                     "publisher": {
-                      "@id": "https://voiceflow.space/#organization"
+                      "@id": "https://voiceflow-azure.vercel.app/#organization"
                     }
                   }
                 ]

@@ -43,7 +43,7 @@ const jakarta = Plus_Jakarta_Sans({
   display: 'swap',
 });
 
-const siteUrl = 'https://voiceflow.space';
+const siteUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://voiceflow-azure.vercel.app';
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),

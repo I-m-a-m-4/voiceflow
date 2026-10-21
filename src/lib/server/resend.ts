@@ -3,7 +3,7 @@ import { adminFirestore } from '@/firebase/admin';
 import { v4 as uuidv4 } from 'uuid';
 import { UNSUBSCRIBE_TOKEN } from '@/lib/email-templates';
 
-const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://voiceflow.space';
+const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://voiceflow-azure.vercel.app';
 
 /**
  * Lazy-initialized Resend client to ensure environment variables are loaded.
@@ -99,7 +99,7 @@ function wrapInTemplate(body: string): string {
         <p style="margin: 0; font-size: 12px; line-height: 1.5;">
           <strong>Account Executive</strong><br/>
           Voiceflow POS & Inventory<br/>
-          <a href="https://voiceflow.space" style="color: #f97316; text-decoration: none; font-weight: 600;">Launch your workspace →</a>
+          <a href="https://voiceflow-azure.vercel.app" style="color: #f97316; text-decoration: none; font-weight: 600;">Launch your workspace →</a>
         </p>
       </div>
 

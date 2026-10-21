@@ -38,7 +38,7 @@ export default function robots(): MetadataRoute.Robots {
         ],
       },
     ],
-    sitemap: 'https://voiceflow.space/sitemap.xml',
-    host: 'https://voiceflow.space',
+    sitemap: `${process.env.NEXT_PUBLIC_BASE_URL || 'https://voiceflow-azure.vercel.app'}/sitemap.xml`,
+    host: process.env.NEXT_PUBLIC_BASE_URL || 'https://voiceflow-azure.vercel.app',
   };
 }

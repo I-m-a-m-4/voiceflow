@@ -2,7 +2,7 @@ import { MetadataRoute } from 'next';
 import { adminFirestore } from '@/firebase/admin';
 import { allBlogPosts } from '@/lib/blog-data';
 
-const baseUrl = 'https://voiceflow.space';
+const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://voiceflow-azure.vercel.app';
 
 // Only routes that render real content to an anonymous visitor belong here.
 // Auth-gated app routes and the /store/* rewrite target are excluded — see
