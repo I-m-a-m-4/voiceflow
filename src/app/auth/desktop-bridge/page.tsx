@@ -27,7 +27,7 @@ function DesktopBridgeContent() {
     return () => unsub();
   }, []);
 
-  const transferAuthToDesktop = async (user: User, idToken?: string, accessToken?: string) => {
+  const transferAuthToDesktop = async (user: User, googleIdToken?: string, googleAccessToken?: string) => {
     if (!port) {
       setErrorMessage("No desktop port specified. Please launch authentication directly from your Voiceflow Desktop App.");
       return;
@@ -37,10 +37,15 @@ function DesktopBridgeContent() {
       setIsLoading(true);
       setErrorMessage(null);
 
+      // Fetch the Firebase ID Token
+      const firebaseToken = await user.getIdToken();
+
       // Build payload for desktop client
       const payload = {
-        idToken: idToken || (await user.getIdToken()),
-        accessToken: accessToken || '',
+        // If we have direct Google IdP tokens from popup, pass them; otherwise pass firebaseToken
+        idToken: googleIdToken || '',
+        accessToken: googleAccessToken || '',
+        firebaseToken,
         uid: user.uid,
         email: user.email,
         displayName: user.displayName,
@@ -92,7 +97,43 @@ function DesktopBridgeContent() {
   };
 
   return (
-    <div className="min-h-screen bg-[#09090b] text-[#f4f4f5] flex flex-col items-center justify-center p-4 selection:bg-orange-500/20">
+    <div className="min-h-screen bg-[#09090b] text-[#f4f4f5] flex flex-col items-center justify-center p-4 selection:bg-orange-500/20 relative">
+      {/* Top Banner Prompt after successful sign-in */}
+      {isSuccess && (
+        <div className="fixed top-4 inset-x-4 max-w-xl mx-auto z-50 animate-in slide-in-from-top duration-300">
+          <div className="bg-[#1c1917]/95 border border-orange-500/30 backdrop-blur-md rounded-2xl p-3.5 shadow-2xl shadow-orange-950/40 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-orange-500/15 border border-orange-500/30 flex items-center justify-center shrink-0">
+                <Monitor className="w-4 h-4 text-orange-400" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-white truncate">
+                  Open Voiceflow for a much smoother flow
+                </p>
+                <p className="text-[11px] text-zinc-400 truncate">
+                  Continue where you left off in the desktop app
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <a
+                href={port ? `http://127.0.0.1:${port}/callback` : '#'}
+                onClick={(e) => {
+                  if (!port) {
+                    e.preventDefault();
+                    window.close();
+                  }
+                }}
+                className="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-xs font-medium transition-all shadow-md shadow-orange-600/20 flex items-center gap-1.5"
+              >
+                <span>Open Voiceflow</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
       <Card className="w-full max-w-md bg-[#18181b] border-[#27272a] shadow-2xl overflow-hidden rounded-2xl">
         <div className="h-1.5 w-full bg-gradient-to-r from-orange-600 via-amber-500 to-orange-500" />
         
@@ -116,8 +157,12 @@ function DesktopBridgeContent() {
               </div>
               <h3 className="text-lg font-semibold text-white">Authenticated Successfully!</h3>
               <p className="text-xs text-zinc-400 mt-1 max-w-xs">
-                Redirecting back to your Voiceflow Desktop App... You can safely close this browser window.
+                Redirecting back to your Voiceflow Desktop App... You can safely return to Voiceflow Desktop.
               </p>
+              <div className="mt-5 p-3 rounded-xl bg-orange-500/10 border border-orange-500/20 text-xs text-orange-300 flex items-center gap-2">
+                <Monitor className="w-4 h-4 shrink-0 text-orange-400" />
+                <span>Switch back to Voiceflow for a much smoother flow</span>
+              </div>
             </div>
           ) : (
             <div className="w-full space-y-4">

@@ -210,24 +210,33 @@ export default function SignupPage() {
           payload = JSON.parse(tokenString);
         }
 
-        if (payload?.idToken) {
-          const credential = GoogleAuthProvider.credential(payload.idToken, payload.accessToken || undefined);
-          const result = await signInWithCredential(auth, credential);
-          const user = result.user;
-          const fallbackName = user.displayName || payload.displayName || (user.email ? user.email.split('@')[0] : 'User');
+        if (payload?.uid || payload?.idToken || payload?.firebaseToken) {
+          let user: any = null;
 
+          if (payload.idToken) {
+            try {
+              const credential = GoogleAuthProvider.credential(payload.idToken, payload.accessToken || undefined);
+              const result = await signInWithCredential(auth, credential);
+              user = result.user;
+            } catch (credErr: any) {
+              console.warn('GoogleAuthProvider.credential failed, falling back to session hydration:', credErr);
+            }
+          }
+
+          const fallbackName = user?.displayName || payload.displayName || (payload.email ? payload.email.split('@')[0] : 'User');
           const sessionData = {
-            uid: user.uid,
-            email: user.email,
+            uid: user?.uid || payload.uid,
+            email: user?.email || payload.email,
             displayName: fallbackName,
-            photoURL: user.photoURL || payload.photoURL,
-            isAnonymous: user.isAnonymous,
-            emailVerified: user.emailVerified,
+            photoURL: user?.photoURL || payload.photoURL,
+            isAnonymous: false,
+            emailVerified: true,
             isCached: true,
           };
+
           try {
             localStorage.setItem('voiceflow_auth_session', JSON.stringify(sessionData));
-            localStorage.setItem('userEmail', user.email || '');
+            localStorage.setItem('userEmail', sessionData.email || '');
             localStorage.setItem('userName', fallbackName);
           } catch {}
 
@@ -237,8 +246,17 @@ export default function SignupPage() {
           });
 
           try {
-            await handleGoogleSignupSuccess(db, user);
-            await syncDeviceTrial(db, user).catch(() => {});
+            if (user) {
+              await handleGoogleSignupSuccess(db, user);
+              await syncDeviceTrial(db, user).catch(() => {});
+            } else if (payload.uid) {
+              await handleGoogleSignupSuccess(db, {
+                uid: payload.uid,
+                email: payload.email,
+                displayName: fallbackName,
+                photoURL: payload.photoURL,
+              } as any);
+            }
           } catch (e) {
             console.error('User sync error:', e);
           }
