@@ -82,11 +82,10 @@ export default function AppSidebar() {
     };
   }, []);
 
-  const { isPro, isAdmin, sessionCount, usedMinutes, maxMinutes, maxFreeSessions, isLimitReached, screenCaptureCount } = usePlanUsage();
+  const { isPro, isAdmin, sessionCount, usedMinutes, bonusMinutes, maxMinutes, availableCredits, maxFreeSessions, isLimitReached, screenCaptureCount } = usePlanUsage();
   const { formatPrice } = useCurrencyGeo();
   const { toast } = useToast();
 
-  const availableCredits = Math.max(0, maxMinutes - usedMinutes);
   const creditPercent = isPro ? 100 : Math.min(100, Math.max(availableCredits > 0 ? 6 : 0, Math.round((availableCredits / maxMinutes) * 100)));
 
   const handleInviteFriends = async () => {
@@ -245,7 +244,9 @@ export default function AppSidebar() {
                 <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-1 leading-snug select-text">
                   {isPro
                     ? 'Pro includes unlimited recording, AI summaries & live assistance.'
-                    : `A meeting uses 1 credit per min. Free includes ${maxMinutes} a month.`}
+                    : bonusMinutes > 0
+                      ? `A meeting uses 1 credit per min. Includes ${bonusMinutes} bonus credits gifted.`
+                      : `A meeting uses 1 credit per min. Free includes ${maxMinutes} a month.`}
                 </p>
 
                 {/* Pill action button */}

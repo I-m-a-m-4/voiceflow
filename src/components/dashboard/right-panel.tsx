@@ -34,7 +34,7 @@ export default function RightPanel() {
   const userEmail = auth?.currentUser?.email || 'user@example.com';
   
   const { startRecording, stopRecording, isRecording, isProcessing, transcript } = useAudioRecorder();
-  const { isPro, sessionCount, maxFreeSessions, isLimitReached } = usePlanUsage();
+  const { isPro, sessionCount, maxFreeSessions, isLimitReached, bonusMinutes, maxMinutes } = usePlanUsage();
   
   const [recordingTime, setRecordingTime] = useState(0);
   const [resumingInfo, setResumingInfo] = useState<{ id: string; title: string; prevDuration: number } | null>(null);
@@ -473,7 +473,9 @@ export default function RightPanel() {
               </button>
               {isLimitReached && (
                 <p className="text-[11px] text-center text-voiceflow-orange font-medium leading-tight font-dm-sans">
-                  Free limit reached (30 mins / 3 sessions) • Click to Upgrade
+                  {bonusMinutes > 0
+                    ? `All ${maxMinutes} credits depleted • Click to Upgrade`
+                    : 'Free limit reached (30 mins / 3 sessions) • Click to Upgrade'}
                 </p>
               )}
             </div>

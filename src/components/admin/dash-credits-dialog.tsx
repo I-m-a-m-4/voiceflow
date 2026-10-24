@@ -71,8 +71,12 @@ export function DashCreditsDialog({ isOpen, onClose, prefillEmail = '', onSucces
 
       const adminEmail = auth.currentUser.email || 'belloimam431@gmail.com';
 
+      let payload: any = {};
+      let successTitle = '';
+      let successDesc = '';
+
       if (dashType === 'pro') {
-        const payload = {
+        payload = {
           isPro: true,
           planTier: 'pro',
           subscriptionPlan: 'Voiceflow Pro (Gifted by Admin)',
@@ -80,75 +84,76 @@ export function DashCreditsDialog({ isOpen, onClose, prefillEmail = '', onSucces
           dashedAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         };
-
-        if (targetDocId) {
-          await updateDoc(doc(firestore, 'users', targetDocId), payload);
-        } else {
-          // Pre-grant for user before they even log in
-          const newDocRef = doc(usersRef);
-          await setDoc(newDocRef, {
-            email: cleanEmail,
-            ...payload,
-            createdAt: serverTimestamp(),
-          });
-        }
-
-        toast({
-          title: '🎉 Pro Plan Dashed!',
-          description: `Successfully gifted lifetime Voiceflow Pro to ${cleanEmail}. They now have unlimited recording and features.`,
-        });
+        successTitle = '🎉 Pro Plan Dashed!';
+        successDesc = `Successfully gifted lifetime Voiceflow Pro to ${cleanEmail}. They now have unlimited recording and features.`;
       } else if (dashType === 'minutes') {
         const currentUsed = typeof existingData?.usedMinutes === 'number' ? existingData.usedMinutes : 0;
         const newUsed = Math.max(0, currentUsed - minutesAmount);
 
-        const payload = {
+        payload = {
           usedMinutes: newUsed,
           bonusMinutesGranted: (existingData?.bonusMinutesGranted || 0) + minutesAmount,
           dashedBy: adminEmail,
           dashedAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         };
-
-        if (targetDocId) {
-          await updateDoc(doc(firestore, 'users', targetDocId), payload);
-        } else {
-          const newDocRef = doc(usersRef);
-          await setDoc(newDocRef, {
-            email: cleanEmail,
-            ...payload,
-            createdAt: serverTimestamp(),
-          });
-        }
-
-        toast({
-          title: '⏱️ Minutes Dashed!',
-          description: `Dashed +${minutesAmount} minutes to ${cleanEmail}. Their usage has been credited.`,
-        });
+        successTitle = '⏱️ Minutes Dashed!';
+        successDesc = `Dashed +${minutesAmount} minutes to ${cleanEmail}. Their usage has been credited.`;
       } else if (dashType === 'reset') {
-        const payload = {
+        payload = {
           usedMinutes: 0,
           sessionCount: 0,
           dashedBy: adminEmail,
           dashedAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         };
+        successTitle = '🔄 Usage Reset & Dashed!';
+        successDesc = `All session and minute counters reset to 0 for ${cleanEmail}.`;
+      }
 
-        if (targetDocId) {
-          await updateDoc(doc(firestore, 'users', targetDocId), payload);
-        } else {
-          const newDocRef = doc(usersRef);
-          await setDoc(newDocRef, {
-            email: cleanEmail,
-            ...payload,
-            createdAt: serverTimestamp(),
-          });
+      if (!querySnap.empty) {
+        for (const docSnap of querySnap.docs) {
+          await updateDoc(doc(firestore, 'users', docSnap.id), payload);
+          const uData = docSnap.data();
+          if (uData.deviceId) {
+            await updateDoc(doc(firestore, 'devices', uData.deviceId), {
+              trialExceeded: false,
+              usedMinutes: 0,
+              sessionCount: 0,
+              hasPro: dashType === 'pro' || uData.hasPro || false,
+              updatedAt: serverTimestamp(),
+            }).catch(() => {});
+          }
         }
-
-        toast({
-          title: '🔄 Usage Reset & Dashed!',
-          description: `All session and minute counters reset to 0 for ${cleanEmail}.`,
+      } else {
+        // Pre-grant for user before they even log in
+        const newDocRef = doc(usersRef);
+        await setDoc(newDocRef, {
+          email: cleanEmail,
+          ...payload,
+          createdAt: serverTimestamp(),
         });
       }
+
+      // Also unblock any device registered to this email
+      try {
+        const devQuery = query(collection(firestore, 'devices'), where('registeredEmails', 'array-contains', cleanEmail));
+        const devSnap = await getDocs(devQuery);
+        devSnap.forEach((d) => {
+          updateDoc(doc(firestore, 'devices', d.id), {
+            trialExceeded: false,
+            usedMinutes: 0,
+            sessionCount: 0,
+            hasPro: dashType === 'pro',
+            updatedAt: serverTimestamp(),
+          }).catch(() => {});
+        });
+      } catch (e) {}
+
+      toast({
+        title: successTitle,
+        description: successDesc,
+      });
 
       // Record in audit log
       await addDoc(collection(firestore, 'admin_dashes'), {

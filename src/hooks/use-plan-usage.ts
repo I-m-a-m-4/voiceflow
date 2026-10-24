@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth, useFirestore } from '@/firebase';
-import { doc, getDoc, updateDoc, onSnapshot, collection, query, where, getDocs, increment } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, getDocs, increment, serverTimestamp } from 'firebase/firestore';
 import { syncDeviceTrial, recordDeviceSession, recordDeviceScreenCapture } from '@/lib/device-fingerprint';
 
 export interface PlanUsageState {
@@ -11,8 +11,10 @@ export interface PlanUsageState {
   planName: string;
   sessionCount: number;
   usedMinutes: number;
+  bonusMinutes: number;
   maxMinutes: number;
   maxFreeSessions: number;
+  availableCredits: number;
   isLimitReached: boolean;
   recordSession: (durationSeconds?: number) => Promise<void>;
   refreshUsage: () => void;
@@ -53,13 +55,19 @@ export function usePlanUsage(): PlanUsageState {
     return saved ? parseInt(saved, 10) : 0;
   });
 
+  const [bonusMinutes, setBonusMinutes] = useState<number>(() => {
+    if (typeof window === 'undefined') return 0;
+    const saved = localStorage.getItem('voiceflow_bonus_minutes');
+    return saved ? parseInt(saved, 10) : 0;
+  });
+
   const [screenCaptureCount, setScreenCaptureCount] = useState<number>(() => {
     if (typeof window === 'undefined') return 0;
     const saved = localStorage.getItem('voiceflow_screen_capture_count');
     return saved ? parseInt(saved, 10) : 0;
   });
 
-  const maxMinutes = 30; // 30 minutes monthly free limit
+  const baseFreeMinutes = 30; // 30 minutes monthly free limit
   const maxFreeSessions = 3; // 3 sessions free limit
   const maxFreeScreenCaptures = 3; // 3 screen captures free limit
 
@@ -74,11 +82,13 @@ export function usePlanUsage(): PlanUsageState {
     const devExceeded = localStorage.getItem('voiceflow_device_trial_exceeded') === 'true';
     const sessions = parseInt(localStorage.getItem('voiceflow_session_count') || '0', 10);
     const mins = parseInt(localStorage.getItem('voiceflow_used_minutes') || '0', 10);
+    const bonus = parseInt(localStorage.getItem('voiceflow_bonus_minutes') || '0', 10);
     const captures = parseInt(localStorage.getItem('voiceflow_screen_capture_count') || '0', 10);
     setIsPro(pro);
     setIsDeviceExceeded(devExceeded);
     setSessionCount(sessions);
     setUsedMinutes(mins);
+    setBonusMinutes(bonus);
     setScreenCaptureCount(captures);
   }, [isAdmin]);
 
@@ -92,7 +102,8 @@ export function usePlanUsage(): PlanUsageState {
         if (res.screenCaptureCount !== undefined) {
           setScreenCaptureCount((prev) => Math.max(prev, res.screenCaptureCount || 0));
         }
-        if (res.trialExceeded && !res.isPro) {
+        // Only mark device exceeded if user is neither Pro nor has bonus minutes!
+        if (res.trialExceeded && !res.isPro && bonusMinutes <= 0) {
           setIsDeviceExceeded(true);
           setSessionCount((prev) => Math.max(prev, res.sessionCount, 3));
           setUsedMinutes((prev) => Math.max(prev, res.usedMinutes, 30));
@@ -103,7 +114,7 @@ export function usePlanUsage(): PlanUsageState {
     return () => {
       isMounted = false;
     };
-  }, [auth?.currentUser, firestore, isAdmin]);
+  }, [auth?.currentUser, firestore, isAdmin, bonusMinutes]);
 
   // Listen to cross-component usage events
   useEffect(() => {
@@ -124,6 +135,35 @@ export function usePlanUsage(): PlanUsageState {
       return;
     }
     const uid = auth.currentUser.uid;
+    const userDocRef = doc(firestore, 'users', uid);
+
+    // Merge any orphaned pre-granted document for this email
+    const email = auth.currentUser.email?.toLowerCase();
+    if (email) {
+      const orphanQuery = query(collection(firestore, 'users'), where('email', '==', email));
+      getDocs(orphanQuery).then((snap) => {
+        snap.forEach((d) => {
+          if (d.id !== uid) {
+            const oData = d.data();
+            if (oData.bonusMinutesGranted || oData.isPro || oData.subscriptionPlan) {
+              const updates: any = {};
+              if (typeof oData.bonusMinutesGranted === 'number') {
+                updates.bonusMinutesGranted = increment(oData.bonusMinutesGranted);
+              }
+              if (oData.isPro) updates.isPro = true;
+              if (oData.subscriptionPlan) updates.subscriptionPlan = oData.subscriptionPlan;
+              if (oData.planTier) updates.planTier = oData.planTier;
+              updates.dashedBy = oData.dashedBy || 'admin';
+              updates.dashedAt = oData.dashedAt || serverTimestamp();
+              updates.updatedAt = serverTimestamp();
+
+              updateDoc(userDocRef, updates).catch(() => {});
+              deleteDoc(doc(firestore, 'users', d.id)).catch(() => {});
+            }
+          }
+        });
+      }).catch(() => {});
+    }
 
     if (isAdmin) {
       setIsPro(true);
@@ -132,7 +172,6 @@ export function usePlanUsage(): PlanUsageState {
       }
     }
 
-    const userDocRef = doc(firestore, 'users', uid);
     const unsubscribe = onSnapshot(userDocRef, (snap) => {
       if (snap.exists()) {
         const data = snap.data();
@@ -150,44 +189,49 @@ export function usePlanUsage(): PlanUsageState {
         }
 
         const proStatus = !!(data.isPro === true || data.planTier === 'pro' || data.subscriptionPlan?.toLowerCase().includes('pro'));
+        const firestoreBonusMins = typeof data.bonusMinutesGranted === 'number' ? data.bonusMinutesGranted : 0;
         const firestoreMins = typeof data.usedMinutes === 'number' ? data.usedMinutes : 0;
         const firestoreSessions = typeof data.sessionCount === 'number' ? data.sessionCount : 0;
         const firestoreCaptures = typeof data.screenCaptureCount === 'number' ? data.screenCaptureCount : 0;
 
         setIsPro(proStatus);
-        if (proStatus) {
-          localStorage.setItem('voiceflow_is_pro', 'true');
-        } else {
-          // Prevent forged localStorage is_pro
-          localStorage.removeItem('voiceflow_is_pro');
+        setBonusMinutes(firestoreBonusMins);
+        setSessionCount(firestoreSessions);
+        setUsedMinutes(firestoreMins);
+        setScreenCaptureCount(firestoreCaptures);
+
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('voiceflow_bonus_minutes', String(firestoreBonusMins));
+          localStorage.setItem('voiceflow_session_count', String(firestoreSessions));
+          localStorage.setItem('voiceflow_used_minutes', String(firestoreMins));
+          localStorage.setItem('voiceflow_screen_capture_count', String(firestoreCaptures));
+          if (proStatus) {
+            localStorage.setItem('voiceflow_is_pro', 'true');
+          } else {
+            localStorage.removeItem('voiceflow_is_pro');
+          }
         }
 
-        // Use the maximum between local and server to avoid resetting upon offline/cache tampering
-        const currentLocalSessions = parseInt(localStorage.getItem('voiceflow_session_count') || '0', 10);
-        const currentLocalMins = parseInt(localStorage.getItem('voiceflow_used_minutes') || '0', 10);
-        const currentLocalCaptures = parseInt(localStorage.getItem('voiceflow_screen_capture_count') || '0', 10);
-
-        const finalSessions = Math.max(firestoreSessions, currentLocalSessions);
-        const finalMins = Math.max(firestoreMins, currentLocalMins);
-        const finalCaptures = Math.max(firestoreCaptures, currentLocalCaptures);
-
-        setSessionCount(finalSessions);
-        setUsedMinutes(finalMins);
-        setScreenCaptureCount(finalCaptures);
-        localStorage.setItem('voiceflow_session_count', String(finalSessions));
-        localStorage.setItem('voiceflow_used_minutes', String(finalMins));
-        localStorage.setItem('voiceflow_screen_capture_count', String(finalCaptures));
+        // If user has bonus minutes, isPro, or was dashed by admin: clear device lock
+        if (proStatus || firestoreBonusMins > 0 || data.dashedAt) {
+          setIsDeviceExceeded(false);
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('voiceflow_device_trial_exceeded');
+          }
+        }
       }
     }, (err) => {
       console.warn("Could not listen to user doc for plan usage:", err);
     });
 
     // Also count existing meetings in Firestore to guarantee anti-cheating accuracy
+    // Only applies to non-pro users with no bonus credits and no admin dash
     const meetingsQuery = query(collection(firestore, 'meetings'), where('userId', '==', uid));
     getDocs(meetingsQuery).then((snapshot) => {
       const realMeetingCount = snapshot.size;
       const currentSessions = parseInt(localStorage.getItem('voiceflow_session_count') || '0', 10);
-      if (realMeetingCount > currentSessions) {
+      const curBonus = parseInt(localStorage.getItem('voiceflow_bonus_minutes') || '0', 10);
+      if (curBonus <= 0 && realMeetingCount > currentSessions) {
         setSessionCount(realMeetingCount);
         localStorage.setItem('voiceflow_session_count', String(realMeetingCount));
         // Approximate 2-3 mins per meeting if usedMinutes is 0
@@ -287,28 +331,38 @@ export function usePlanUsage(): PlanUsageState {
   }, [auth?.currentUser?.uid, firestore, isAdmin, isPro, maxFreeScreenCaptures]);
 
   // Anti-cheating & Anti-account hopping:
-  // Limit reached if user is not pro AND (device trial already exhausted OR user exceeded sessions/minutes)
   // Bello Imam is the owner/admin: NEVER restricted by limits
+  // Pro users: NEVER restricted
+  // User with available credits (availableCredits > 0): NEVER restricted!
+  const effectiveMaxMinutes = baseFreeMinutes + bonusMinutes;
+  const availableCredits = Math.max(0, effectiveMaxMinutes - usedMinutes);
+
   const isLimitReached = isAdmin
     ? false
-    : (!isPro && (isDeviceExceeded || sessionCount >= maxFreeSessions || usedMinutes >= maxMinutes));
+    : isPro
+    ? false
+    : bonusMinutes > 0
+    ? availableCredits <= 0
+    : (availableCredits <= 0 || isDeviceExceeded || sessionCount >= maxFreeSessions);
 
   const isScreenCaptureLimitReached = isAdmin
     ? false
     : (!isPro && screenCaptureCount >= maxFreeScreenCaptures);
 
-  // If device trial is exhausted, clamp displayed usage to the limit so user sees 3/3 sessions and 30/30 mins
-  const displaySessions = isDeviceExceeded && !isPro ? Math.max(sessionCount, maxFreeSessions) : sessionCount;
-  const displayMinutes = isDeviceExceeded && !isPro ? Math.max(usedMinutes, maxMinutes) : usedMinutes;
+  // If device trial is exhausted without bonus minutes, clamp displayed usage to the limit
+  const displaySessions = (isDeviceExceeded && !isPro && bonusMinutes <= 0) ? Math.max(sessionCount, maxFreeSessions) : sessionCount;
+  const displayMinutes = (isDeviceExceeded && !isPro && bonusMinutes <= 0) ? Math.max(usedMinutes, effectiveMaxMinutes) : usedMinutes;
 
   return {
     isPro: isAdmin ? true : isPro,
     isAdmin,
-    planName: isAdmin ? 'Voiceflow Founder & Admin' : isPro ? 'Voiceflow Pro' : 'Basic Plan',
+    planName: isAdmin ? 'Voiceflow Founder & Admin' : isPro ? 'Voiceflow Pro' : bonusMinutes > 0 ? 'Basic + Bonus Credits' : 'Basic Plan',
     sessionCount: displaySessions,
     usedMinutes: displayMinutes,
-    maxMinutes: isAdmin ? 999999 : maxMinutes,
-    maxFreeSessions: isAdmin ? 999999 : maxFreeSessions,
+    bonusMinutes,
+    maxMinutes: isAdmin ? 999999 : effectiveMaxMinutes,
+    maxFreeSessions: isAdmin ? 999999 : (bonusMinutes > 0 ? 999999 : maxFreeSessions),
+    availableCredits: isAdmin ? 999999 : availableCredits,
     isLimitReached,
     recordSession,
     refreshUsage: syncFromStorage,

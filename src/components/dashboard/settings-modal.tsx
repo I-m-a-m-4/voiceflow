@@ -240,8 +240,12 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
 
       const adminEmail = auth?.currentUser?.email || 'belloimam431@gmail.com';
 
+      let payload: any = {};
+      let successTitle = '';
+      let successDesc = '';
+
       if (dashType === 'pro') {
-        const payload = {
+        payload = {
           isPro: true,
           planTier: 'pro',
           subscriptionPlan: 'Voiceflow Pro (Gifted by Bello Imam)',
@@ -249,52 +253,69 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
           dashedAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         };
-        if (targetId) {
-          await updateDoc(doc(db, 'users', targetId), payload);
-        } else {
-          await setDoc(doc(usersRef), { email: cleanEmail, ...payload, createdAt: serverTimestamp() });
-        }
-        toast({
-          title: '🎉 Pro Plan Dashed!',
-          description: `Successfully gifted lifetime Voiceflow Pro to ${cleanEmail}.`,
-        });
+        successTitle = '🎉 Pro Plan Dashed!';
+        successDesc = `Successfully gifted lifetime Voiceflow Pro to ${cleanEmail}.`;
       } else if (dashType === 'minutes') {
         const curUsed = typeof existingData?.usedMinutes === 'number' ? existingData.usedMinutes : 0;
         const newUsed = Math.max(0, curUsed - dashMinutes);
-        const payload = {
+        payload = {
           usedMinutes: newUsed,
           bonusMinutesGranted: (existingData?.bonusMinutesGranted || 0) + dashMinutes,
           dashedBy: adminEmail,
           dashedAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         };
-        if (targetId) {
-          await updateDoc(doc(db, 'users', targetId), payload);
-        } else {
-          await setDoc(doc(usersRef), { email: cleanEmail, ...payload, createdAt: serverTimestamp() });
-        }
-        toast({
-          title: '⏱️ Minutes Dashed!',
-          description: `Dashed +${dashMinutes} minutes to ${cleanEmail}.`,
-        });
+        successTitle = '⏱️ Minutes Dashed!';
+        successDesc = `Dashed +${dashMinutes} minutes to ${cleanEmail}.`;
       } else if (dashType === 'reset') {
-        const payload = {
+        payload = {
           usedMinutes: 0,
           sessionCount: 0,
           dashedBy: adminEmail,
           dashedAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         };
-        if (targetId) {
-          await updateDoc(doc(db, 'users', targetId), payload);
-        } else {
-          await setDoc(doc(usersRef), { email: cleanEmail, ...payload, createdAt: serverTimestamp() });
-        }
-        toast({
-          title: '🔄 Usage Reset & Dashed!',
-          description: `All limits and counters reset to 0 for ${cleanEmail}.`,
-        });
+        successTitle = '🔄 Usage Reset & Dashed!';
+        successDesc = `All limits and counters reset to 0 for ${cleanEmail}.`;
       }
+
+      if (!snap.empty) {
+        for (const docSnap of snap.docs) {
+          await updateDoc(doc(db, 'users', docSnap.id), payload);
+          const uData = docSnap.data();
+          if (uData.deviceId) {
+            await updateDoc(doc(db, 'devices', uData.deviceId), {
+              trialExceeded: false,
+              usedMinutes: 0,
+              sessionCount: 0,
+              hasPro: dashType === 'pro' || uData.hasPro || false,
+              updatedAt: serverTimestamp(),
+            }).catch(() => {});
+          }
+        }
+      } else {
+        await setDoc(doc(usersRef), { email: cleanEmail, ...payload, createdAt: serverTimestamp() });
+      }
+
+      // Also unblock any device registered to this email
+      try {
+        const devQuery = query(collection(db, 'devices'), where('registeredEmails', 'array-contains', cleanEmail));
+        const devSnap = await getDocs(devQuery);
+        devSnap.forEach((d) => {
+          updateDoc(doc(db, 'devices', d.id), {
+            trialExceeded: false,
+            usedMinutes: 0,
+            sessionCount: 0,
+            hasPro: dashType === 'pro',
+            updatedAt: serverTimestamp(),
+          }).catch(() => {});
+        });
+      } catch (e) {}
+
+      toast({
+        title: successTitle,
+        description: successDesc,
+      });
 
       await addDoc(collection(db, 'admin_dashes'), {
         adminEmail,

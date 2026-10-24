@@ -282,9 +282,14 @@ export async function syncDeviceTrial(
       const effectiveCaptures = Math.max(serverCaptures, localCaptures);
       localStorage.setItem('voiceflow_screen_capture_count', String(effectiveCaptures));
 
+      // If device trialExceeded was explicitly set to false by admin or Pro, honor that!
+      if (devData.trialExceeded === false || devHasPro) {
+        localStorage.removeItem('voiceflow_device_trial_exceeded');
+      }
+
       const effectiveSessions = Math.max(serverSessions, localSessions);
       const effectiveMins = Math.max(serverMins, localMins);
-      const isExceeded = !devHasPro && (devData.trialExceeded === true || effectiveSessions >= 3 || effectiveMins >= 30);
+      const isExceeded = !devHasPro && devData.trialExceeded !== false && (devData.trialExceeded === true || effectiveSessions >= 3 || effectiveMins >= 30);
 
       if (isExceeded) {
         // Enforce limit lock locally

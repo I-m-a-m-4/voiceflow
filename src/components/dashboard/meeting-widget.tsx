@@ -351,6 +351,9 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
     sessionCount, 
     maxFreeSessions, 
     isLimitReached, 
+    bonusMinutes,
+    maxMinutes,
+    availableCredits,
     screenCaptureCount, 
     isScreenCaptureLimitReached, 
     recordScreenCapture 
@@ -843,13 +846,15 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
                 <Lock size={22} />
               </div>
               <span className="text-[11px] font-bold tracking-wider uppercase bg-orange-500/10 text-voiceflow-orange border border-orange-500/20 px-2.5 py-1 rounded-full mb-2">
-                Free Limit Reached ({sessionCount}/{maxFreeSessions} Sessions)
+                {bonusMinutes > 0 ? `Credits Depleted (${maxMinutes}/${maxMinutes})` : `Free Limit Reached (${sessionCount}/${maxFreeSessions} Sessions)`}
               </span>
               <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2 font-nexa">
                 Upgrade to Voiceflow Pro
               </h3>
               <p className="text-xs text-gray-600 dark:text-white/70 max-w-sm mb-5 leading-relaxed">
-                You have used your 3 free meeting sessions on the Basic Plan. Upgrade to Pro for unlimited AI notetaking, live privacy co-pilot, and custom instructions.
+                {bonusMinutes > 0 
+                  ? `You have used your ${maxMinutes} credits. Upgrade to Pro for unlimited AI notetaking, live privacy co-pilot, and custom instructions.`
+                  : 'You have used your 3 free meeting sessions on the Basic Plan. Upgrade to Pro for unlimited AI notetaking, live privacy co-pilot, and custom instructions.'}
               </p>
               <button
                 onClick={() => {
