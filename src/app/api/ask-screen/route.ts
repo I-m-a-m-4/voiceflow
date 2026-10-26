@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Groq from 'groq-sdk';
+import { buildEnhancedInterviewPrompt, synthesizeIntelligentFallback } from '@/lib/transcript-context';
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,6 +13,9 @@ export async function POST(req: NextRequest) {
     // Keep the most recent transcript context to stay focused and latency-optimized
     const rawTranscript = (transcript || "").trim();
     const transcriptContext = rawTranscript.slice(-3500) || "None yet";
+    const hasImage = Boolean(imageBase64 && typeof imageBase64 === 'string' && imageBase64.trim().length > 100);
+
+    const { targetPrompt, extractedQuestion } = buildEnhancedInterviewPrompt(prompt, rawTranscript, hasImage);
 
     const customContextSnippet = customContext && typeof customContext === 'string' && customContext.trim() 
       ? `\n\n[Active User Profile & Role Context]\n${customContext.trim()}\n(Strictly ground all answers, perspective, and phrasing in this role profile.)`
@@ -24,11 +28,11 @@ Core Teleprompter Principles:
 1. High-Impact Scannable Output:
    - State the core answer, suggestion, or direct response FIRST in bold.
    - Follow with 2 to 3 crisp, natural bullet points that the user can read aloud while maintaining eye contact.
-   - Avoid robotic preambles, disclaimers, or excessive meta-commentary.
+   - Avoid robotic preambles, disclaimers, or meta-advice (never say "You should say...", "As an AI...", or "I am listening to your audio"). Deliver the exact words the user can speak aloud.
 
 2. Context-Aware Visual & Screen Analysis:
    - When an image or screenshot is provided, dynamically adapt to what is actively being discussed or what the user asked about:
-     * If the screen shows Code or an IDE / Technical Assessment (e.g. VS Code, LeetCode, terminal) AND the user or meeting is discussing code:
+     * If the screen shows Code or an IDE / Technical Assessment (e.g. VS Code, LeetCode, CoderPad, terminal):
        - Identify the language and logic.
        - Provide the optimal, clean solution in a code block with Time/Space complexity and 2-3 spoken explanation points.
      * If the screen shows Slides / Presentation deck:
@@ -39,12 +43,12 @@ Core Teleprompter Principles:
        - Focus on user flow, design critique, features, or architectural talking points.
      * If the screen shows Documents, Emails, or Proposals:
        - Extract key clauses, questions, or action items.
-   - Always prioritize whatever the user explicitly asked in their prompt (e.g., if they say "look at the chart", focus on the chart; if "look at the code", focus on the code; if they ask generally, focus on the primary active window).
 
-3. In-Call Guidance:
-   * When asked "What should I say next?", "Suggest follow-ups", "Recap", or for smart meeting talking points:
-     - Ground responses directly in what was said in the meeting transcript and what's on screen.
-     - Frame points in natural, first-person speech that sounds confident, articulate, and conversational.
+3. In-Call Interview & Discussion Answering:
+   * When the user asks "What should I say?", "Suggest answer", "Recap", or when an interviewer asks a question in the transcript:
+     - IDENTIFY THE EXACT QUESTION OR TOPIC ASKED BY THE INTERVIEWER / PARTICIPANTS IN THE TRANSCRIPT.
+     - DELIVER THE DIRECT, FIRST-PERSON TECHNICAL ANSWER TO THAT QUESTION IMMEDIATELY.
+     - Frame points in natural, first-person speech ("I built...", "Our approach was...", "We chose...") that sounds confident, articulate, and experienced.
      - If transcript context is initial or minimal, provide proactive executive talking points (e.g. alignment checks, scope verification, priority confirmation).
 
 4. Natural Greetings & Chat:
@@ -65,7 +69,7 @@ Core Teleprompter Principles:
     const openRouterModel = process.env.OPENAI_MODEL;
     const groqKey = process.env.GROQ_API_KEY || process.env.NEXT_PUBLIC_GROQ_API_KEY;
 
-    // 1. If GEMINI_API_KEY is available and imageBase64 is provided, try Gemini Vision with a strict timeout
+    // 1. If GEMINI_API_KEY is available and imageBase64 is provided, try Gemini Vision with a short timeout
     if (process.env.GEMINI_API_KEY && imageBase64) {
       try {
         const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
@@ -73,7 +77,7 @@ Core Teleprompter Principles:
           contents: [
             {
               parts: [
-                { text: `${systemPrompt}\n\n${prompt}\n\nContext transcript: ${transcriptContext}${customContextSnippet}` },
+                { text: `${systemPrompt}\n\n${targetPrompt}\n\nContext transcript: ${transcriptContext}${customContextSnippet}` },
                 {
                   inline_data: {
                     mime_type: "image/jpeg",
@@ -90,41 +94,48 @@ Core Teleprompter Principles:
         };
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        const timeoutId = setTimeout(() => controller.abort(), 3500);
 
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-            signal: controller.signal,
-          }
-        );
-        clearTimeout(timeoutId);
+        const geminiModels = ['gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-flash-latest'];
+        for (const gModel of geminiModels) {
+          try {
+            const response = await fetch(
+              `https://generativelanguage.googleapis.com/v1beta/models/${gModel}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+                signal: controller.signal,
+              }
+            );
 
-        if (response.ok) {
-          const data = await response.json();
-          const answer = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (answer && answer.trim()) {
-            recordUsage('gemini', 'gemini-1.5-flash');
-            return NextResponse.json({ text: answer });
+            if (response.ok) {
+              const data = await response.json();
+              const answer = data.candidates?.[0]?.content?.parts?.[0]?.text;
+              if (answer && answer.trim()) {
+                clearTimeout(timeoutId);
+                recordUsage('gemini', gModel);
+                return NextResponse.json({ text: answer });
+              }
+            }
+          } catch (modelErr) {
+            // Check next Gemini model or fallback
           }
         }
+        clearTimeout(timeoutId);
       } catch (geminiErr: any) {
-        console.warn("Gemini vision call failed or timed out, trying OpenRouter / Groq:", geminiErr?.message || geminiErr);
+        console.warn("Gemini vision call failed, proceeding to OpenRouter / Groq:", geminiErr?.message || geminiErr);
       }
     }
 
-    // 2. If imageBase64 is provided, process via OpenRouter Vision with per-model timeouts
+    // 2. If imageBase64 is provided, process via OpenRouter Vision (verified working models)
     if (openRouterKey && imageBase64) {
       try {
         const imageUrl = imageBase64.startsWith("data:") ? imageBase64 : `data:image/jpeg;base64,${imageBase64}`;
 
         const visionModels = [
-          "meta-llama/llama-3.2-11b-vision-instruct:free",
+          "nvidia/nemotron-3.5-super-vl:free",
           "google/gemma-4-26b-a4b-it:free",
-          "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
           "openrouter/auto"
         ];
         if (openRouterModel && !visionModels.includes(openRouterModel) && openRouterModel !== "openrouter/free") {
@@ -139,7 +150,7 @@ Core Teleprompter Principles:
             content: [
               {
                 type: "text",
-                text: `${prompt}\n\nMeeting Context: ${transcriptContext}${customContextSnippet}`
+                text: `${targetPrompt}\n\nMeeting Context: ${transcriptContext}${customContextSnippet}`
               },
               {
                 type: "image_url",
@@ -151,7 +162,7 @@ Core Teleprompter Principles:
 
         for (const model of visionModels) {
           const modelController = new AbortController();
-          const timeoutId = setTimeout(() => modelController.abort(), 9000);
+          const timeoutId = setTimeout(() => modelController.abort(), 7000);
           try {
             const orRes = await fetch(`${openRouterBaseUrl}/chat/completions`, {
               method: "POST",
@@ -181,7 +192,6 @@ Core Teleprompter Principles:
             }
           } catch (mErr) {
             clearTimeout(timeoutId);
-            // try next model
           }
         }
       } catch (orErr: any) {
@@ -190,12 +200,24 @@ Core Teleprompter Principles:
     }
 
     // 3. Ultra-fast Groq text execution (primary for pure conversation, questions, and recaps)
+    // Sanitize message sequence so consecutive roles strictly alternate
+    const sanitizedHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+    for (const h of cleanHistory) {
+      if (sanitizedHistory.length === 0 || sanitizedHistory[sanitizedHistory.length - 1].role !== h.role) {
+        sanitizedHistory.push(h);
+      }
+    }
+    // If the last history item is a user role, merge or trim so the next item can be a user prompt
+    if (sanitizedHistory.length > 0 && sanitizedHistory[sanitizedHistory.length - 1].role === 'user') {
+      sanitizedHistory.pop();
+    }
+
     const textMessages: any[] = [
       { role: "system", content: systemPrompt },
-      ...cleanHistory,
+      ...sanitizedHistory,
       {
         role: "user",
-        content: `${prompt}\n\nMeeting Context: ${transcriptContext}${customContextSnippet}`
+        content: `${targetPrompt}\n\nMeeting Context: ${transcriptContext}${customContextSnippet}`
       }
     ];
 
@@ -203,13 +225,13 @@ Core Teleprompter Principles:
       try {
         const groq = new Groq({ 
           apiKey: groqKey,
-          timeout: 10000,
+          timeout: 12000,
           maxRetries: 1,
         });
         
+        // Prioritize verified models available on the active Groq account
         const groqModels = [
-          "llama-3.3-70b-versatile",
-          "llama-3.1-8b-instant",
+          "qwen/qwen3.8-27b",
           "openai/gpt-oss-120b",
           "openai/gpt-oss-20b"
         ];
@@ -240,9 +262,8 @@ Core Teleprompter Principles:
     // 4. Fallback to OpenRouter text models if Groq was unavailable
     if (openRouterKey) {
       const textModels = [
-        "meta-llama/llama-3.3-70b-instruct:free",
-        "google/gemma-2-9b-it:free",
-        "qwen/qwen-2.5-72b-instruct:free",
+        "nvidia/nemotron-3.5-super-vl:free",
+        "liquid/lfm-2.5-2.6b:free",
         "openrouter/auto"
       ];
       if (openRouterModel && !textModels.includes(openRouterModel) && openRouterModel !== "openrouter/free") {
@@ -286,24 +307,16 @@ Core Teleprompter Principles:
       }
     }
 
-    // 5. Intelligent conversational fallback if remote models all timed out or rate-limited
-    const lowerPrompt = prompt.toLowerCase();
-    let smartFallback = "";
-    if (lowerPrompt.includes('hello') || lowerPrompt.includes('hi') || lowerPrompt.startsWith('hey')) {
-      smartFallback = "Hello! I'm your Voiceflow live meeting assistant. I'm actively listening to your audio and tracking your screen. How can I help you in this session?";
-    } else if (lowerPrompt.includes('what should i say') || lowerPrompt.includes('suggest speaking')) {
-      smartFallback = transcriptContext && transcriptContext !== "None yet"
-        ? `**Suggested Speaking Points:**\n• "Building on the points raised so far, let's make sure we align on the concrete next steps."\n• "Could we clarify our timeline and the key milestones for this?"`
-        : `**Suggested Meeting Starters:**\n• "Thanks everyone for joining. Should we quickly align on the main goals for today's call?"\n• "Before we jump into the details, are there any priority items or blockers we should cover first?"`;
-    } else if (lowerPrompt.includes('recap') || lowerPrompt.includes('summarize')) {
-      smartFallback = transcriptContext && transcriptContext !== "None yet"
-        ? `**Quick Recap of Recent Discussion:**\n• ${transcriptContext.slice(-300).replace(/\\n/g, ' ').trim()}`
-        : "I'm listening to your live meeting audio. As soon as participants begin speaking, I'll generate live bulleted recaps for you.";
-    } else {
-      smartFallback = "I'm listening and tracking your live meeting. Ask any question or click 'Analyze This' for instant guidance on your active screen.";
-    }
+    // 5. Intelligent conversational fallback with accurate intent extraction (never returns "I'm listening")
+    const smartFallback = synthesizeIntelligentFallback({
+      prompt,
+      transcript: rawTranscript,
+      customContext,
+      hasImage,
+    });
 
     return NextResponse.json({ text: smartFallback });
+
 
   } catch (error: any) {
     console.error("Error in ask-screen route:", error);

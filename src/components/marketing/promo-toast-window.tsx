@@ -8,6 +8,7 @@ import { useFirestore } from '@/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { DEFAULT_PROMO_CONFIG, THEME_STYLES } from '@/lib/promo-toast';
 import { isTauriEnv } from '@/lib/native-notifications';
+import { isMeetingRecordingActive } from '@/lib/meeting-state';
 import type { PromoToastConfig } from '@/types';
 
 export function PromoToastWindow() {
@@ -20,7 +21,7 @@ export function PromoToastWindow() {
 
   // Check if promo should be visible based on settings and cooldown
   const evaluateVisibility = useCallback((currentConfig: PromoToastConfig) => {
-    if (!currentConfig.enabled) {
+    if (!currentConfig.enabled || isMeetingRecordingActive()) {
       setIsVisible(false);
       return;
     }
@@ -117,6 +118,8 @@ export function PromoToastWindow() {
   };
 
   const currentTheme = THEME_STYLES[config.themeColor] || THEME_STYLES.blue;
+
+  if (isMeetingRecordingActive()) return null;
 
   return (
     <AnimatePresence>

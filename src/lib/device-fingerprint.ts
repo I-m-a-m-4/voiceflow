@@ -241,7 +241,9 @@ export async function syncDeviceTrial(
 ): Promise<DeviceTrialInfo> {
   const deviceId = await getDeviceFingerprint();
   const currentEmail = user?.email?.toLowerCase() || '';
-  const isAdmin = currentEmail === 'belloimam431@gmail.com';
+  const isAdmin = currentEmail === 'belloimam431@gmail.com' ||
+    currentEmail === 'bimex4@gmail.com' ||
+    currentEmail === 'safewayderma@gmail.com';
 
   if (isAdmin) {
     return {

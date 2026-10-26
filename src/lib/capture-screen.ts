@@ -1,4 +1,5 @@
 import { isNativeApp } from './platform';
+import { isMeetingRecordingActive } from './meeting-state';
 
 let cachedStream: MediaStream | null = null;
 
@@ -50,13 +51,14 @@ export function canCaptureScreen(): boolean {
   if (typeof window === 'undefined') return true;
   const isPro = localStorage.getItem('voiceflow_is_pro') === 'true';
   if (isPro) return true;
+  if (isNativeApp()) return true;
   const count = parseInt(localStorage.getItem('voiceflow_screen_capture_count') || '0', 10);
   return count < 3;
 }
 
 export async function captureScreenBase64(): Promise<string> {
   if (!canCaptureScreen()) {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && !isMeetingRecordingActive()) {
       window.dispatchEvent(new CustomEvent('open-billing-modal'));
     }
     console.warn('Screen capture blocked: Free tier limit (3 captures) reached.');

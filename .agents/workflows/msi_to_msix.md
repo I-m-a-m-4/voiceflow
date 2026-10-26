@@ -54,12 +54,14 @@ Whenever a new MSI installer for Voiceflow (e.g., `voiceflow_3.0.1_x64_en-US.msi
 
 ## Notes
 
+- **One-Command Shortcut**: You can run `npm run pack:msix` directly from the repository root to automatically execute steps 1 through 6!
 - Quote the whole `-ArgumentList` as a **single string**, exactly as written in
   step 2. Passing a PowerShell array breaks on the spaces in `C:\Users\Bello
   Imam\...` and msiexec fails with error **1639** (invalid command line).
 - Never name the variable `$args` — it is a reserved PowerShell automatic
   variable and `Start-Process` silently does nothing.
-- `npm run version-up <version>` already updates `AppxManifest.xml`, so step 5
-  is usually a no-op. Confirm the `<Identity Version="X.Y.Z.0">` matches before
-  packing.
+- `npm run version-up <version>` updates `<Identity Version="X.Y.Z.0">`. Ensure
+  `<TargetDeviceFamily ... MinVersion="10.0.17763.0" />` is NEVER overwritten with
+  the app version (Partner Center rejects any package where `MinVersion <= 10.0.17134.0`).
+- A clean manifest template is tracked in `store-assets/AppxManifest.xml`.
 

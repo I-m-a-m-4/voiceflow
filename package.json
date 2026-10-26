@@ -1,6 +1,6 @@
 {
   "name": "voiceflow",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "scripts": {
     "predev": "node scripts/clean-sw.mjs",
@@ -14,6 +14,7 @@
     "postinstall": "patch-package",
     "tauri": "tauri",
     "version-up": "node scripts/update-version.js",
+    "pack:msix": "powershell -ExecutionPolicy Bypass -File scripts/pack-msix.ps1",
     "test:zen-cost": "tsx scripts/check-zen-cost.ts",
     "announce-release": "node scripts/announce-release.mjs",
     "record": "node scripts/record/record.mjs",

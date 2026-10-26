@@ -35,6 +35,7 @@ import remarkGfm from 'remark-gfm';
 import { usePlanUsage } from '@/hooks/use-plan-usage';
 import { toast } from '@/hooks/use-toast';
 import { apiBase } from '@/lib/platform';
+import { buildEnhancedInterviewPrompt, synthesizeIntelligentFallback } from '@/lib/transcript-context';
 
 interface MeetingWidgetProps {
   isRecording: boolean;
@@ -348,6 +349,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
 
   const { 
     isPro, 
+    isAdmin,
     sessionCount, 
     maxFreeSessions, 
     isLimitReached, 
@@ -404,15 +406,8 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
   if (!mounted || !isRecording) return null;
 
   const handleAskAI = async (customPrompt?: string, includeScreenCapture = false) => {
-    if (isLimitReached) {
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('open-billing-modal'));
-      }
-      return;
-    }
-
-    const promptToUse = customPrompt || query;
-    if (!promptToUse.trim() || isQuerying) return;
+    const promptToUse = (customPrompt || query || "What should I say right now?").trim();
+    if (!promptToUse || isQuerying) return;
     
     // Automatically make response card visible when asking
     if (isHidden) setIsHidden(false);
@@ -428,21 +423,9 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
         /\b(screen|slide|display|image|photo|visual|picture|diagram|look at this|see on|what's on my screen|screenshot|code)\b/i.test(promptToUse);
 
       let base64Image: string | null = null;
-      if (wantsScreenAnalysis && !lastImageBase64Ref.current) {
-        if (isScreenCaptureLimitReached) {
-          toast({
-            title: "Screen Capture Limit Reached (3/3 Free Uses)",
-            description: "Free plan is limited to 3 AI screen captures. Upgrade to Voiceflow Pro for unlimited real-time visual analysis.",
-            variant: "destructive"
-          });
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('open-billing-modal'));
-          }
-          if (includeScreenCapture) {
-            setIsQuerying(false);
-            return;
-          }
-        } else {
+      if (wantsScreenAnalysis) {
+        // If explicitly requested or no image is currently cached, take a fresh screenshot silently
+        if (includeScreenCapture || !lastImageBase64Ref.current) {
           try {
             base64Image = await captureScreenBase64();
             if (base64Image) {
@@ -451,7 +434,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
               await recordScreenCapture();
             }
           } catch (e) {
-            console.warn("Screen capture skipped, proceeding with transcript context:", e);
+            console.warn("Screen capture failed, proceeding with transcript context:", e);
           }
         }
       }
@@ -461,6 +444,13 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
       const effectiveImage = base64Image || lastImageBase64Ref.current || "";
       const customContext = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_custom_context') || '' : '';
       const activeTranscript = liveTranscript || transcript || (typeof window !== 'undefined' ? localStorage.getItem('voiceflow_live_transcript') || '' : '');
+
+      // Bind the prompt directly to the interviewer's active question or discussion topic
+      const { targetPrompt } = buildEnhancedInterviewPrompt(
+        promptToUse,
+        activeTranscript,
+        Boolean(effectiveImage)
+      );
 
       // Lightweight conversation history (last 6 messages) for token economy and low latency
       const historyPayload = messages.slice(-6).map(m => ({
@@ -474,7 +464,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
       let cleanAnswer = "";
       try {
         const fetchTimeoutController = new AbortController();
-        const timeoutId = setTimeout(() => fetchTimeoutController.abort(), 12000);
+        const timeoutId = setTimeout(() => fetchTimeoutController.abort(), 25000);
         
         // Link parent controller abort
         const onParentAbort = () => fetchTimeoutController.abort();
@@ -524,14 +514,14 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
       if (!cleanAnswer) {
         const groqApiKey = process.env.NEXT_PUBLIC_GROQ_API_KEY || process.env.GROQ_API_KEY;
         const openRouterKey = process.env.NEXT_PUBLIC_OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY;
-        const transcriptSnippet = (transcript || "").slice(-3000) || "None yet";
-        const systemPrompt = "You are Voiceflow AI, an articulate, intelligent, and natural live meeting co-pilot and coding assistant. When answering, be direct, conversational, and helpful. Use clean Markdown code blocks or bullet points.";
+        const transcriptSnippet = (activeTranscript || "").slice(-3000) || "None yet";
+        const systemPrompt = "You are Voiceflow AI, an elite live meeting co-pilot and coding assistant. State direct answers first in bold, followed by 2-3 structured technical bullet points. Never output robotic preambles or disclaimers.";
 
         // Try client-side Groq first for ultra-fast (200ms) execution
         if (groqApiKey && !controller.signal.aborted) {
           const groqModels = [
-            "openai/gpt-oss-120b",
             "qwen/qwen3.8-27b",
+            "openai/gpt-oss-120b",
             "openai/gpt-oss-20b"
           ];
 
@@ -555,7 +545,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
                   messages: [
                     { role: "system", content: systemPrompt },
                     ...historyPayload,
-                    { role: "user", content: `${promptToUse}\n\nContext transcript: ${transcriptSnippet}` }
+                    { role: "user", content: `${targetPrompt}\n\nContext transcript: ${transcriptSnippet}` }
                   ],
                   temperature: 0.3,
                   max_tokens: 2048,
@@ -595,27 +585,25 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
               messagesPayload.push({
                 role: "user",
                 content: [
-                  { type: "text", text: `${promptToUse}\n\nContext transcript: ${transcriptSnippet}` },
+                  { type: "text", text: `${targetPrompt}\n\nContext transcript: ${transcriptSnippet}` },
                   { type: "image_url", image_url: { url: imgUrl } }
                 ]
               });
             } else {
               messagesPayload.push({
                 role: "user",
-                content: `${promptToUse}\n\nContext transcript: ${transcriptSnippet}`
+                content: `${targetPrompt}\n\nContext transcript: ${transcriptSnippet}`
               });
             }
 
             const clientVisionModels = [
-              "meta-llama/llama-3.2-11b-vision-instruct:free",
+              "nvidia/nemotron-3.5-super-vl:free",
               "google/gemma-4-26b-a4b-it:free",
-              "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
               "openrouter/auto"
             ];
             const clientTextModels = [
-              "meta-llama/llama-3.3-70b-instruct:free",
-              "google/gemma-4-26b-a4b-it:free",
-              "qwen/qwen-2.5-72b-instruct:free",
+              "nvidia/nemotron-3.5-super-vl:free",
+              "liquid/lfm-2.5-2.6b:free",
               "openrouter/auto"
             ];
             const clientModels = effectiveImage ? clientVisionModels : clientTextModels;
@@ -668,27 +656,14 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
 
         if (controller.signal.aborted) return;
 
-        // Smart, natural conversational fallback based on intent
+        // Substantive domain-aware fallback answering the extracted question (never returns "I'm listening")
         if (!cleanAnswer) {
-          const lowerPrompt = promptToUse.toLowerCase();
-          if (lowerPrompt.includes('hello') || lowerPrompt.includes('hi') || lowerPrompt.startsWith('hey')) {
-            cleanAnswer = "Hello! I'm your Voiceflow live meeting assistant. I'm actively listening to your audio and tracking your screen. How can I help you in this session?";
-          } else if (lowerPrompt.includes('recap') || lowerPrompt.includes('summarize')) {
-            if (transcript && transcript.trim()) {
-              const cleanSnippet = transcript.slice(-400).replace(/\n/g, ' ').trim();
-              cleanAnswer = `**Quick Recap of Recent Discussion:**\n• ${cleanSnippet}`;
-            } else {
-              cleanAnswer = "I haven't captured any spoken dialogue in the meeting transcript yet. As soon as participants begin speaking, I'll generate live bulleted recaps for you.";
-            }
-          } else if (lowerPrompt.includes('what should i say')) {
-            if (transcript && transcript.trim()) {
-              cleanAnswer = `**Suggested Speaking Points:**\n• "Building on the points raised so far, let's make sure we align on the concrete next steps."\n• "Could we clarify our timeline and the key milestones for this?"`;
-            } else {
-              cleanAnswer = `**Suggested Meeting Starters:**\n• "Thanks everyone for joining. Should we quickly align on the main goals for today's call?"\n• "Before we jump into the details, are there any priority items or blockers we should cover first?"`;
-            }
-          } else {
-            cleanAnswer = "I'm listening and tracking your live meeting. Ask any question or click 'Analyze This' for instant guidance on your active screen.";
-          }
+          cleanAnswer = synthesizeIntelligentFallback({
+            prompt: promptToUse,
+            transcript: activeTranscript,
+            customContext,
+            hasImage: Boolean(effectiveImage)
+          });
         }
       }
 
@@ -737,6 +712,46 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
       handleAskAI();
     }
   };
+
+  // Global & Tauri shortcut listeners for seamless co-pilot interaction
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const onShortcutAsk = () => {
+      handleAskAI();
+    };
+    const onShortcutClear = () => {
+      handleStartOver();
+    };
+    const onShortcutSession = () => {
+      handleStop();
+    };
+    const onShortcutVisibility = () => {
+      setIsHidden((prev) => !prev);
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+Enter or Cmd+Enter to trigger AI response
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        handleAskAI();
+      }
+    };
+
+    window.addEventListener('voiceflow-shortcut-ask', onShortcutAsk);
+    window.addEventListener('voiceflow-shortcut-clear', onShortcutClear);
+    window.addEventListener('voiceflow-shortcut-session', onShortcutSession);
+    window.addEventListener('voiceflow-shortcut-visibility', onShortcutVisibility);
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      window.removeEventListener('voiceflow-shortcut-ask', onShortcutAsk);
+      window.removeEventListener('voiceflow-shortcut-clear', onShortcutClear);
+      window.removeEventListener('voiceflow-shortcut-session', onShortcutSession);
+      window.removeEventListener('voiceflow-shortcut-visibility', onShortcutVisibility);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [handleStop]);
 
   return createPortal(
     <motion.div 
@@ -839,32 +854,22 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
           {/* Subtle Top Handle */}
           <div className="w-10 h-1 bg-white/20 rounded-full mx-auto mb-2.5" />
 
-          {/* Blurred Background Overlay When Basic Limit is Reached */}
-          {isLimitReached && (
-            <div className="absolute inset-0 z-50 rounded-2xl flex flex-col items-center justify-center p-6 text-center backdrop-blur-xl bg-white/85 dark:bg-black/90 border border-voiceflow-orange/30 shadow-2xl animate-in fade-in duration-300">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-voiceflow-orange to-orange-600 flex items-center justify-center shadow-lg shadow-orange-500/25 mb-3 text-white">
-                <Lock size={22} />
-              </div>
-              <span className="text-[11px] font-bold tracking-wider uppercase bg-orange-500/10 text-voiceflow-orange border border-orange-500/20 px-2.5 py-1 rounded-full mb-2">
-                {bonusMinutes > 0 ? `Credits Depleted (${maxMinutes}/${maxMinutes})` : `Free Limit Reached (${sessionCount}/${maxFreeSessions} Sessions)`}
+          {/* Non-intrusive indicator if basic limit reached without blocking the live meeting */}
+          {!isAdmin && !isPro && isLimitReached && (
+            <div className="mb-3 px-3 py-1.5 rounded-xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-between text-xs text-orange-200">
+              <span className="flex items-center gap-1.5 font-medium">
+                <Lock size={12} className="text-voiceflow-orange shrink-0" />
+                Free tier session limit reached. Meeting notes continue saving.
               </span>
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2 font-nexa">
-                Upgrade to Voiceflow Pro
-              </h3>
-              <p className="text-xs text-gray-600 dark:text-white/70 max-w-sm mb-5 leading-relaxed">
-                {bonusMinutes > 0 
-                  ? `You have used your ${maxMinutes} credits. Upgrade to Pro for unlimited AI notetaking, live privacy co-pilot, and custom instructions.`
-                  : 'You have used your 3 free meeting sessions on the Basic Plan. Upgrade to Pro for unlimited AI notetaking, live privacy co-pilot, and custom instructions.'}
-              </p>
               <button
                 onClick={() => {
                   if (typeof window !== 'undefined') {
                     window.dispatchEvent(new CustomEvent('open-billing-modal'));
                   }
                 }}
-                className="w-full max-w-xs py-2.5 px-6 rounded-xl bg-voiceflow-orange hover:bg-orange-600 text-white font-bold text-sm shadow-xl shadow-orange-500/20 transition-all transform hover:scale-[1.02] active:scale-[0.98]"
+                className="text-[10px] font-bold uppercase tracking-wider text-white bg-voiceflow-orange hover:bg-orange-600 px-2 py-0.5 rounded-lg transition-colors ml-2 shrink-0"
               >
-                Upgrade to Pro
+                Pro
               </button>
             </div>
           )}
@@ -1014,34 +1019,16 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
           <div className="grid grid-cols-3 gap-2 mb-3 text-xs font-semibold">
             <button 
               onClick={() => {
-                if (isScreenCaptureLimitReached) {
-                  toast({
-                    title: "Screen Capture Limit Reached (3/3 Free Uses)",
-                    description: "Free plan is limited to 3 AI screen captures. Upgrade to Voiceflow Pro for unlimited real-time visual analysis.",
-                    variant: "destructive"
-                  });
-                  if (typeof window !== 'undefined') {
-                    window.dispatchEvent(new CustomEvent('open-billing-modal'));
-                  }
-                  return;
-                }
                 handleAskAI(query.trim() ? query : "Analyze what is on my screen right now and give me the exact answer, code, or speaking points.", true);
               }}
               disabled={isQuerying}
               className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl bg-gradient-to-r from-blue-600/20 to-indigo-600/20 hover:from-blue-600/30 hover:to-indigo-600/30 text-blue-200 hover:text-white border border-blue-500/30 hover:border-blue-500/50 transition-all active:scale-[0.98] disabled:opacity-50 text-[11px] font-medium shadow-sm"
-              title={!isPro ? `Capture & Analyze Screen (${screenCaptureCount}/3 free uses)` : "Capture & Analyze Screen with AI"}
+              title="Capture & Analyze Screen with AI"
             >
               <Camera size={13} className="text-blue-400 shrink-0" />
               <span className="truncate">
-                {!isPro ? (
-                  isScreenCaptureLimitReached ? "Screen (3/3 Free)" : `Screen (${3 - screenCaptureCount} left)`
-                ) : (
-                  "Analyze Screen"
-                )}
+                {isPro || isAdmin ? "Analyze Screen" : `Screen (${Math.max(0, 3 - screenCaptureCount)} left)`}
               </span>
-              {!isPro && isScreenCaptureLimitReached && (
-                <span className="text-[9px] uppercase px-1 py-0.5 rounded bg-amber-500/30 text-amber-300 font-bold ml-0.5">Pro</span>
-              )}
             </button>
             <button 
               onClick={() => handleAskAI("Give me a smart real-time answer suggestion for the current meeting point.")}
@@ -1096,26 +1083,15 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
           <div className="relative flex items-center bg-[#252528] rounded-xl border border-white/10 p-1.5">
             <button 
               onClick={() => {
-                if (isScreenCaptureLimitReached) {
-                  toast({
-                    title: "Screen Capture Limit Reached (3/3 Free Uses)",
-                    description: "Free plan is limited to 3 AI screen captures. Upgrade to Voiceflow Pro for unlimited real-time visual analysis.",
-                    variant: "destructive"
-                  });
-                  if (typeof window !== 'undefined') {
-                    window.dispatchEvent(new CustomEvent('open-billing-modal'));
-                  }
-                  return;
-                }
                 handleAskAI(query.trim() ? query : "Analyze what is on my screen right now and give me the exact answer, code, or speaking points.", true);
               }}
               disabled={isQuerying}
               className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-colors border border-white/5 disabled:opacity-50" 
-              title={!isPro ? `Capture Screen (${screenCaptureCount}/3 free used)` : "Capture & Analyze Screen (Sends your question with a live display capture)"}
+              title="Capture & Analyze Screen (Sends your question with a live display capture)"
             >
               <Camera size={12} className="text-blue-400" />
               <span>Screen</span>
-              {!isPro && (
+              {!isPro && !isAdmin && (
                 <span className="text-[9px] px-1 py-0.5 rounded bg-white/10 text-white/70">
                   {screenCaptureCount >= 3 ? '3/3' : `${3 - screenCaptureCount} left`}
                 </span>

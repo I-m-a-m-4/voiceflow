@@ -32,6 +32,7 @@
 
 import { openExternal } from '@/lib/platform';
 import { playNotificationSound } from '@/lib/sound';
+import { isMeetingRecordingActive } from '@/lib/meeting-state';
 
 export type NativeNotificationRequest = {
   /**
@@ -248,6 +249,8 @@ export async function initNativeNotificationPermissions(): Promise<boolean> {
 export async function triggerNativeNotification(request: NativeNotificationRequest): Promise<void> {
   try {
     if (!request?.title || !isTauriEnv()) return;
+    // Suppress all intrusive OS notification banners during active meetings and interviews
+    if (isMeetingRecordingActive()) return;
     if (!claimIdentity(request)) return;
 
     const granted = await initNativeNotificationPermissions();

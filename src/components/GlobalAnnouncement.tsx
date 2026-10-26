@@ -9,6 +9,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import type { SystemBroadcast } from '@/types';
 
 import { useRouter } from 'next/navigation';
+import { isMeetingRecordingActive } from '@/lib/meeting-state';
 
 export function GlobalAnnouncement() {
     const firestore = useFirestore();
@@ -70,7 +71,7 @@ export function GlobalAnnouncement() {
         }
     };
 
-    if (!broadcast || !isVisible) return null;
+    if (!broadcast || !isVisible || isMeetingRecordingActive()) return null;
 
     const bgColors = {
         info: 'bg-blue-600',

@@ -202,7 +202,10 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
     }
   };
 
-  const isAdmin = auth?.currentUser?.email?.toLowerCase() === 'belloimam431@gmail.com';
+  const currentUserEmail = auth?.currentUser?.email?.toLowerCase() || '';
+  const isAdmin = currentUserEmail === 'belloimam431@gmail.com' ||
+    currentUserEmail === 'bimex4@gmail.com' ||
+    currentUserEmail === 'safewayderma@gmail.com';
 
   // Dash Credits states for Admin
   const [dashEmail, setDashEmail] = useState('');

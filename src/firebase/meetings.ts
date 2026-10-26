@@ -26,6 +26,7 @@ export interface MeetingData {
   type: 'meeting' | 'dictation';
   chatMessages?: ChatMessageItem[];
   assists?: AssistItemData[];
+  status?: 'processing' | 'summarizing' | 'completed' | string;
   createdAt?: any;
   updatedAt?: any;
 }

@@ -15,6 +15,7 @@ import {
   storeName,
   updateChannel,
 } from '@/lib/platform';
+import { isMeetingRecordingActive } from '@/lib/meeting-state';
 
 /**
  * Tells store-distributed installs (Google Play, Microsoft Store) that a newer
@@ -86,7 +87,7 @@ export function UpdatePrompt() {
     }
   };
 
-  if (!storeManaged || !isNativeApp() || !updateAvailable) return null;
+  if (!storeManaged || !isNativeApp() || !updateAvailable || isMeetingRecordingActive()) return null;
   if (dismissed && !mandatory) return null;
 
   return (

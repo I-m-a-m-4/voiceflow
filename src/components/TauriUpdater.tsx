@@ -8,6 +8,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { RefreshCw, ArrowUpCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { isMeetingRecordingActive } from '@/lib/meeting-state';
 
 /**
  * TauriUpdater Component
@@ -25,6 +26,8 @@ export function TauriUpdater() {
     if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) return;
 
     const checkForUpdates = async () => {
+      // Do not perform update checks or downloads during live meetings / interviews
+      if (isMeetingRecordingActive()) return;
       try {
         const update = await check();
         if (update) {
@@ -84,6 +87,8 @@ export function TauriUpdater() {
       window.location.reload(); // Fallback
     }
   };
+
+  if (isMeetingRecordingActive()) return null;
 
   return (
     <AnimatePresence>

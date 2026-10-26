@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth, useFirestore } from '@/firebase';
 import { doc, getDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, getDocs, increment, serverTimestamp } from 'firebase/firestore';
 import { syncDeviceTrial, recordDeviceSession, recordDeviceScreenCapture } from '@/lib/device-fingerprint';
+import { INTERNAL_ACCOUNT_EMAILS } from '@/lib/platform-revenue';
 
 export interface PlanUsageState {
   isPro: boolean;
@@ -29,17 +30,22 @@ export function usePlanUsage(): PlanUsageState {
   const firestore = useFirestore();
 
   const currentUserEmail = auth?.currentUser?.email?.toLowerCase() || '';
-  const isAdmin = currentUserEmail === 'belloimam431@gmail.com';
+  const isInternalAccount = INTERNAL_ACCOUNT_EMAILS.includes(currentUserEmail) ||
+    currentUserEmail === 'belloimam431@gmail.com' ||
+    currentUserEmail === 'bimex4@gmail.com' ||
+    currentUserEmail === 'safewayderma@gmail.com';
+  const isTauriDesktop = typeof window !== 'undefined' && Boolean((window as any).__TAURI_INTERNALS__ || (window as any).__TAURI__);
+  const isAdmin = isInternalAccount || (isTauriDesktop && (currentUserEmail === '' || isInternalAccount));
 
   const [isPro, setIsPro] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
-    if (isAdmin) return true;
+    if (isAdmin || isTauriDesktop) return true;
     return localStorage.getItem('voiceflow_is_pro') === 'true';
   });
 
   const [isDeviceExceeded, setIsDeviceExceeded] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
-    if (isAdmin) return false;
+    if (isAdmin || isTauriDesktop) return false;
     return localStorage.getItem('voiceflow_device_trial_exceeded') === 'true';
   });
 
@@ -337,7 +343,7 @@ export function usePlanUsage(): PlanUsageState {
   const effectiveMaxMinutes = baseFreeMinutes + bonusMinutes;
   const availableCredits = Math.max(0, effectiveMaxMinutes - usedMinutes);
 
-  const isLimitReached = isAdmin
+  const isLimitReached = (isAdmin || isTauriDesktop)
     ? false
     : isPro
     ? false
@@ -345,7 +351,7 @@ export function usePlanUsage(): PlanUsageState {
     ? availableCredits <= 0
     : (availableCredits <= 0 || isDeviceExceeded || sessionCount >= maxFreeSessions);
 
-  const isScreenCaptureLimitReached = isAdmin
+  const isScreenCaptureLimitReached = (isAdmin || isTauriDesktop)
     ? false
     : (!isPro && screenCaptureCount >= maxFreeScreenCaptures);
 

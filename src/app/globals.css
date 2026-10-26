@@ -973,6 +973,15 @@ html.tauri-recording-mode #meeting-widget-root {
   box-shadow: none !important;
 }
 
+/* Suppress all external portals, modals, and toasts while in stealth HUD recording mode */
+html.tauri-recording-mode [data-radix-portal]:not(:has(#meeting-widget-root)),
+html.tauri-recording-mode [data-sonner-toaster],
+html.tauri-recording-mode .toaster {
+  display: none !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+}
+
 
 
 

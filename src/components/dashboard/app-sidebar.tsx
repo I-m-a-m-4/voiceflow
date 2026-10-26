@@ -15,6 +15,7 @@ import { useToast } from '@/hooks/use-toast';
 import { copyToClipboard } from '@/lib/clipboard';
 import { BillingModal } from './billing-modal';
 import { SettingsModal } from './settings-modal';
+import { isMeetingRecordingActive } from '@/lib/meeting-state';
 
 export default function AppSidebar() {
   const pathname = usePathname();
@@ -69,7 +70,10 @@ export default function AppSidebar() {
   ];
 
   useEffect(() => {
-    const handleOpenBilling = () => setIsBillingModalOpen(true);
+    const handleOpenBilling = () => {
+      if (isMeetingRecordingActive()) return;
+      setIsBillingModalOpen(true);
+    };
     const handleOpenSettings = (e: any) => {
       if (e.detail?.tab) setSettingsTab(e.detail.tab);
       setIsSettingsModalOpen(true);

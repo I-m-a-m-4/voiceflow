@@ -55,18 +55,34 @@ Write-Host "Cleaned up temporary extraction directory"
 
 # 5. Verify / Update AppxManifest.xml version
 $manifestPath = Join-Path $packDir "AppxManifest.xml"
+$repoManifest = Join-Path $PSScriptRoot "..\store-assets\AppxManifest.xml"
+if (Test-Path $repoManifest) {
+    Copy-Item -Path $repoManifest -Destination $manifestPath -Force
+}
+
 if (Test-Path $manifestPath) {
     $manifestContent = Get-Content $manifestPath -Raw
-    $manifestContent = [regex]::Replace($manifestContent, 'Version="[0-9\.]+"', "Version=`"$version.0`"")
+    # Update only the <Identity ... Version="..." /> attribute using lookbehind/lookahead
+    $manifestContent = [regex]::Replace($manifestContent, '(?<=<Identity\b[^>]*?\bVersion=")[0-9\.]+(?=")', "$version.0")
+    # Ensure MinVersion is at least 10.0.17763.0 (must be >= 10.0.17763.0 for Microsoft Store)
+    $manifestContent = [regex]::Replace($manifestContent, '(?<=<TargetDeviceFamily\b[^>]*?\bMinVersion=")[0-9\.]+(?=")', "10.0.17763.0")
     Set-Content -Path $manifestPath -Value $manifestContent -NoNewline
-    Write-Host "AppxManifest.xml set to Version=`"$version.0`""
+    Write-Host "AppxManifest.xml set to Version=`"$version.0`" with MinVersion=`"10.0.17763.0`""
 }
 
 # 6. Pack to MSIX using MSIXHeroCLI
 $outMsix = Join-Path $downloads "VoiceflowPack_$version.msix"
+if (Test-Path $outMsix) {
+    Remove-Item -Path $outMsix -Force
+}
 Write-Host "Packing to $outMsix using MSIXHeroCLI..."
 
 & MSIXHeroCLI.exe pack -d "$packDir" -p "$outMsix"
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "MSIXHeroCLI failed with exit code $LASTEXITCODE"
+    exit 1
+}
 
 if (Test-Path $outMsix) {
     $msixItem = Get-Item $outMsix

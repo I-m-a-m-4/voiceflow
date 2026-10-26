@@ -45,7 +45,12 @@ export function useAudioRecorder() {
         ? "audio/webm;codecs=opus"
         : "audio/webm";
 
-      const currentBlob = new Blob(chunksRef.current, { type: mimeType });
+      // If buffer is large (> 40 chunks), take latest 35 chunks to prevent sending multi-megabyte payloads every 5s
+      const sliceChunks = chunksRef.current.length > 40
+        ? chunksRef.current.slice(-35)
+        : chunksRef.current;
+
+      const currentBlob = new Blob(sliceChunks, { type: mimeType });
       const formData = new FormData();
       formData.append("file", currentBlob, "live-slice.webm");
 
@@ -55,19 +60,30 @@ export function useAudioRecorder() {
       const res = await fetch(transcribeUrl, {
         method: "POST",
         body: formData,
+        signal: AbortSignal.timeout(9000),
       });
 
       if (res.ok) {
         const data = await res.json();
         const liveText = (data.formattedTranscript || data.text || "").trim();
         if (liveText && isRecordingRef.current) {
-          setTranscript(liveText);
-          if (typeof window !== 'undefined') {
-            try {
-              localStorage.setItem('voiceflow_live_transcript', liveText);
-            } catch (e) {}
-            window.dispatchEvent(new CustomEvent('voiceflow-live-transcript', { detail: { transcript: liveText } }));
-          }
+          setTranscript((prev) => {
+            let updated = liveText;
+            if (chunksRef.current.length <= 40 || !prev || !prev.trim()) {
+              updated = liveText;
+            } else if (prev.endsWith(liveText) || prev.includes(liveText)) {
+              updated = prev;
+            } else {
+              updated = `${prev} ${liveText}`;
+            }
+            if (typeof window !== 'undefined') {
+              try {
+                localStorage.setItem('voiceflow_live_transcript', updated);
+              } catch (e) {}
+              window.dispatchEvent(new CustomEvent('voiceflow-live-transcript', { detail: { transcript: updated } }));
+            }
+            return updated;
+          });
         }
       }
     } catch (err) {
@@ -159,6 +175,12 @@ export function useAudioRecorder() {
       mediaRecorder.start(1000); // chunk every second
       setIsRecording(true);
       isRecordingRef.current = true;
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('voiceflow_is_recording', 'true');
+          window.dispatchEvent(new CustomEvent('voiceflow-record-state', { detail: { isRecording: true } }));
+        } catch (e) {}
+      }
       shouldRestartRecognitionRef.current = true;
       setIsPausedBySilence(false);
       setTranscript("");
@@ -300,6 +322,12 @@ export function useAudioRecorder() {
 
     setIsRecording(false);
     setIsPausedBySilence(false);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('voiceflow_is_recording', 'false');
+        window.dispatchEvent(new CustomEvent('voiceflow-record-state', { detail: { isRecording: false } }));
+      } catch (e) {}
+    }
   }, []);
 
   useEffect(() => {
@@ -349,6 +377,14 @@ export function useAudioRecorder() {
 
   const processAudio = async (blob: Blob, type: "dictation" | "meeting", elapsedSecs = 0) => {
     setIsProcessing(true);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('voiceflow_is_processing', 'true');
+      window.dispatchEvent(new CustomEvent('voiceflow-processing-state', { detail: { isProcessing: true } }));
+    }
+
+    let savedMeetingId: string | null = null;
+    let combinedTranscript = "";
+
     try {
       const formData = new FormData();
       formData.append("file", blob, "audio.webm");
@@ -357,14 +393,15 @@ export function useAudioRecorder() {
       const transcribeUrl = base ? `${base}/api/transcribe` : "/api/transcribe";
       const summarizeUrl = base ? `${base}/api/summarize` : "/api/summarize";
 
-      // 1. Transcribe
+      // 1. Transcribe with keepalive so page navigation doesn't abort the upload
       const transcribeRes = await fetch(transcribeUrl, {
         method: "POST",
         body: formData,
+        keepalive: true,
       });
       const transcribeData = await transcribeRes.json();
 
-      if (!transcribeRes.ok) throw new Error(transcribeData.error);
+      if (!transcribeRes.ok) throw new Error(transcribeData.error || "Transcription failed");
 
       // Check if resuming an existing meeting session
       const resumeMeetingId = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_resume_meeting_id') : null;
@@ -372,7 +409,7 @@ export function useAudioRecorder() {
       const prevDuration = typeof window !== 'undefined' ? parseInt(localStorage.getItem('voiceflow_resume_previous_duration') || '0', 10) : 0;
 
       const newTranscript = transcribeData.formattedTranscript || transcribeData.text || "";
-      const combinedTranscript = resumeMeetingId && prevTranscript
+      combinedTranscript = resumeMeetingId && prevTranscript
         ? `${prevTranscript}\n\n${newTranscript}`
         : newTranscript;
 
@@ -380,67 +417,59 @@ export function useAudioRecorder() {
       const totalDurationSeconds = resumeMeetingId ? (prevDuration + sessionDuration) : sessionDuration;
       const totalDurationMinutes = Math.max(1, Math.round(totalDurationSeconds / 60));
 
-      // 2. Summarize / Clean up with user's custom context if provided
-      const customContext = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_custom_context') || '' : '';
-      const summarizeRes = await fetch(summarizeUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          text: combinedTranscript, 
-          type, 
-          customContext 
-        }),
-      });
-      const summarizeData = await summarizeRes.json();
-
-      if (!summarizeRes.ok) throw new Error(summarizeData.error);
-
-      const finalOutput = summarizeData.text;
-      setTranscript(finalOutput);
-
-      // 3. Save or Update in Firestore
-      if (user?.uid) {
-        // Read current widget chat messages from localStorage so they are persisted to Firestore
-        let currentChatMessages: any[] = [];
-        let currentAssists: any[] = [];
-        try {
-          const rawChat = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_widget_messages') : null;
-          if (rawChat) {
-            currentChatMessages = JSON.parse(rawChat);
-            if (Array.isArray(currentChatMessages)) {
-              for (let i = 0; i < currentChatMessages.length; i += 2) {
-                const u = currentChatMessages[i];
-                const a = currentChatMessages[i + 1];
-                if (u && a && u.sender === 'user' && a.sender === 'ai') {
-                  currentAssists.push({
-                    prompt: u.text,
-                    type: 'Assist',
-                    response: a.text,
-                    timestamp: u.timestamp || a.timestamp,
-                  });
-                }
+      // Extract current widget chat messages & assists
+      let currentChatMessages: any[] = [];
+      let currentAssists: any[] = [];
+      try {
+        const rawChat = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_widget_messages') : null;
+        if (rawChat) {
+          currentChatMessages = JSON.parse(rawChat);
+          if (Array.isArray(currentChatMessages)) {
+            for (let i = 0; i < currentChatMessages.length; i += 2) {
+              const u = currentChatMessages[i];
+              const a = currentChatMessages[i + 1];
+              if (u && a && u.sender === 'user' && a.sender === 'ai') {
+                currentAssists.push({
+                  prompt: u.text,
+                  type: 'Assist',
+                  response: a.text,
+                  timestamp: u.timestamp || a.timestamp,
+                });
               }
             }
           }
-        } catch (e) {
-          console.warn("Could not parse widget messages for meeting save:", e);
         }
+      } catch (e) {
+        console.warn("Could not parse widget messages for meeting save:", e);
+      }
 
+      // Generate a meaningful initial title from the first sentences of the transcript
+      const firstLine = combinedTranscript.split('\n').filter(Boolean)[0] || "";
+      const derivedTitle = firstLine.length > 5 
+        ? (firstLine.length > 50 ? `${firstLine.slice(0, 47)}...` : firstLine)
+        : `Meeting Session (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`;
+
+      // --- PHASE 1 IMMEDIATE SAVE ---
+      // Save transcript to Firestore IMMEDIATELY before starting summarization.
+      // Even if the user navigates away or network drops during summarization, the transcript is 100% preserved!
+      if (user?.uid) {
         if (resumeMeetingId) {
+          savedMeetingId = resumeMeetingId;
           const { updateMeeting } = await import("@/firebase/meetings");
           await updateMeeting(resumeMeetingId, {
             transcript: combinedTranscript,
-            summary: finalOutput,
             durationSeconds: totalDurationSeconds,
             durationMinutes: totalDurationMinutes,
             chatMessages: currentChatMessages,
             assists: currentAssists,
+            status: 'summarizing'
           }, user.uid);
         } else {
-          await saveMeeting({
+          savedMeetingId = await saveMeeting({
             userId: user.uid,
+            title: derivedTitle,
             transcript: combinedTranscript,
-            summary: finalOutput,
+            summary: "Generating executive AI summary...",
             durationSeconds: totalDurationSeconds,
             durationMinutes: totalDurationMinutes,
             type,
@@ -448,6 +477,62 @@ export function useAudioRecorder() {
             assists: currentAssists,
           });
         }
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('voiceflow-meeting-saved'));
+        }
+      }
+
+      // 2. Summarize with keepalive
+      const customContext = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_custom_context') || '' : '';
+      let finalOutput = "";
+
+      try {
+        const summarizeRes = await fetch(summarizeUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ 
+            text: combinedTranscript, 
+            type, 
+            customContext 
+          }),
+          keepalive: true,
+        });
+
+        if (summarizeRes.ok) {
+          const summarizeData = await summarizeRes.json();
+          finalOutput = summarizeData.text || "";
+        }
+      } catch (sumErr) {
+        console.warn("Remote summarization call interrupted or failed, using local synthesis:", sumErr);
+      }
+
+      // If remote summarization failed or returned blank, synthesize a clean structured summary locally from transcript
+      if (!finalOutput || !finalOutput.trim() || finalOutput.includes("Meeting recorded offline")) {
+        const sentences = combinedTranscript.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 15);
+        const lead = sentences.slice(0, 2).join(' ') || combinedTranscript.slice(0, 200);
+        const keyPoints = sentences.slice(2, 6);
+
+        finalOutput = `## Executive Summary\n${lead}\n\n## Key Takeaways\n`;
+        if (keyPoints.length > 0) {
+          keyPoints.forEach(kp => {
+            finalOutput += `• **Discussion Point**: ${kp.trim()}\n`;
+          });
+        } else {
+          finalOutput += `• **Discussion Point**: ${combinedTranscript.slice(0, 250).trim()}...\n`;
+        }
+        finalOutput += `\n## Action Items\n• **Follow-Up**: Review session transcript notes and align on deliverables.`;
+      }
+
+      setTranscript(finalOutput);
+
+      // --- PHASE 2 UPDATE SUMMARY ---
+      if (user?.uid && savedMeetingId) {
+        const { updateMeeting } = await import("@/firebase/meetings");
+        await updateMeeting(savedMeetingId, {
+          summary: finalOutput,
+          status: 'completed'
+        }, user.uid);
 
         // Also persist user plan usage directly to Firestore (anti-cheating)
         try {
@@ -457,7 +542,6 @@ export function useAudioRecorder() {
             sessionCount: increment(resumeMeetingId ? 0 : 1),
             usedMinutes: increment(Math.max(1, Math.round(sessionDuration / 60)))
           });
-          // Update device ledger across accounts
           recordDeviceSession(db, sessionDuration).catch(() => {});
         } catch (planErr) {
           console.warn("Could not increment user usage in firestore:", planErr);
@@ -499,36 +583,45 @@ export function useAudioRecorder() {
       }
       
     } catch (err) {
-      console.error("Processing failed (e.g. network lost), executing emergency offline transcript backup:", err);
-      // Emergency offline backup: if online transcribe/summarize failed, recover from live transcript or backup
-      try {
-        const cachedTranscript = transcript || (typeof window !== 'undefined' ? localStorage.getItem('voiceflow_live_transcript') || '' : '');
-        if (cachedTranscript.trim() && user?.uid) {
-          const rawChat = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_widget_messages') : null;
-          let currentChatMessages: any[] = [];
-          if (rawChat) {
-            try { currentChatMessages = JSON.parse(rawChat); } catch {}
+      console.error("Processing encountered error, checking if emergency backup is needed:", err);
+      // Emergency offline backup: ONLY execute if the meeting wasn't already saved above
+      if (!savedMeetingId) {
+        try {
+          const cachedTranscript = combinedTranscript || transcript || (typeof window !== 'undefined' ? localStorage.getItem('voiceflow_live_transcript') || '' : '');
+          if (cachedTranscript.trim() && user?.uid) {
+            const rawChat = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_widget_messages') : null;
+            let currentChatMessages: any[] = [];
+            if (rawChat) {
+              try { currentChatMessages = JSON.parse(rawChat); } catch {}
+            }
+
+            // Synthesize a structured summary rather than a static network interruption alert
+            const sentences = cachedTranscript.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 15);
+            const lead = sentences.slice(0, 2).join(' ') || cachedTranscript.slice(0, 200);
+            const synthesizedSummary = `## Executive Summary\n${lead}\n\n## Key Takeaways\n• **Preserved Transcript**: Full real-time conversation safely retained.\n\n## Action Items\n• Click 'Regenerate Summary' anytime to format with AI.`;
+
+            await saveMeeting({
+              userId: user.uid,
+              transcript: cachedTranscript,
+              summary: synthesizedSummary,
+              durationSeconds: elapsedSecs,
+              durationMinutes: Math.max(1, Math.round(elapsedSecs / 60)),
+              type,
+              chatMessages: currentChatMessages,
+              title: `Session Notes (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`
+            });
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('voiceflow-meeting-saved'));
+            }
           }
-          await saveMeeting({
-            userId: user.uid,
-            transcript: cachedTranscript,
-            summary: `Meeting recorded offline (${new Date().toLocaleDateString()}). Real-time transcript preserved during network interruption.`,
-            durationSeconds: elapsedSecs,
-            durationMinutes: Math.max(1, Math.round(elapsedSecs / 60)),
-            type,
-            chatMessages: currentChatMessages,
-            title: `Session Backup (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`
-          });
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new CustomEvent('voiceflow-meeting-saved'));
-          }
+        } catch (backupErr) {
+          console.error("Emergency backup write failed:", backupErr);
         }
-      } catch (backupErr) {
-        console.error("Emergency backup write failed:", backupErr);
       }
     } finally {
       setIsProcessing(false);
       if (typeof window !== 'undefined') {
+        localStorage.removeItem('voiceflow_is_processing');
         window.dispatchEvent(new CustomEvent('voiceflow-processing-state', { detail: { isProcessing: false } }));
       }
     }

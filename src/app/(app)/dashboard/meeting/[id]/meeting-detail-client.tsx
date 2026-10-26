@@ -937,6 +937,25 @@ ${meeting?.transcript ? meeting.transcript : '_No transcript recorded._'}
         {/* Tab 1: Summary */}
         {activeTab === 'summary' && (
           <div className="space-y-6 animate-fade-up">
+            {meeting.summary?.includes('Meeting recorded offline') && meeting.transcript && (
+              <div className="p-4 rounded-xl border border-orange-500/25 bg-orange-500/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <Sparkles className="w-5 h-5 text-voiceflow-orange shrink-0" />
+                  <div>
+                    <p className="text-xs font-semibold text-foreground">Draft summary preserved from interrupted session</p>
+                    <p className="text-xs text-muted-foreground">Full transcript is intact. Click regenerate to create your executive AI summary now.</p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleRegenerateSummary}
+                  disabled={isRegenerating}
+                  className="px-3 py-1.5 rounded-lg bg-voiceflow-orange hover:bg-orange-600 text-white font-semibold text-xs transition-colors flex items-center gap-1.5 shrink-0 self-start sm:self-auto disabled:opacity-50"
+                >
+                  <RefreshCw size={12} className={isRegenerating ? "animate-spin" : ""} />
+                  {isRegenerating ? "Generating..." : "Generate Full AI Summary"}
+                </button>
+              </div>
+            )}
             {meeting.summary ? (
               <div className="space-y-4">
                 <div className="bg-card border border-border rounded-2xl p-6 sm:p-8 shadow-sm">

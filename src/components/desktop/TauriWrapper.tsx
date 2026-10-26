@@ -68,17 +68,24 @@ export function TauriLayoutWrapper({ children }: { children: React.ReactNode }) 
       // Listen for Global Shortcuts from Tauri Rust Backend
       import('@tauri-apps/api/event').then(({ listen }) => {
         listen('shortcut-visibility', () => {
-           console.log('Voiceflow Visibility Toggled via Shortcut');
-           // Placeholder: Add global state dispatcher here
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('voiceflow-shortcut-visibility'));
+          }
         });
         listen('shortcut-ask', () => {
-           console.log('Voiceflow Ask Prompt Triggered via Shortcut');
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('voiceflow-shortcut-ask'));
+          }
         });
         listen('shortcut-clear', () => {
-           console.log('Voiceflow Clear Conversation Triggered via Shortcut');
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('voiceflow-shortcut-clear'));
+          }
         });
         listen('shortcut-session', () => {
-           console.log('Voiceflow Session Toggle Triggered via Shortcut');
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('voiceflow-shortcut-session'));
+          }
         });
       }).catch(console.error);
     }
