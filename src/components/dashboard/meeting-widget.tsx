@@ -78,7 +78,11 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
     return [];
   });
   const [isStealth, setIsStealth] = useState<boolean>(true);
-  const [isTauri, setIsTauri] = useState(false);
+  const [isTauri, setIsTauri] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    return !isMobile && Boolean((window as any).__TAURI_INTERNALS__ || (window as any).__TAURI__);
+  });
   const [liveTranscript, setLiveTranscript] = useState<string>(() => {
     return transcript || (typeof window !== 'undefined' ? localStorage.getItem('voiceflow_live_transcript') || '' : '');
   });
@@ -403,8 +407,6 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
 
 
   
-  if (!mounted || !isRecording) return null;
-
   const handleAskAI = async (customPrompt?: string, includeScreenCapture = false) => {
     const promptToUse = (customPrompt || query || "What should I say right now?").trim();
     if (!promptToUse || isQuerying) return;
@@ -715,7 +717,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
 
   // Global & Tauri shortcut listeners for seamless co-pilot interaction
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || !isRecording) return;
 
     const onShortcutAsk = () => {
       handleAskAI();
@@ -751,7 +753,9 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
       window.removeEventListener('voiceflow-shortcut-visibility', onShortcutVisibility);
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [handleStop]);
+  }, [isRecording, handleStop]);
+
+  if (!mounted || !isRecording) return null;
 
   return createPortal(
     <motion.div 
