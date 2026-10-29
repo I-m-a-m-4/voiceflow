@@ -986,3 +986,14 @@ html.tauri-recording-mode .toaster {
 
 
 
+
+/* Stealth cursor shielding: never reveal hover pointer, text I-beam, or drag fist over screenshare */
+html.tauri-recording-mode,
+html.tauri-recording-mode *,
+html.tauri-recording-mode button,
+html.tauri-recording-mode a,
+html.tauri-recording-mode input,
+html.tauri-recording-mode textarea,
+html.tauri-recording-mode [data-tauri-drag-region] {
+  cursor: default !important;
+}

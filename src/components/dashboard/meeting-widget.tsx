@@ -462,12 +462,19 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
 
       if (controller.signal.aborted) return;
 
-      // Retain active screen context: keep image attached so follow-up questions
-      // ("so give me the proposed solution", "recap", "explain the complexity") reference the active screen
-      const effectiveImage = base64Image || lastImageBase64Ref.current || "";
+      // When the user explicitly clicks "Analyze Screen", strictly use the fresh screenshot.
+      // If the fresh capture failed, clear any stale image so old screens never leak.
+      // For general follow-up questions without explicit screen requests, retain the active screen reference.
+      const effectiveImage = includeScreenCapture 
+        ? (base64Image || "")
+        : (base64Image || lastImageBase64Ref.current || "");
+
       if (effectiveImage) {
         lastImageBase64Ref.current = effectiveImage;
         setHasAttachedImage(true);
+      } else if (includeScreenCapture && !base64Image) {
+        lastImageBase64Ref.current = null;
+        setHasAttachedImage(false);
       }
 
       const customContext = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_custom_context') || '' : '';
@@ -494,7 +501,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
 
       try {
         const fetchTimeoutController = new AbortController();
-        const timeoutId = setTimeout(() => fetchTimeoutController.abort(), 20000);
+        const timeoutId = setTimeout(() => fetchTimeoutController.abort(), 35000);
         
         const onParentAbort = () => fetchTimeoutController.abort();
         controller.signal.addEventListener('abort', onParentAbort);
@@ -1023,7 +1030,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
                               </ReactMarkdown>
                               {msg.provider && (
                                 <span className="text-[9px] text-white/40 block mt-1.5 border-t border-white/5 pt-1">
-                                  ⚡ Generated via {msg.provider === 'local-smart' ? 'Smart Co-Pilot' : msg.provider} {msg.model ? `(${msg.model})` : ''}
+                                  ⚡ Voiceflow AI
                                 </span>
                               )}
                             </>

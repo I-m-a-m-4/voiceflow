@@ -6,7 +6,7 @@
  * 3. High-impact first-person speaking points without generic canned replies.
  */
 
-const QUESTION_STARTERS_REGEX = /\b(can you|could you|how did you|how do you|how would you|what is|what are|what was|why did you|why do you|tell me about|explain|walk me through|describe|in what scenario|how have you handled|what challenges|how does|what's your experience|have you ever|what would happen if|did you|do you|would you|should we|how can we|what if|what about|could we|who did|where did|which one|give me an example|how will you|how do we|tell us|elaborate on|what do you think)\b/i;
+const QUESTION_STARTERS_REGEX = /\b(can you|could you|how did you|how do you|how would you|what is|what are|what was|why did you|why do you|tell me about|tell us about|tell me|tell us|explain|walk me through|walk us through|describe|in what scenario|how have you handled|what challenges|how does|what's your experience|have you ever|have you|has there|are you|were you|is there|was there|do you|did you|would you|should we|how can we|what if|what about|could we|who did|where did|which one|give me an example|give us an example|how will you|how do we|elaborate on|what do you think|what would you|what's your differential|differential diagnosis|what tests|how would you treat|how would you manage)\b/i;
 
 const GENERIC_PROMPT_PATTERNS = [
   /^what\s+should\s+i\s+say(\s+next)?(\s+in\s+this\s+meeting)?(\?)?$/i,
@@ -120,16 +120,29 @@ export function buildEnhancedInterviewPrompt(
   const isGeneric = isGenericAskPrompt(rawPrompt);
   const lastQuestion = extractLastQuestion(transcript);
   const recentTopic = extractRecentTopic(transcript);
+  const isScreenFocused = /\b(screen|slide|display|screenshot|what's on my screen|picture|image|analyze (what is on )?my screen)\b/i.test(rawPrompt);
+
+  // Case 0: Explicit visual screen analysis requested with attached image
+  if (hasImage && isScreenFocused) {
+    return {
+      extractedQuestion: "Screen Visual Analysis",
+      targetPrompt: `[Screen Visual Analysis Task]: Analyze what is actively displayed on screen right now.
+- If it shows code, an IDE, or technical assessment (LeetCode, HackerRank, CoderPad, terminal): Provide the clean optimal code solution in a code block, time/space complexity, and 2-3 spoken explanation points.
+- If it shows a slide, diagram, or architecture: State the core takeaway FIRST in bold and provide 2-3 confident speaking points.
+- If it shows a document, question, or medical/clinical case: Identify the exact problem and provide the direct, articulate answer immediately.
+- If it shows a dashboard, UI, or metrics: Highlight key takeaways, anomalies, and actionable conclusions.
+- State your direct answer or core conclusion FIRST in bold. Deliver the exact words ready to speak aloud without robotic meta-commentary.`,
+    };
+  }
 
   // Case 1: Generic assist button ("What should I say?") with an active question detected AND screen captured
   if (isGeneric && lastQuestion && hasImage) {
     return {
       extractedQuestion: lastQuestion,
       targetPrompt: `[Interviewer's Last Question/Prompt]: "${lastQuestion}"
-[Screen Visual Context Attached]: The candidate's screen is captured.
-[Task]: The interviewer just asked this on the call. Analyze both the question and any code, diagram, or problem visible on the screen.
-- Provide the exact, high-scoring, first-person technical answer immediately.
-- If code/IDE is shown: Provide the clean, optimal code block with Time/Space complexity and 2-3 spoken explanation points.
+[Screen Visual Context Attached]: The user's screen is captured.
+[Task]: The interviewer or team just presented this on the call. Analyze both the question and any code, diagram, or problem visible on screen.
+- Provide the exact, high-scoring, first-person answer immediately. Ground it in the relevant domain (clinical, technical, executive, business).
 - State the direct answer FIRST in bold.
 - Avoid robotic preambles like "You should say" — deliver the exact words ready to speak aloud.`,
     };
@@ -140,9 +153,9 @@ export function buildEnhancedInterviewPrompt(
     return {
       extractedQuestion: lastQuestion,
       targetPrompt: `[Interviewer's Last Question/Prompt]: "${lastQuestion}"
-[Task]: The interviewer just asked this question on the call. Provide the exact, high-scoring, first-person technical answer immediately.
+[Task]: The interviewer just asked this on the call. Provide the exact, high-scoring, first-person answer immediately.
 - State the direct answer FIRST in bold.
-- Provide 2-3 structured technical points with concrete architecture, trade-offs, and production details.
+- Deliver 2-3 structured points grounded in the speaker's domain (e.g. clinical experience, architecture, business rationale).
 - Avoid robotic preambles like "You should say" — deliver the exact words ready to speak aloud.`,
     };
   }
@@ -151,11 +164,10 @@ export function buildEnhancedInterviewPrompt(
   if (hasImage && isGeneric) {
     return {
       extractedQuestion: "Screen Visual Analysis",
-      targetPrompt: `[Screen Visual Analysis]: Analyze what is currently displayed on screen.
-- If it shows code or a coding assessment (LeetCode, HackerRank, CoderPad, IDE): Provide the optimal code solution in a code block, Time & Space complexity, and 2-3 spoken explanation points.
-- If it shows slides or architecture diagrams: State the core takeaway in bold and give 2-3 executive speaking points.
-- If it shows a dashboard or UI: Highlight the key metrics, insights, and talking points.
-- Deliver the exact words the user can speak aloud immediately.`,
+      targetPrompt: `[Screen Visual Analysis]: Analyze what is actively displayed on screen.
+- State the core finding or direct answer FIRST in bold.
+- Provide 2-3 crisp, articulate speaking points ready to read aloud.
+- Ground the answer in the specific content visible on the screen.`,
     };
   }
 
@@ -165,21 +177,21 @@ export function buildEnhancedInterviewPrompt(
       extractedQuestion: recentTopic,
       targetPrompt: `[Active Discussion Context]: "${recentTopic}"
 [Task]: The interviewer or team just finished discussing this. Provide the optimal, articulate speaking response to address and build on this topic directly.
-- State your core response or insight in bold.
-- Follow with 2 crisp, confident talking points with practical real-world context.`,
+- State your core response or insight FIRST in bold.
+- Follow with 2 crisp, confident talking points with practical real-world depth.`,
     };
   }
 
-  // Case 5: Specific candidate prompt (e.g., "explain our caching strategy") with or without question
+  // Case 5: Specific candidate prompt (e.g., "explain our licensing status", "walk through the clinical differential")
   const cleanedPrompt = rawPrompt.replace(/^(it is asking me that|can you explain|explain|tell me)\s*/i, '').trim();
   
   if (lastQuestion) {
     return {
       extractedQuestion: lastQuestion,
-      targetPrompt: `[Interviewer Question]: "${lastQuestion}"
+      targetPrompt: `[Active Interview Context]: "${lastQuestion}"
 [User Clarification]: "${cleanedPrompt}"
-${hasImage ? '[Screen Context]: Refer to the code, diagram, or UI visible on screen to ground this answer.' : ''}
-[Task]: Provide the exact, first-person technical answer directly addressing this topic. State the core answer in bold, followed by 2-3 clear technical points.`,
+${hasImage ? '[Screen Context]: Refer to the content visible on screen to ground this answer.' : ''}
+[Task]: Provide the exact, first-person answer directly addressing this topic. State the core answer in bold, followed by 2-3 clear points.`,
     };
   }
 
@@ -200,7 +212,6 @@ export function synthesizeIntelligentFallback(params: {
   hasImage?: boolean;
 }): string {
   const { prompt, transcript, customContext, hasImage } = params;
-  const isGeneric = isGenericAskPrompt(prompt);
   const lastQuestion = extractLastQuestion(transcript);
   const recentTopic = extractRecentTopic(transcript);
   const cleanPrompt = prompt.replace(/^(it is asking me that|can you explain|explain|tell me)\s*/i, '').trim();
@@ -208,7 +219,7 @@ export function synthesizeIntelligentFallback(params: {
   // Extract real topics from the active transcript
   const transcriptLines = (transcript || '')
     .split(/(?<=[.?!])\s+|\n+/)
-    .map(s => s.trim())
+    .map(s => cleanSentence(s))
     .filter(s => s.length > 15);
 
   const keyTranscriptPoint = transcriptLines.length > 0 
@@ -220,88 +231,63 @@ export function synthesizeIntelligentFallback(params: {
 
   // Check user intent from prompt
   const isRecap = /\b(recap|summarize|summary|what was (just )?said|repeat)\b/i.test(prompt);
-  const isSolution = /\b(solution|solve|propose|approach|fix|how to|code)\b/i.test(prompt);
-  const isComplexity = /\b(complexity|big o|time complexity|space complexity|optimize)\b/i.test(prompt);
 
   // 1. If user asks for a Quick Recap
   if (isRecap) {
     if (keyTranscriptPoint) {
       return `**2-Bullet Meeting Recap:**
 • **Current Focus**: ${keyTranscriptPoint}
-• **Context & Priority**: ${secondTranscriptPoint || "Aligning on architectural boundaries, performance requirements, and execution timeline."}
+• **Context & Priority**: ${secondTranscriptPoint || "Aligning on core objectives, expectations, and next steps."}
 
 **Ready-to-Speak Response:**
-"To summarize where we are: we are focusing on ${keyTranscriptPoint.slice(0, 100)}, and our priority is ensuring the implementation is robust, observable, and delivered on schedule."`;
+"To summarize where we are: we are focusing on ${keyTranscriptPoint.slice(0, 100)}, and our priority is ensuring the deliverables are clear, verified, and executed seamlessly."`;
     }
     return `**2-Bullet Meeting Recap:**
-• **Core Discussion**: Reviewing technical system requirements, component decoupling, and clean interfaces.
-• **Current Priority**: Ensuring low latency, predictable failure recovery, and immediate stakeholder alignment.
+• **Core Discussion**: Reviewing current requirements, scope, and key deliverables.
+• **Current Priority**: Ensuring alignment, predictable execution, and immediate next steps.
 
 **Ready-to-Speak Response:**
-"We are aligned on the core architecture and are now focusing on finalizing the exact component contracts and error handling strategy."`;
+"We are aligned on the core objectives and are now focusing on finalizing the exact implementation and execution details."`;
   }
 
-  // 2. If user asks for Proposed Solution or Implementation
-  if (isSolution) {
-    const focusTopic = lastQuestion || keyTranscriptPoint || cleanPrompt || "the current technical requirement";
-    return `**Proposed Solution & Technical Approach:**
-"For **${focusTopic.slice(0, 120)}**, my recommendation is a decoupled, modular design using deterministic state transitions and idempotent execution."
-
-**Speaking Highlights:**
-• **Architecture**: Isolate the business logic behind a clean interface with strict type safety and input validation.
-• **Efficiency & Concurrency**: Ensure operations operate with linear or logarithmic time complexity, avoiding synchronous bottlenecks.
-• **Production Proof**: Add structured error logging and metrics so health and latency are observable immediately.`;
-  }
-
-  // 3. If user asks about Complexity or Optimization
-  if (isComplexity) {
-    return `**Performance & Complexity Optimization:**
-"The optimal target for this workload is **O(n)** time complexity with **O(1)** auxiliary space by using in-place operations or index-based lookups."
-
-**Key Optimization Points:**
-• **Time Complexity**: Replace nested traversals with a single pass using a hash map or two-pointer technique.
-• **Space Complexity**: Stream or process chunks incrementally to keep memory usage bounded and avoid cache thrashing.
-• **Failure Mode**: Gracefully handle edge cases (empty collections, boundary limits, network pauses) before processing.`;
-  }
-
-  // 4. Direct answer to an extracted interview question
+  // 2. Direct answer to an extracted interview question or topic
   if (lastQuestion) {
-    return `**Direct Answer to Interviewer:**
-"Regarding that question: our approach centers on modular separation of concerns with optimistic updates and deterministic error recovery."
+    return `**Direct Answer to Meeting Point:**
+"Regarding **${lastQuestion.slice(0, 120)}**: my perspective is centered on structured execution, evidence-based rigor, and clear communication."
 
-**Key Technical Points:**
-• **Core Strategy**: Address "${lastQuestion.slice(0, 100)}" by establishing clean service boundaries and strict validation.
-• **Trade-Off**: Prioritized maintainability, fault tolerance, and predictable latency over complex pre-optimizations.
-• **Verification**: Verified with automated unit coverage and end-to-end integration tests in CI/CD.`;
+**Key Speaking Highlights:**
+• **Direct Approach**: Address the core requirement with proven methodology and practical application.
+• **Execution & Quality**: Emphasize safety, reliability, and measured outcomes.
+• **Next Action**: Propose the recommended path forward and invite collaborative feedback.`;
   }
 
-  // 5. Visual Screen Analysis (ONLY if explicitly requested and no specific question asked)
-  if (hasImage && isGeneric) {
-    return `**Screen Analysis & Speaking Highlights:**
-"Looking at what is actively displayed on screen, the core focus is ensuring clean logic, robust edge-case handling, and clear architectural boundaries."
+  // 3. Visual Screen Analysis (ONLY if explicitly requested and image is present)
+  if (hasImage) {
+    return `**Visual Screen Analysis:**
+"Reviewing what is actively displayed on screen: the primary focus is aligning on the active material and verifying core points."
 
 **Key Discussion Points:**
-• **Implementation Flow**: Verify that inputs are validated early and operations execute with bounded latency.
-• **Edge Cases**: Account for null or malformed data, concurrent updates, and graceful failover.
-• **Next Action**: Walk through the logic step-by-step, verify the complexity, and confirm team alignment.`;
+• **Active Content**: Focus directly on the critical elements and priorities presented on screen.
+• **Execution**: Ensure expectations, constraints, and actionable deliverables are clearly addressed.
+• **Next Action**: Walk through the recommendations step-by-step and confirm alignment with the team.`;
   }
 
-  // 6. Response to a recent discussion topic or general speaking point
+  // 4. Response to a recent discussion topic or general speaking point
   if (recentTopic) {
     return `**Suggested Speaking Response:**
-"Building directly on what was just mentioned regarding ${recentTopic.slice(0, 90)}: our priority should be ensuring high throughput and clean separation of concerns."
+"Building directly on what was just mentioned regarding **${recentTopic.slice(0, 90)}**: our priority should be ensuring high quality, clear ownership, and reliable outcomes."
 
 **Core Discussion Points:**
-• **Technical Approach**: Implement deterministic error boundaries and validate invariants upfront.
-• **Actionable Next Step**: Confirm the interface contract and proceed with the proposed implementation.`;
+• **Primary Focus**: Maintain alignment on immediate goals and validate key parameters upfront.
+• **Actionable Next Step**: Confirm consensus on the proposed direction and proceed with execution.`;
   }
 
-  // 7. General Prompt Fallback (Addressing prompt directly)
+  // 5. General Prompt Fallback
   return `**Direct Answer for "${cleanPrompt.slice(0, 80)}":**
-"To address this directly: our approach is built on decoupled, modular services with deterministic state management."
+"To address this directly: our approach is built on structured methodology, clear priorities, and measurable outcomes."
 
 **Speaking Highlights:**
-• **Primary Principle**: Deliver a clean, maintainable solution that satisfies performance criteria without adding operational complexity.
-• **Reliability**: Guard critical execution paths with structured error boundaries and automated fallback handling.
+• **Primary Principle**: Deliver a clean, effective solution that satisfies the core requirements.
+• **Reliability & Execution**: Guard against risks with disciplined validation and clear communication.
 • **Next Step**: State the trade-offs clearly and invite questions on the implementation details.`;
 }
