@@ -45,14 +45,11 @@ export function useAudioRecorder() {
         ? "audio/webm;codecs=opus"
         : "audio/webm";
 
-      // If buffer is large (> 40 chunks), take latest 35 chunks to prevent sending multi-megabyte payloads every 5s
-      const sliceChunks = chunksRef.current.length > 40
-        ? chunksRef.current.slice(-35)
-        : chunksRef.current;
-
-      const currentBlob = new Blob(sliceChunks, { type: mimeType });
+      // ALWAYS build blob from chunk 0 so the WebM EBML header and track metadata are preserved!
+      // Slicing mid-stream strips the header, causing Whisper to fail after 30 seconds.
+      const currentBlob = new Blob(chunksRef.current, { type: mimeType });
       const formData = new FormData();
-      formData.append("file", currentBlob, "live-slice.webm");
+      formData.append("file", currentBlob, "live-recording.webm");
 
       const base = apiBase();
       const transcribeUrl = base ? `${base}/api/transcribe` : "/api/transcribe";
@@ -60,30 +57,25 @@ export function useAudioRecorder() {
       const res = await fetch(transcribeUrl, {
         method: "POST",
         body: formData,
-        signal: AbortSignal.timeout(9000),
+        signal: AbortSignal.timeout(15000),
       });
 
       if (res.ok) {
         const data = await res.json();
         const liveText = (data.formattedTranscript || data.text || "").trim();
         if (liveText && isRecordingRef.current) {
-          setTranscript((prev) => {
-            let updated = liveText;
-            if (chunksRef.current.length <= 40 || !prev || !prev.trim()) {
-              updated = liveText;
-            } else if (prev.endsWith(liveText) || prev.includes(liveText)) {
-              updated = prev;
-            } else {
-              updated = `${prev} ${liveText}`;
-            }
-            if (typeof window !== 'undefined') {
-              try {
-                localStorage.setItem('voiceflow_live_transcript', updated);
-              } catch (e) {}
-              window.dispatchEvent(new CustomEvent('voiceflow-live-transcript', { detail: { transcript: updated } }));
-            }
-            return updated;
-          });
+          setTranscript(liveText);
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem('voiceflow_live_transcript', liveText);
+              localStorage.setItem('voiceflow_current_meeting_backup', JSON.stringify({
+                transcript: liveText,
+                updatedAt: new Date().toISOString(),
+                startTime: startTimeRef.current,
+              }));
+            } catch (e) {}
+            window.dispatchEvent(new CustomEvent('voiceflow-live-transcript', { detail: { transcript: liveText } }));
+          }
         }
       }
     } catch (err) {
@@ -228,11 +220,20 @@ export function useAudioRecorder() {
           };
 
           recognition.onerror = (event: any) => {
-            if (event.error === 'network' || event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+            if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
               shouldRestartRecognitionRef.current = false;
               console.info(`SpeechRecognition disabled (${event.error}). Recording continues via Whisper AI.`);
             } else {
-              console.warn("SpeechRecognition warning:", event.error);
+              console.warn("SpeechRecognition transient warning:", event.error);
+              if (isRecordingRef.current && shouldRestartRecognitionRef.current) {
+                setTimeout(() => {
+                  try {
+                    if (isRecordingRef.current && recognitionRef.current) {
+                      recognitionRef.current.start();
+                    }
+                  } catch (e) {}
+                }, 2000);
+              }
             }
           };
 
@@ -393,11 +394,10 @@ export function useAudioRecorder() {
       const transcribeUrl = base ? `${base}/api/transcribe` : "/api/transcribe";
       const summarizeUrl = base ? `${base}/api/summarize` : "/api/summarize";
 
-      // 1. Transcribe with keepalive so page navigation doesn't abort the upload
+      // 1. Transcribe (NO keepalive: true, since payloads > 64KB throw TypeError)
       const transcribeRes = await fetch(transcribeUrl, {
         method: "POST",
         body: formData,
-        keepalive: true,
       });
       const transcribeData = await transcribeRes.json();
 
@@ -496,7 +496,6 @@ export function useAudioRecorder() {
             type, 
             customContext 
           }),
-          keepalive: true,
         });
 
         if (summarizeRes.ok) {

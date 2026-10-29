@@ -25,7 +25,10 @@ export async function POST(req: NextRequest) {
     const trimmed = text.trim();
     // Optimization: If text is extremely short or blank, do not waste Groq quota
     if (trimmed.length < 15) {
-      return NextResponse.json({ text: trimmed });
+      return NextResponse.json({ 
+        text: trimmed,
+        title: `Meeting Session (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`
+      });
     }
 
     let systemPrompt = "You are an elite AI meeting assistant and executive notetaker.";
@@ -76,16 +79,19 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
       systemPrompt += `\n\nUser Profile & Custom Context:\n"${customContext.trim()}"\nTailor the summary and action items to specifically address the priorities, role, and industry mentioned above.`;
     }
 
-    // Official lightning-fast Groq models currently supported on the platform
+    // Token Guard: If transcript exceeds 25,000 chars (~6,000 tokens), preserve the crucial beginning (agenda/context)
+    // and ending (conclusions/action items) while omitting repetitive middle bulk to strictly protect Groq TPM ceilings.
+    const boundedText = trimmed.length > 25000 
+      ? `${trimmed.slice(0, 12000)}\n\n[... Middle Discussion Retained in Full Transcript ...]\n\n${trimmed.slice(-12000)}`
+      : trimmed;
+
+    // Models supported on this Groq account (prioritizing fast & high-capacity models)
     const modelsToTry = [
-      "openai/gpt-oss-120b",
       "qwen/qwen3.8-27b",
-      "openai/gpt-oss-20b",
-      "llama-3.3-70b-versatile",
-      "llama-3.1-8b-instant"
+      "openai/gpt-oss-120b",
+      "openai/gpt-oss-20b"
     ];
     let completion = null;
-    let lastError = null;
 
     for (const model of modelsToTry) {
       try {
@@ -97,7 +103,7 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
             },
             {
               role: "user",
-              content: trimmed,
+              content: boundedText,
             },
           ],
           model: model,
@@ -106,8 +112,8 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
         });
         if (completion?.choices?.[0]?.message?.content) break;
       } catch (err: any) {
-        console.warn(`Groq model ${model} failed, trying fallback:`, err.message);
-        lastError = err;
+        console.warn(`Groq model ${model} failed in summarize:`, err.message);
+        logAIError('groq-summarize', model, err.message, 500);
       }
     }
 
@@ -118,9 +124,9 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
 
       if (openRouterKey) {
         const orModels = [
-          "nvidia/nemotron-3.5-super-vl:free",
+          "openrouter/free",
           "liquid/lfm-2.5-2.6b:free",
-          "openrouter/auto"
+          "nvidia/nemotron-3.5-super-vl:free"
         ];
         for (const orModel of orModels) {
           try {
@@ -136,7 +142,7 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
                 model: orModel,
                 messages: [
                   { role: "system", content: systemPrompt },
-                  { role: "user", content: trimmed }
+                  { role: "user", content: boundedText }
                 ],
                 temperature: 0.2,
                 max_tokens: 1500,
@@ -150,8 +156,9 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
                 break;
               }
             }
-          } catch (orErr) {
+          } catch (orErr: any) {
             console.warn(`OpenRouter fallback ${orModel} failed in summarize:`, orErr);
+            logAIError('openrouter-summarize', orModel, orErr?.message || 'Failed', 500);
           }
         }
       }
@@ -180,12 +187,46 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
     outputText = outputText.replace(/(##\s*Executive Summary\s*\n+)(?:\*\*)?Executive Summary(?:\*\*)?[:\s]*/gi, '$1');
     outputText = outputText.replace(/^(\*\*)?Executive Summary(\*\*)?[:\s]*\n+(##\s*Executive Summary)/gi, '$3');
 
-    return NextResponse.json({ text: outputText.trim() });
+    // Synthesize clean title
+    const firstSentence = trimmed.split(/(?<=[.!?])\s+/).filter((s: string) => s.trim().length > 8)[0] || "";
+    let smartTitle = firstSentence.length > 5
+      ? (firstSentence.length > 45 ? `${firstSentence.slice(0, 42)}...` : firstSentence)
+      : `Session Notes (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`;
+
+    return NextResponse.json({ 
+      text: outputText.trim(),
+      title: smartTitle
+    });
   } catch (error: any) {
     console.error("Summarize error:", error);
-    // Even in outer catch, return a structured fallback response rather than breaking the client workflow
+    logAIError('summarize-server', 'catch', error?.message || 'Error', 500);
     return NextResponse.json({
-      text: `## Executive Summary\nMeeting transcript successfully captured. Ready for executive review.\n\n## Action Items\n• Review recorded conversation points and action steps.`
+      text: `## Executive Summary\nMeeting transcript successfully captured. Ready for executive review.\n\n## Action Items\n• Review recorded conversation points and action steps.`,
+      title: `Meeting Notes (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`
     });
+  }
+}
+
+async function logAIError(provider: string, model: string, error: string, status?: number) {
+  try {
+    const { adminFirestore } = await import('@/firebase/admin');
+    if (adminFirestore) {
+      const admin = (await import('firebase-admin')).default;
+      await adminFirestore.collection('error_logs').add({
+        message: `[AI Summarize: ${provider.toUpperCase()}] Model '${model}' failed: ${error}`,
+        stack: `HTTP Status: ${status || 500}\nTimestamp: ${new Date().toISOString()}`,
+        url: '/api/summarize',
+        userAgent: 'Voiceflow Server Summarizer',
+        userId: 'system',
+        businessId: 'system',
+        type: 'ai_error',
+        provider,
+        model,
+        status: status || 500,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+  } catch (e) {
+    console.warn("Failed to write to error_logs:", e);
   }
 }

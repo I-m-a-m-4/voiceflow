@@ -191,7 +191,7 @@ ${hasImage ? '[Screen Context]: Refer to the code, diagram, or UI visible on scr
 
 /**
  * Synthesizes a structured, substantive fallback response whenever all remote models fail or device is offline.
- * NEVER returns dismissive phrases like "I'm listening".
+ * NEVER returns dismissive phrases like "I'm listening" and NEVER returns identical static strings.
  */
 export function synthesizeIntelligentFallback(params: {
   prompt: string;
@@ -203,97 +203,105 @@ export function synthesizeIntelligentFallback(params: {
   const isGeneric = isGenericAskPrompt(prompt);
   const lastQuestion = extractLastQuestion(transcript);
   const recentTopic = extractRecentTopic(transcript);
+  const cleanPrompt = prompt.replace(/^(it is asking me that|can you explain|explain|tell me)\s*/i, '').trim();
 
-  // Extract core domain keywords from transcript or prompt
-  const combinedText = `${prompt} ${transcript} ${customContext || ''}`.toLowerCase();
+  // Extract real topics from the active transcript
+  const transcriptLines = (transcript || '')
+    .split(/(?<=[.?!])\s+|\n+/)
+    .map(s => s.trim())
+    .filter(s => s.length > 15);
 
-  let domainFocus = "Engineering & Systems Architecture";
-  let techDetails = "Optimistic concurrency, modular microservices, resilient data caching, and automated failover";
+  const keyTranscriptPoint = transcriptLines.length > 0 
+    ? transcriptLines[transcriptLines.length - 1] 
+    : null;
+  const secondTranscriptPoint = transcriptLines.length > 1 
+    ? transcriptLines[transcriptLines.length - 2] 
+    : null;
 
-  if (combinedText.includes('pos') || combinedText.includes('inventory') || combinedText.includes('zeneva') || combinedText.includes('stock')) {
-    domainFocus = "Enterprise POS & Real-Time Inventory (Zeneva)";
-    techDetails = "Multi-device vector clocks, offline-first SQLite synchronization, idempotent delta mutations, and optimistic locking to prevent stock collision";
-  } else if (combinedText.includes('database') || combinedText.includes('sql') || combinedText.includes('postgres') || combinedText.includes('mongo')) {
-    domainFocus = "Database Architecture & Query Optimization";
-    techDetails = "B-tree and composite indexing, read-replicas, connection pooling, and idempotent transaction boundaries";
-  } else if (combinedText.includes('auth') || combinedText.includes('security') || combinedText.includes('token') || combinedText.includes('jwt')) {
-    domainFocus = "Authentication, Security & Session Hardening";
-    techDetails = "Signed cryptographic tokens, stateless verification, rate-limiting, and short-lived refresh token rotation";
-  } else if (combinedText.includes('cache') || combinedText.includes('redis') || combinedText.includes('latency')) {
-    domainFocus = "High-Throughput Caching & Low Latency";
-    techDetails = "Redis distributed cache, cache-aside pattern with TTL eviction, and stale-while-revalidate invalidation";
-  }
+  // Check user intent from prompt
+  const isRecap = /\b(recap|summarize|summary|what was (just )?said|repeat)\b/i.test(prompt);
+  const isSolution = /\b(solution|solve|propose|approach|fix|how to|code)\b/i.test(prompt);
+  const isComplexity = /\b(complexity|big o|time complexity|space complexity|optimize)\b/i.test(prompt);
 
-  // 1. Direct answer to an extracted interview question
-  if (lastQuestion) {
-    if (hasImage) {
-      return `**Direct Solution & Speaking Points:**
-"To address that directly, our implementation leverages ${techDetails}. Based on the active screen assessment, here is the clean, production-grade approach:"
+  // 1. If user asks for a Quick Recap
+  if (isRecap) {
+    if (keyTranscriptPoint) {
+      return `**2-Bullet Meeting Recap:**
+• **Current Focus**: ${keyTranscriptPoint}
+• **Context & Priority**: ${secondTranscriptPoint || "Aligning on architectural boundaries, performance requirements, and execution timeline."}
 
-\`\`\`typescript
-// Optimal approach with deterministic state and error boundaries
-export async function handleOperation(input: Record<string, any>) {
-  // Validate input invariants early
-  if (!input) throw new Error("Invalid payload");
-  
-  // Apply idempotent execution with optimistic locking
-  return { success: true, timestamp: Date.now() };
-}
-\`\`\`
-
-**Key Points to Deliver:**
-• **Complexity**: Operates in **O(n)** time and **O(1)** auxiliary space.
-• **Resilience**: Accounts for edge conditions (network timeouts, duplicate events) deterministically.
-• **Trade-Off**: Chose predictability and thread-safety over naive state mutation.`;
+**Ready-to-Speak Response:**
+"To summarize where we are: we are focusing on ${keyTranscriptPoint.slice(0, 100)}, and our priority is ensuring the implementation is robust, observable, and delivered on schedule."`;
     }
+    return `**2-Bullet Meeting Recap:**
+• **Core Discussion**: Reviewing technical system requirements, component decoupling, and clean interfaces.
+• **Current Priority**: Ensuring low latency, predictable failure recovery, and immediate stakeholder alignment.
 
-    return `**Direct Answer to Interviewer:**
-"To address that directly, our approach centers on ${techDetails}. In production, this guarantees low latency, complete data consistency, and seamless scalability without single points of failure."
-
-**Key Technical Points:**
-• **Core Architecture**: Engineered with decoupled, modular layers so each subsystem operates independently under high load.
-• **Trade-Offs & Decisions**: Prioritized consistency and fault tolerance over naive synchronization, ensuring deterministic state even during network interruptions.
-• **Production Proof**: Validated under real-world traffic with automated telemetry, zero-downtime deployment, and comprehensive monitoring.`;
+**Ready-to-Speak Response:**
+"We are aligned on the core architecture and are now focusing on finalizing the exact component contracts and error handling strategy."`;
   }
 
-  // 2. Image / Screen analysis fallback (when screen is captured but no specific question in audio)
-  if (hasImage) {
-    return `**Visual Screen Analysis & Speaking Points:**
-"Reviewing the active screen: the focus is on optimizing implementation efficiency, clean error boundaries, and predictable state."
+  // 2. If user asks for Proposed Solution or Implementation
+  if (isSolution) {
+    const focusTopic = lastQuestion || keyTranscriptPoint || cleanPrompt || "the current technical requirement";
+    return `**Proposed Solution & Technical Approach:**
+"For **${focusTopic.slice(0, 120)}**, my recommendation is a decoupled, modular design using deterministic state transitions and idempotent execution."
 
 **Speaking Highlights:**
-• **Logic & Algorithm**: Ensure time complexity is minimized with linear or logarithmic lookup structures.
-• **Robustness**: Account for edge cases (null inputs, concurrent updates, network drops) gracefully.
-• **Next Step**: State the proposed solution clearly, explain the trade-offs, and invite review.`;
+• **Architecture**: Isolate the business logic behind a clean interface with strict type safety and input validation.
+• **Efficiency & Concurrency**: Ensure operations operate with linear or logarithmic time complexity, avoiding synchronous bottlenecks.
+• **Production Proof**: Add structured error logging and metrics so health and latency are observable immediately.`;
   }
 
-  // 3. Response to a recent discussion topic
+  // 3. If user asks about Complexity or Optimization
+  if (isComplexity) {
+    return `**Performance & Complexity Optimization:**
+"The optimal target for this workload is **O(n)** time complexity with **O(1)** auxiliary space by using in-place operations or index-based lookups."
+
+**Key Optimization Points:**
+• **Time Complexity**: Replace nested traversals with a single pass using a hash map or two-pointer technique.
+• **Space Complexity**: Stream or process chunks incrementally to keep memory usage bounded and avoid cache thrashing.
+• **Failure Mode**: Gracefully handle edge cases (empty collections, boundary limits, network pauses) before processing.`;
+  }
+
+  // 4. Direct answer to an extracted interview question
+  if (lastQuestion) {
+    return `**Direct Answer to Interviewer:**
+"Regarding that question: our approach centers on modular separation of concerns with optimistic updates and deterministic error recovery."
+
+**Key Technical Points:**
+• **Core Strategy**: Address "${lastQuestion.slice(0, 100)}" by establishing clean service boundaries and strict validation.
+• **Trade-Off**: Prioritized maintainability, fault tolerance, and predictable latency over complex pre-optimizations.
+• **Verification**: Verified with automated unit coverage and end-to-end integration tests in CI/CD.`;
+  }
+
+  // 5. Visual Screen Analysis (ONLY if explicitly requested and no specific question asked)
+  if (hasImage && isGeneric) {
+    return `**Screen Analysis & Speaking Highlights:**
+"Looking at what is actively displayed on screen, the core focus is ensuring clean logic, robust edge-case handling, and clear architectural boundaries."
+
+**Key Discussion Points:**
+• **Implementation Flow**: Verify that inputs are validated early and operations execute with bounded latency.
+• **Edge Cases**: Account for null or malformed data, concurrent updates, and graceful failover.
+• **Next Action**: Walk through the logic step-by-step, verify the complexity, and confirm team alignment.`;
+  }
+
+  // 6. Response to a recent discussion topic or general speaking point
   if (recentTopic) {
     return `**Suggested Speaking Response:**
-"Building directly on what was just raised, the key priority here is ensuring our architecture remains both resilient and scalable under production workloads."
+"Building directly on what was just mentioned regarding ${recentTopic.slice(0, 90)}: our priority should be ensuring high throughput and clean separation of concerns."
 
 **Core Discussion Points:**
-• **Technical Approach**: Implement ${techDetails} to maintain high throughput and clean separation of concerns.
-• **Actionable Next Step**: Align on the immediate milestone, verify API boundaries, and establish observable health metrics.`;
+• **Technical Approach**: Implement deterministic error boundaries and validate invariants upfront.
+• **Actionable Next Step**: Confirm the interface contract and proceed with the proposed implementation.`;
   }
 
-  // 4. Initial call / zero-transcript starter
-  if (isGeneric) {
-    return `**Suggested Opening & Positioning:**
-"Thanks everyone for joining today! I'm excited to dive into the technical details and walk you through the systems and architecture we've built."
+  // 7. General Prompt Fallback (Addressing prompt directly)
+  return `**Direct Answer for "${cleanPrompt.slice(0, 80)}":**
+"To address this directly: our approach is built on decoupled, modular services with deterministic state management."
 
-**High-Impact Opening Points:**
-• **Context**: "I can walk you through the end-to-end technical architecture, our scalability decisions, or a specific deep dive into our core modules."
-• **Alignment**: "Before we jump into the details, is there a specific area or priority you'd like to focus on first?"`;
-  }
-
-  // 5. Specific candidate query fallback
-  const cleanPrompt = prompt.replace(/^(it is asking me that|can you explain|explain|tell me)\s*/i, '').trim();
-  return `**Direct Answer:**
-"Regarding **${cleanPrompt}**: In our systems, this is solved by leveraging ${techDetails}."
-
-**Key Points to Deliver:**
-• **Technical Foundation**: State the fundamental technical reasoning and architecture choices upfront.
-• **Practical Trade-Offs**: Discuss performance, maintainability, and operational simplicity in production environments.
-• **Real-World Evidence**: Ground your response in concrete systems and lessons learned from past deployments.`;
+**Speaking Highlights:**
+• **Primary Principle**: Deliver a clean, maintainable solution that satisfies performance criteria without adding operational complexity.
+• **Reliability**: Guard critical execution paths with structured error boundaries and automated fallback handling.
+• **Next Step**: State the trade-offs clearly and invite questions on the implementation details.`;
 }

@@ -54,12 +54,14 @@ Core Teleprompter Principles:
 4. Natural Greetings & Chat:
    * If the user greets you or asks for general advice, respond warmly, concisely, and ask how to assist with the ongoing meeting.`;
 
-    // Extract prior conversation history (limited to last 6 turns for optimal token economy and low latency)
+    // Extract prior conversation history (last 6 turns, bounded to 800 chars per turn for strict Groq TPM & context protection)
     const cleanHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
     if (Array.isArray(history)) {
       for (const item of history.slice(-6)) {
         if ((item.role === 'user' || item.role === 'assistant') && typeof item.content === 'string' && item.content.trim()) {
-          cleanHistory.push({ role: item.role, content: item.content.trim() });
+          const trimmed = item.content.trim();
+          const boundedContent = trimmed.length > 800 ? `${trimmed.slice(0, 800)}...` : trimmed;
+          cleanHistory.push({ role: item.role, content: boundedContent });
         }
       }
     }
@@ -69,74 +71,17 @@ Core Teleprompter Principles:
     const openRouterModel = process.env.OPENAI_MODEL;
     const groqKey = process.env.GROQ_API_KEY || process.env.NEXT_PUBLIC_GROQ_API_KEY;
 
-    // 1. If GEMINI_API_KEY is available and imageBase64 is provided, try Gemini Vision with a short timeout
-    if (process.env.GEMINI_API_KEY && imageBase64) {
-      try {
-        const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
-        const payload = {
-          contents: [
-            {
-              parts: [
-                { text: `${systemPrompt}\n\n${targetPrompt}\n\nContext transcript: ${transcriptContext}${customContextSnippet}` },
-                {
-                  inline_data: {
-                    mime_type: "image/jpeg",
-                    data: base64Data
-                  }
-                }
-              ]
-            }
-          ],
-          generationConfig: {
-            temperature: 0.3,
-            maxOutputTokens: 1024,
-          }
-        };
+    let visionSuccess = false;
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3500);
-
-        const geminiModels = ['gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-flash-latest'];
-        for (const gModel of geminiModels) {
-          try {
-            const response = await fetch(
-              `https://generativelanguage.googleapis.com/v1beta/models/${gModel}:generateContent?key=${process.env.GEMINI_API_KEY}`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
-                signal: controller.signal,
-              }
-            );
-
-            if (response.ok) {
-              const data = await response.json();
-              const answer = data.candidates?.[0]?.content?.parts?.[0]?.text;
-              if (answer && answer.trim()) {
-                clearTimeout(timeoutId);
-                recordUsage('gemini', gModel);
-                return NextResponse.json({ text: answer });
-              }
-            }
-          } catch (modelErr) {
-            // Check next Gemini model or fallback
-          }
-        }
-        clearTimeout(timeoutId);
-      } catch (geminiErr: any) {
-        console.warn("Gemini vision call failed, proceeding to OpenRouter / Groq:", geminiErr?.message || geminiErr);
-      }
-    }
-
-    // 2. If imageBase64 is provided, process via OpenRouter Vision (verified working models)
-    if (openRouterKey && imageBase64) {
+    // 1. Free Vision Analysis via OpenRouter free tier (50 free requests/day)
+    if (openRouterKey && imageBase64 && !visionSuccess) {
       try {
         const imageUrl = imageBase64.startsWith("data:") ? imageBase64 : `data:image/jpeg;base64,${imageBase64}`;
 
         const visionModels = [
-          "nvidia/nemotron-3.5-super-vl:free",
-          "google/gemma-4-26b-a4b-it:free",
-          "openrouter/auto"
+          "openrouter/free",
+          "dots-studio/dots-3-note-preview:free",
+          "nvidia/nemotron-3.5-super-vl:free"
         ];
         if (openRouterModel && !visionModels.includes(openRouterModel) && openRouterModel !== "openrouter/free") {
           visionModels.unshift(openRouterModel);
@@ -184,30 +129,35 @@ Core Teleprompter Principles:
 
             if (orRes.ok) {
               const orData = await orRes.json();
-              const text = orData.choices?.[0]?.message?.content;
-              if (text && text.trim() && !text.includes("User Safety: safe")) {
+              const rawMsg = orData.choices?.[0]?.message;
+              const text = ((rawMsg?.content && rawMsg.content.trim()) || (rawMsg?.reasoning && rawMsg.reasoning.trim()) || "").trim();
+              if (text && !text.includes("User Safety: safe")) {
                 recordUsage('openrouter', model);
-                return NextResponse.json({ text });
+                visionSuccess = true;
+                return NextResponse.json({ text, provider: 'openrouter', model });
               }
+            } else {
+              const errData: any = await orRes.json().catch(() => ({}));
+              logAIError('openrouter-vision', model, errData?.message || `HTTP ${orRes.status}`, orRes.status);
             }
-          } catch (mErr) {
+          } catch (mErr: any) {
             clearTimeout(timeoutId);
+            logAIError('openrouter-vision', model, mErr?.message || 'Timeout / error', 500);
           }
         }
       } catch (orErr: any) {
         console.warn("OpenRouter vision call failed, falling back to text models:", orErr?.message || orErr);
+        logAIError('openrouter-vision', 'all', orErr?.message || 'Vision failed', 500);
       }
     }
 
-    // 3. Ultra-fast Groq text execution (primary for pure conversation, questions, and recaps)
-    // Sanitize message sequence so consecutive roles strictly alternate
+    // 3. Ultra-fast Groq text execution (handles questions, recaps, and text-based interview prompts)
     const sanitizedHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
     for (const h of cleanHistory) {
       if (sanitizedHistory.length === 0 || sanitizedHistory[sanitizedHistory.length - 1].role !== h.role) {
         sanitizedHistory.push(h);
       }
     }
-    // If the last history item is a user role, merge or trim so the next item can be a user prompt
     if (sanitizedHistory.length > 0 && sanitizedHistory[sanitizedHistory.length - 1].role === 'user') {
       sanitizedHistory.pop();
     }
@@ -217,7 +167,7 @@ Core Teleprompter Principles:
       ...sanitizedHistory,
       {
         role: "user",
-        content: `${targetPrompt}\n\nMeeting Context: ${transcriptContext}${customContextSnippet}`
+        content: `${hasImage ? "[Active Screen Context Attached: Focus on the screen, active code/slides, and interviewer question]\n\n" : ""}${targetPrompt}\n\nMeeting Context: ${transcriptContext}${customContextSnippet}`
       }
     ];
 
@@ -229,7 +179,7 @@ Core Teleprompter Principles:
           maxRetries: 1,
         });
         
-        // Prioritize verified models available on the active Groq account
+        // Prioritize verified ultra-fast models on this Groq account
         const groqModels = [
           "qwen/qwen3.8-27b",
           "openai/gpt-oss-120b",
@@ -248,23 +198,24 @@ Core Teleprompter Principles:
             const textOutput = candidate?.choices?.[0]?.message?.content || "";
             if (textOutput.trim()) {
               recordUsage('groq', model);
-              return NextResponse.json({ text: textOutput });
+              return NextResponse.json({ text: textOutput, provider: 'groq', model });
             }
           } catch (err: any) {
             console.warn(`Groq model ${model} failed:`, err?.message || err);
+            logAIError('groq', model, err?.message || 'Groq error', 500);
           }
         }
-      } catch (groqErr) {
+      } catch (groqErr: any) {
         console.warn("Groq initialization/execution failed:", groqErr);
+        logAIError('groq', 'init', groqErr?.message || 'Groq init error', 500);
       }
     }
 
     // 4. Fallback to OpenRouter text models if Groq was unavailable
     if (openRouterKey) {
       const textModels = [
-        "nvidia/nemotron-3.5-super-vl:free",
-        "liquid/lfm-2.5-2.6b:free",
-        "openrouter/auto"
+        "openrouter/free",
+        "liquid/lfm-2.5-2.6b:free"
       ];
       if (openRouterModel && !textModels.includes(openRouterModel) && openRouterModel !== "openrouter/free") {
         textModels.unshift(openRouterModel);
@@ -297,17 +248,20 @@ Core Teleprompter Principles:
             const answer = orData.choices?.[0]?.message?.content;
             if (answer && answer.trim() && !answer.includes("User Safety: safe")) {
               recordUsage('openrouter', model);
-              return NextResponse.json({ text: answer });
+              return NextResponse.json({ text: answer, provider: 'openrouter', model });
             }
+          } else {
+            const errData: any = await orRes.json().catch(() => ({}));
+            logAIError('openrouter-text', model, errData?.message || `HTTP ${orRes.status}`, orRes.status);
           }
         } catch (orTextErr: any) {
           clearTimeout(timeoutId);
-          console.warn(`OpenRouter text call ${model} failed, checking next:`, orTextErr?.message || orTextErr);
+          logAIError('openrouter-text', model, orTextErr?.message || 'Failed', 500);
         }
       }
     }
 
-    // 5. Intelligent conversational fallback with accurate intent extraction (never returns "I'm listening")
+    // 5. Intelligent dynamic fallback (never returns static boilerplate)
     const smartFallback = synthesizeIntelligentFallback({
       prompt,
       transcript: rawTranscript,
@@ -315,17 +269,22 @@ Core Teleprompter Principles:
       hasImage,
     });
 
-    return NextResponse.json({ text: smartFallback });
-
+    return NextResponse.json({ 
+      text: smartFallback, 
+      provider: 'local-fallback', 
+      model: 'dynamic-synthesizer', 
+      isFallback: true 
+    });
 
   } catch (error: any) {
     console.error("Error in ask-screen route:", error);
     const errorMessage = typeof error === 'string' ? error : (error?.message || (typeof error === 'object' ? JSON.stringify(error) : "Failed to process AI request"));
+    logAIError('server', 'outer-catch', errorMessage, 500);
     return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }
 
-async function recordUsage(provider: 'groq' | 'openrouter' | 'gemini', model: string) {
+async function recordUsage(provider: 'groq' | 'openrouter', model: string) {
   try {
     const { adminFirestore } = await import('@/firebase/admin');
     if (adminFirestore) {
@@ -346,5 +305,29 @@ async function recordUsage(provider: 'groq' | 'openrouter' | 'gemini', model: st
     }
   } catch (err) {
     // silently ignore metrics failure so response is never delayed
+  }
+}
+
+async function logAIError(provider: string, model: string, error: string, status?: number) {
+  try {
+    const { adminFirestore } = await import('@/firebase/admin');
+    if (adminFirestore) {
+      const admin = (await import('firebase-admin')).default;
+      await adminFirestore.collection('error_logs').add({
+        message: `[AI Provider: ${provider.toUpperCase()}] Model '${model}' failed: ${error}`,
+        stack: `HTTP Status: ${status || 500}\nTimestamp: ${new Date().toISOString()}`,
+        url: '/api/ask-screen',
+        userAgent: 'Voiceflow Server Co-Pilot',
+        userId: 'system',
+        businessId: 'system',
+        type: 'ai_error',
+        provider,
+        model,
+        status: status || 500,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+  } catch (e) {
+    console.warn("Failed to write AI error to error_logs:", e);
   }
 }

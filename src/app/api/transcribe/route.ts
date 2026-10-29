@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import Groq from "groq-sdk";
 
 export const maxDuration = 300; // Allow up to 5 minutes for large files
 export const dynamic = "force-dynamic";
@@ -42,13 +41,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Allocate 120s timeout for audio uploads and processing with 1 retry
-    const groq = new Groq({
-      apiKey: process.env.GROQ_API_KEY,
-      timeout: 120000,
-      maxRetries: 1,
-    });
-
+    const groqApiKey = process.env.GROQ_API_KEY;
     let transcriptionText = "";
     let durationSeconds = 0;
     let formattedTranscript = "";
@@ -60,42 +53,39 @@ export async function POST(req: NextRequest) {
       return `${m}:${s.toString().padStart(2, '0')}`;
     };
 
-    try {
-      const transcription: any = await groq.audio.transcriptions.create({
-        file: file,
-        model: "whisper-large-v3-turbo",
-        prompt: "Meeting and interview conversation transcription",
-        response_format: "verbose_json",
-        language: "en",
-        temperature: 0.0,
-      });
-      transcriptionText = transcription.text || "";
-      durationSeconds = typeof transcription.duration === 'number' ? transcription.duration : 0;
-      segments = Array.isArray(transcription.segments) ? transcription.segments : [];
-    } catch (turboErr: any) {
-      console.warn("whisper-large-v3-turbo verbose_json failed, falling back to whisper-large-v3:", turboErr?.message || turboErr);
+    const modelsToTry = ["whisper-large-v3-turbo", "whisper-large-v3"];
+
+    for (const model of modelsToTry) {
       try {
-        const fallbackTranscription: any = await groq.audio.transcriptions.create({
-          file: file,
-          model: "whisper-large-v3",
-          prompt: "Meeting and interview conversation transcription",
-          response_format: "verbose_json",
-          language: "en",
-          temperature: 0.0,
+        const groqFormData = new FormData();
+        groqFormData.append("file", file, file.name || "audio.webm");
+        groqFormData.append("model", model);
+        groqFormData.append("response_format", "verbose_json");
+        groqFormData.append("language", "en");
+        groqFormData.append("temperature", "0.0");
+
+        const groqRes = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${groqApiKey}`,
+          },
+          body: groqFormData,
+          signal: AbortSignal.timeout(45000),
         });
-        transcriptionText = fallbackTranscription.text || "";
-        durationSeconds = typeof fallbackTranscription.duration === 'number' ? fallbackTranscription.duration : 0;
-        segments = Array.isArray(fallbackTranscription.segments) ? fallbackTranscription.segments : [];
-      } catch (fallbackErr: any) {
-        console.warn("verbose_json failed, retrying with standard json:", fallbackErr?.message || fallbackErr);
-        const basicTranscription: any = await groq.audio.transcriptions.create({
-          file: file,
-          model: "whisper-large-v3-turbo",
-          response_format: "json",
-          language: "en",
-          temperature: 0.0,
-        });
-        transcriptionText = basicTranscription.text || "";
+
+        if (groqRes.ok) {
+          const transcription: any = await groqRes.json();
+          transcriptionText = transcription.text || "";
+          durationSeconds = typeof transcription.duration === 'number' ? transcription.duration : 0;
+          segments = Array.isArray(transcription.segments) ? transcription.segments : [];
+          break;
+        } else {
+          const errData: any = await groqRes.json().catch(() => ({}));
+          const errMsg = errData?.error?.message || `HTTP ${groqRes.status}`;
+          logAIError("groq-whisper", model, errMsg, groqRes.status);
+        }
+      } catch (err: any) {
+        logAIError("groq-whisper", model, err?.message || "Transcription request failed", 500);
       }
     }
 
@@ -126,6 +116,7 @@ export async function POST(req: NextRequest) {
   } catch (error: any) {
     console.error("Transcription error:", error);
     const errorMessage = typeof error === "string" ? error : (error?.message || "Something went wrong transcribing audio");
+    logAIError("groq-whisper", "transcribe-route", errorMessage, 500);
     return NextResponse.json(
       { error: errorMessage },
       { 
@@ -135,5 +126,29 @@ export async function POST(req: NextRequest) {
         },
       }
     );
+  }
+}
+
+async function logAIError(provider: string, model: string, error: string, status?: number) {
+  try {
+    const { adminFirestore } = await import('@/firebase/admin');
+    if (adminFirestore) {
+      const admin = (await import('firebase-admin')).default;
+      await adminFirestore.collection('error_logs').add({
+        message: `[AI Transcription: ${provider.toUpperCase()}] Model '${model}' error: ${error}`,
+        stack: `HTTP Status: ${status || 500}\nTimestamp: ${new Date().toISOString()}`,
+        url: '/api/transcribe',
+        userAgent: 'Voiceflow Audio Transcriber',
+        userId: 'system',
+        businessId: 'system',
+        type: 'transcription_error',
+        provider,
+        model,
+        status: status || 500,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+  } catch (e) {
+    console.warn("Failed to write transcription error to error_logs:", e);
   }
 }
