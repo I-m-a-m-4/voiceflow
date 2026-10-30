@@ -551,7 +551,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
       if (!cleanAnswer) {
         const groqApiKey = process.env.NEXT_PUBLIC_GROQ_API_KEY || process.env.GROQ_API_KEY;
         const transcriptSnippet = (activeTranscript || "").slice(-3000) || "None yet";
-        const systemPrompt = "You are Voiceflow AI, an elite live meeting co-pilot. State direct answers first in bold, followed by 2-3 structured technical bullet points. Never output robotic preambles.";
+        const systemPrompt = "You are Voiceflow AI, an elite live meeting co-pilot. State direct answers first in bold, followed by 2-3 structured speaking points. Speak naturally in first person and never output robotic preambles.";
 
         if (groqApiKey && !controller.signal.aborted) {
           const groqModels = [
@@ -1069,7 +1069,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
                 <div className="grid grid-cols-3 gap-2 mb-2.5 text-xs font-semibold">
                   <button 
                     onClick={() => {
-                      handleAskAI(query.trim() ? query : "Analyze what is on my screen right now and give me the exact answer, code, or speaking points.", true);
+                      handleAskAI(query.trim() ? query : "Analyze what is on my screen right now and give me the exact answer, solution, or speaking points.", true);
                     }}
                     disabled={isQuerying}
                     className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl bg-gradient-to-r from-blue-600/20 to-indigo-600/20 hover:from-blue-600/30 hover:to-indigo-600/30 text-blue-200 hover:text-white border border-blue-500/30 transition-all active:scale-[0.98] disabled:opacity-50 text-[11px] font-medium shadow-sm"
@@ -1126,7 +1126,7 @@ export default function MeetingWidget({ isRecording, stopRecording, transcript }
                 <div className="relative flex items-center bg-[#252528] rounded-xl border border-white/10 p-1.5">
                   <button 
                     onClick={() => {
-                      handleAskAI(query.trim() ? query : "Analyze what is on my screen right now and give me the exact answer, code, or speaking points.", true);
+                      handleAskAI(query.trim() ? query : "Analyze what is on my screen right now and give me the exact answer, solution, or speaking points.", true);
                     }}
                     disabled={isQuerying}
                     className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-colors border border-white/5 disabled:opacity-50" 

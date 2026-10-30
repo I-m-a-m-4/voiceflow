@@ -6,7 +6,7 @@
  * 3. High-impact first-person speaking points without generic canned replies.
  */
 
-const QUESTION_STARTERS_REGEX = /\b(can you|could you|how did you|how do you|how would you|what is|what are|what was|why did you|why do you|tell me about|tell us about|tell me|tell us|explain|walk me through|walk us through|describe|in what scenario|how have you handled|what challenges|how does|what's your experience|have you ever|have you|has there|are you|were you|is there|was there|do you|did you|would you|should we|how can we|what if|what about|could we|who did|where did|which one|give me an example|give us an example|how will you|how do we|elaborate on|what do you think|what would you|what's your differential|differential diagnosis|what tests|how would you treat|how would you manage)\b/i;
+const QUESTION_STARTERS_REGEX = /\b(can you|could you|how did you|how do you|how would you|what is|what are|what was|what were|why did you|why do you|why would|tell me about|tell us about|tell me|tell us|explain|walk me through|walk us through|describe|in what scenario|how have you handled|what challenges|how does|what's your experience|have you ever|have you|has there|are you|were you|is there|was there|do you|did you|would you|should we|how can we|what if|what about|could we|who did|where did|which one|give me an example|give us an example|how will you|how do we|elaborate on|what do you think|what would you)\b/i;
 
 const GENERIC_PROMPT_PATTERNS = [
   /^what\s+should\s+i\s+say(\s+next)?(\s+in\s+this\s+meeting)?(\?)?$/i,
@@ -126,12 +126,11 @@ export function buildEnhancedInterviewPrompt(
   if (hasImage && isScreenFocused) {
     return {
       extractedQuestion: "Screen Visual Analysis",
-      targetPrompt: `[Screen Visual Analysis Task]: Analyze what is actively displayed on screen right now.
-- If it shows code, an IDE, or technical assessment (LeetCode, HackerRank, CoderPad, terminal): Provide the clean optimal code solution in a code block, time/space complexity, and 2-3 spoken explanation points.
-- If it shows a slide, diagram, or architecture: State the core takeaway FIRST in bold and provide 2-3 confident speaking points.
-- If it shows a document, question, or medical/clinical case: Identify the exact problem and provide the direct, articulate answer immediately.
-- If it shows a dashboard, UI, or metrics: Highlight key takeaways, anomalies, and actionable conclusions.
-- State your direct answer or core conclusion FIRST in bold. Deliver the exact words ready to speak aloud without robotic meta-commentary.`,
+      targetPrompt: `[Screen Visual Analysis Task]: Analyze what is actively displayed on the user's screen right now.
+- Examine all visible text, diagrams, documents, problems, questions, or interfaces shown on screen.
+- State the direct answer, solution, or core takeaway FIRST in bold.
+- Follow with 2 to 3 concise, high-impact speaking points ready to read aloud.
+- Deliver the exact words ready to speak in natural first-person voice without robotic meta-commentary.`,
     };
   }
 
@@ -139,12 +138,12 @@ export function buildEnhancedInterviewPrompt(
   if (isGeneric && lastQuestion && hasImage) {
     return {
       extractedQuestion: lastQuestion,
-      targetPrompt: `[Interviewer's Last Question/Prompt]: "${lastQuestion}"
-[Screen Visual Context Attached]: The user's screen is captured.
-[Task]: The interviewer or team just presented this on the call. Analyze both the question and any code, diagram, or problem visible on screen.
-- Provide the exact, high-scoring, first-person answer immediately. Ground it in the relevant domain (clinical, technical, executive, business).
-- State the direct answer FIRST in bold.
-- Avoid robotic preambles like "You should say" — deliver the exact words ready to speak aloud.`,
+      targetPrompt: `[Meeting Point / Active Question]: "${lastQuestion}"
+[Screen Visual Context Attached]: Refer to the active content on screen alongside the discussion.
+[Task]: Deliver the direct, first-person response to this point immediately.
+- State your core answer or position FIRST in bold.
+- Follow with 2 to 3 substantive, articulate speaking points tailored directly to the question and screen.
+- Deliver the exact words ready to speak aloud with confidence, avoiding robotic preambles.`,
     };
   }
 
@@ -152,11 +151,11 @@ export function buildEnhancedInterviewPrompt(
   if (isGeneric && lastQuestion) {
     return {
       extractedQuestion: lastQuestion,
-      targetPrompt: `[Interviewer's Last Question/Prompt]: "${lastQuestion}"
-[Task]: The interviewer just asked this on the call. Provide the exact, high-scoring, first-person answer immediately.
-- State the direct answer FIRST in bold.
-- Deliver 2-3 structured points grounded in the speaker's domain (e.g. clinical experience, architecture, business rationale).
-- Avoid robotic preambles like "You should say" — deliver the exact words ready to speak aloud.`,
+      targetPrompt: `[Meeting Point / Active Question]: "${lastQuestion}"
+[Task]: Deliver the direct, first-person response to this question immediately.
+- State your core answer or position FIRST in bold.
+- Follow with 2 to 3 articulate, well-reasoned speaking points directly answering the question.
+- Deliver the exact words ready to speak aloud with confidence, avoiding robotic preambles.`,
     };
   }
 
@@ -165,8 +164,8 @@ export function buildEnhancedInterviewPrompt(
     return {
       extractedQuestion: "Screen Visual Analysis",
       targetPrompt: `[Screen Visual Analysis]: Analyze what is actively displayed on screen.
-- State the core finding or direct answer FIRST in bold.
-- Provide 2-3 crisp, articulate speaking points ready to read aloud.
+- State the core finding, solution, or direct answer FIRST in bold.
+- Provide 2 to 3 crisp, articulate speaking points ready to read aloud.
 - Ground the answer in the specific content visible on the screen.`,
     };
   }
@@ -176,22 +175,22 @@ export function buildEnhancedInterviewPrompt(
     return {
       extractedQuestion: recentTopic,
       targetPrompt: `[Active Discussion Context]: "${recentTopic}"
-[Task]: The interviewer or team just finished discussing this. Provide the optimal, articulate speaking response to address and build on this topic directly.
+[Task]: The participants just finished discussing this. Provide the optimal, articulate speaking response to address and build on this topic directly.
 - State your core response or insight FIRST in bold.
-- Follow with 2 crisp, confident talking points with practical real-world depth.`,
+- Follow with 2 to 3 crisp, confident talking points with practical real-world depth.`,
     };
   }
 
-  // Case 5: Specific candidate prompt (e.g., "explain our licensing status", "walk through the clinical differential")
+  // Case 5: Specific user prompt (e.g., custom typed question)
   const cleanedPrompt = rawPrompt.replace(/^(it is asking me that|can you explain|explain|tell me)\s*/i, '').trim();
   
   if (lastQuestion) {
     return {
       extractedQuestion: lastQuestion,
-      targetPrompt: `[Active Interview Context]: "${lastQuestion}"
-[User Clarification]: "${cleanedPrompt}"
+      targetPrompt: `[Active Discussion Context]: "${lastQuestion}"
+[User Request]: "${cleanedPrompt}"
 ${hasImage ? '[Screen Context]: Refer to the content visible on screen to ground this answer.' : ''}
-[Task]: Provide the exact, first-person answer directly addressing this topic. State the core answer in bold, followed by 2-3 clear points.`,
+[Task]: Provide the exact, first-person answer directly addressing this topic. State the core answer in bold, followed by 2 to 3 clear points.`,
     };
   }
 
