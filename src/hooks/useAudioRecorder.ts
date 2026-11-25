@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useUser } from "@/firebase/provider";
 import { saveMeeting } from "@/firebase/meetings";
-import { apiBase } from "@/lib/platform";
+import { apiBase, isNativeApp } from "@/lib/platform";
 import { recordDeviceSession } from "@/lib/device-fingerprint";
 import { copyToClipboard } from "@/lib/clipboard";
 
@@ -38,6 +38,7 @@ export function useAudioRecorder() {
   const recognitionRef = useRef<any>(null);
 
   const isRecordingRef = useRef<boolean>(false);
+  const isStartingRef = useRef<boolean>(false);
   const shouldRestartRecognitionRef = useRef<boolean>(true);
   const sessionStartMsRef = useRef<number>(0);
   const sessionTypeRef = useRef<"dictation" | "meeting">("dictation");
@@ -163,7 +164,13 @@ export function useAudioRecorder() {
       const options: MediaRecorderOptions = { audioBitsPerSecond: 64000 };
       if (mimeType) options.mimeType = mimeType;
 
-      const recorder = new MediaRecorder(stream, options);
+      let recorder: MediaRecorder;
+      try {
+        recorder = new MediaRecorder(stream, options);
+      } catch {
+        // Fallback if specific mimeType/bitrate is unsupported on mixed streams or WebView2
+        recorder = new MediaRecorder(stream);
+      }
 
       recorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) {
@@ -477,7 +484,8 @@ export function useAudioRecorder() {
 
   const startRecording = useCallback(
     async (captureSystemAudio = false) => {
-      if (isRecordingRef.current) return;
+      if (isRecordingRef.current || isStartingRef.current) return;
+      isStartingRef.current = true;
 
       try {
         // Reset session state cleanly BEFORE starting so zero stale context leaks from prior sessions
@@ -491,58 +499,89 @@ export function useAudioRecorder() {
         setTranscriptionHealth("listening");
         broadcastTranscript("", true);
 
-        let hasSystemAudio = false;
-        let displayStream: MediaStream | null = null;
+        // 1. Always acquire Microphone Audio FIRST (with safe fallback to plain `{ audio: true }`)
+        // Note: echoCancellation: false lets laptop/desktop speakers still be picked up naturally
+        let micStream: MediaStream;
+        try {
+          micStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: true,
+            },
+          });
+        } catch {
+          micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        }
+        micStreamRef.current = micStream;
 
-        // 1. Optional System / Tab Call Audio (must be requested during user click gesture)
-        if (captureSystemAudio && typeof navigator !== "undefined" && navigator.mediaDevices?.getDisplayMedia) {
+        // 2. Optional Browser Tab/System Audio (strictly web opt-in, NEVER blocks or crashes desktop start!)
+        let hasSystemAudio = false;
+        let finalStream: MediaStream = micStream;
+
+        if (
+          captureSystemAudio &&
+          !isNativeApp() &&
+          typeof navigator !== "undefined" &&
+          navigator.mediaDevices?.getDisplayMedia
+        ) {
           try {
-            displayStream = await navigator.mediaDevices.getDisplayMedia({
+            const displayStream = await navigator.mediaDevices.getDisplayMedia({
               video: true, // required by browser spec to expose audio checkbox
-              audio: {
-                echoCancellation: false,
-                noiseSuppression: false,
-                autoGainControl: false,
-              } as any,
+              audio: true,
             });
             displayStreamRef.current = displayStream;
-            // Immediately stop the video track so no screen-share indicator stays unnecessarily heavy
+            // Stop unneeded video track while keeping captured audio tracks
             displayStream.getVideoTracks().forEach((t) => t.stop());
-            hasSystemAudio = displayStream.getAudioTracks().length > 0;
+
+            if (displayStream.getAudioTracks().length > 0) {
+              const mixCtx = new AudioContext();
+              mixAudioCtxRef.current = mixCtx;
+              if (mixCtx.state === "suspended") {
+                await mixCtx.resume().catch(() => {});
+              }
+              const dest = mixCtx.createMediaStreamDestination();
+              mixCtx.createMediaStreamSource(micStream).connect(dest);
+              mixCtx.createMediaStreamSource(displayStream).connect(dest);
+              if (dest.stream.getAudioTracks().length > 0) {
+                finalStream = dest.stream;
+                hasSystemAudio = true;
+              }
+            }
           } catch (e) {
-            console.info("System audio share skipped by user, proceeding with microphone:", e);
+            // Non-fatal: always continue recording cleanly with microphone!
+            console.info("Optional tab/system audio skipped or failed, continuing with microphone:", e);
+            if (displayStreamRef.current) {
+              displayStreamRef.current.getTracks().forEach((t) => t.stop());
+              displayStreamRef.current = null;
+            }
+            if (mixAudioCtxRef.current) {
+              mixAudioCtxRef.current.close().catch(() => {});
+              mixAudioCtxRef.current = null;
+            }
+            finalStream = micStream;
+            hasSystemAudio = false;
           }
         }
 
         setSystemAudioActive(hasSystemAudio);
         sessionTypeRef.current = hasSystemAudio ? "meeting" : "dictation";
-
-        // 2. Request Microphone Audio ONLY when recording starts (never permanently locked on mount!)
-        // When system audio is captured directly, enable echoCancellation on mic so speakers don't double-record.
-        // When mic-only, disable echoCancellation so speakers can still be picked up if user isn't on headphones.
-        const micStream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: hasSystemAudio,
-            noiseSuppression: hasSystemAudio,
-            autoGainControl: true,
-          },
-        });
-        micStreamRef.current = micStream;
-
-        let finalStream: MediaStream = micStream;
-        if (hasSystemAudio && displayStream) {
-          const mixCtx = new AudioContext();
-          mixAudioCtxRef.current = mixCtx;
-          const dest = mixCtx.createMediaStreamDestination();
-          mixCtx.createMediaStreamSource(micStream).connect(dest);
-          mixCtx.createMediaStreamSource(displayStream).connect(dest);
-          finalStream = dest.stream;
-        }
         finalStreamRef.current = finalStream;
 
         const mimeType = getSupportedAudioMimeType();
 
         // 3. Start rolling self-contained segment recorder (8s windows = ~60KB each, scales to hours without 413!)
+        try {
+          spawnSegmentRecorder(finalStream, mimeType);
+        } catch (recErr) {
+          // If mixed stream fails MediaRecorder in any webview, fall back cleanly to raw micStream
+          console.warn("Primary recorder stream failed, falling back to raw microphone stream:", recErr);
+          finalStream = micStream;
+          finalStreamRef.current = micStream;
+          setSystemAudioActive(false);
+          spawnSegmentRecorder(micStream, "");
+        }
+
         isRecordingRef.current = true;
         setIsRecording(true);
         setIsPausedBySilence(false);
@@ -555,8 +594,6 @@ export function useAudioRecorder() {
             // ignore
           }
         }
-
-        spawnSegmentRecorder(finalStream, mimeType);
 
         // Rotate recorder cleanly every 8 seconds: start next BEFORE stopping previous so 0ms audio is lost!
         rotateTimerRef.current = setInterval(() => {
@@ -658,12 +695,23 @@ export function useAudioRecorder() {
             // Whisper handles everything even without SpeechRecognition
           }
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Error starting recording:", err);
         isRecordingRef.current = false;
         setIsRecording(false);
         setTranscriptionHealth("idle");
         releaseAllMediaResources();
+        if (typeof window !== "undefined") {
+          const msg =
+            err?.name === "NotAllowedError"
+              ? "Microphone permission was denied. Please allow microphone access in Windows/browser settings and try again."
+              : err?.name === "NotFoundError"
+                ? "No microphone device was found. Please connect a microphone and try again."
+                : err?.message || "Could not start recording. Please check your microphone and try again.";
+          window.dispatchEvent(new CustomEvent("voiceflow-recorder-error", { detail: { message: msg } }));
+        }
+      } finally {
+        isStartingRef.current = false;
       }
     },
     [broadcastTranscript, buildCombinedLiveTranscript, releaseAllMediaResources, spawnSegmentRecorder]

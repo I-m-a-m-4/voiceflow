@@ -17,7 +17,7 @@ import {
 import { useAudioRecorder } from '@/hooks/useAudioRecorder';
 import { usePlanUsage } from '@/hooks/use-plan-usage';
 import { useToast } from '@/hooks/use-toast';
-import { openExternal } from '@/lib/platform';
+import { openExternal, isNativeApp } from '@/lib/platform';
 import MeetingWidget from './meeting-widget';
 
 interface UpcomingMeeting {
@@ -43,13 +43,28 @@ export default function RightPanel() {
     systemAudioActive,
   } = useAudioRecorder();
   const { isPro, sessionCount, maxFreeSessions, isLimitReached, bonusMinutes, maxMinutes } = usePlanUsage();
-  const [includeCallAudio, setIncludeCallAudio] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('voiceflow_capture_call_audio');
-      return saved !== null ? saved === 'true' : true;
-    }
-    return true;
-  });
+  const [isDesktopNative, setIsDesktopNative] = useState<boolean>(false);
+  // Default FALSE so clicking Start Voiceflow launches instantly with ZERO "Share screen" popup!
+  // On native desktop (Tauri), screen capture is already automatic via Win32 GDI so browser getDisplayMedia is never used.
+  const [includeCallAudio, setIncludeCallAudio] = useState<boolean>(false);
+
+  useEffect(() => {
+    setIsDesktopNative(isNativeApp());
+  }, []);
+
+  // Surface any real microphone permission/device error cleanly via toast instead of failing silently
+  useEffect(() => {
+    const onRecorderError = (e: any) => {
+      const msg = e?.detail?.message || 'Could not access microphone. Please check your audio permissions and try again.';
+      toast({
+        variant: 'destructive',
+        title: 'Could Not Start Voiceflow',
+        description: msg,
+      });
+    };
+    window.addEventListener('voiceflow-recorder-error', onRecorderError);
+    return () => window.removeEventListener('voiceflow-recorder-error', onRecorderError);
+  }, [toast]);
   
   const [recordingTime, setRecordingTime] = useState(0);
   const [resumingInfo, setResumingInfo] = useState<{ id: string; title: string; prevDuration: number } | null>(null);
@@ -139,11 +154,11 @@ export default function RightPanel() {
       if (autoStart === 'true') {
         localStorage.removeItem('voiceflow_auto_start_record');
         setTimeout(() => {
-          startRecording(includeCallAudio);
+          startRecording(isDesktopNative ? false : includeCallAudio);
         }, 350);
       }
     }
-  }, [startRecording, includeCallAudio]);
+  }, [startRecording, includeCallAudio, isDesktopNative]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -186,12 +201,12 @@ export default function RightPanel() {
           localStorage.removeItem('voiceflow_widget_messages');
           localStorage.removeItem('voiceflow_resume_chat_messages');
         }
-        startRecording(includeCallAudio);
+        startRecording(isDesktopNative ? false : includeCallAudio);
       }
     };
     window.addEventListener('voiceflow-toggle-record', handleToggle);
     return () => window.removeEventListener('voiceflow-toggle-record', handleToggle);
-  }, [isRecording, stopRecording, startRecording, isLimitReached, resumingInfo, includeCallAudio]);
+  }, [isRecording, stopRecording, startRecording, isLimitReached, resumingInfo, includeCallAudio, isDesktopNative]);
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60).toString().padStart(2, '0');
@@ -413,7 +428,7 @@ export default function RightPanel() {
     if (typeof window !== 'undefined') {
       localStorage.setItem('voiceflow_active_meeting_title', meeting.title);
     }
-    startRecording(includeCallAudio);
+    startRecording(isDesktopNative ? false : includeCallAudio);
   };
 
   return (
@@ -462,43 +477,35 @@ export default function RightPanel() {
                   </button>
                 </div>
               )}
-              {/* Audio Capture Mode Selector (Solves headphone vs speaker call audio) */}
-              <div className="grid grid-cols-2 gap-1.5 p-1 bg-background/80 border border-border rounded-xl text-[11px] font-semibold">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIncludeCallAudio(true);
-                    if (typeof window !== 'undefined') {
-                      localStorage.setItem('voiceflow_capture_call_audio', 'true');
-                    }
-                  }}
-                  className={`py-1.5 px-2 rounded-lg transition-all ${
-                    includeCallAudio
-                      ? 'bg-voiceflow-orange/15 text-voiceflow-orange border border-voiceflow-orange/30'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                  title="Capture both your microphone and meeting tab/system audio (recommended for headphones)"
-                >
-                  Mic + Call Audio
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIncludeCallAudio(false);
-                    if (typeof window !== 'undefined') {
-                      localStorage.setItem('voiceflow_capture_call_audio', 'false');
-                    }
-                  }}
-                  className={`py-1.5 px-2 rounded-lg transition-all ${
-                    !includeCallAudio
-                      ? 'bg-voiceflow-orange/15 text-voiceflow-orange border border-voiceflow-orange/30'
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                  title="Capture microphone only (works when call audio plays on open speakers)"
-                >
-                  Mic Only
-                </button>
-              </div>
+              {/* Optional Browser Tab Audio toggle (Web only; Desktop native already sees the screen & mic instantly) */}
+              {!isDesktopNative && (
+                <div className="grid grid-cols-2 gap-1.5 p-1 bg-background/80 border border-border rounded-xl text-[11px] font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => setIncludeCallAudio(false)}
+                    className={`py-1.5 px-2 rounded-lg transition-all ${
+                      !includeCallAudio
+                        ? 'bg-voiceflow-orange/15 text-voiceflow-orange border border-voiceflow-orange/30'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                    title="Instant start with microphone (no screen-share popup)"
+                  >
+                    Instant Mic
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIncludeCallAudio(true)}
+                    className={`py-1.5 px-2 rounded-lg transition-all ${
+                      includeCallAudio
+                        ? 'bg-voiceflow-orange/15 text-voiceflow-orange border border-voiceflow-orange/30'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                    title="Also prompt browser to capture meeting tab audio (useful on headphones in browser)"
+                  >
+                    + Tab Audio
+                  </button>
+                </div>
+              )}
 
               <button 
                 onClick={() => {
@@ -512,7 +519,7 @@ export default function RightPanel() {
                     localStorage.removeItem('voiceflow_widget_messages');
                     localStorage.removeItem('voiceflow_resume_chat_messages');
                   }
-                  startRecording(includeCallAudio);
+                  startRecording(isDesktopNative ? false : includeCallAudio);
                 }} 
                 className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl transition-all font-semibold shadow-sm active:scale-[0.98] bg-voiceflow-orange hover:bg-orange-600 text-white shadow-orange-500/20"
                 title={isLimitReached ? "Upgrade to Pro to start a new session" : "Launch Voiceflow Floating Assistant and start live listening"}
