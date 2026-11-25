@@ -1,5 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import Groq from "groq-sdk";
+
+export const maxDuration = 60;
+export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
@@ -113,7 +116,7 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
         if (completion?.choices?.[0]?.message?.content) break;
       } catch (err: any) {
         console.warn(`Groq model ${model} failed in summarize:`, err.message);
-        logAIError('groq-summarize', model, err.message, 500);
+        after(() => logAIError('groq-summarize', model, err.message, 500));
       }
     }
 
@@ -158,7 +161,7 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
             }
           } catch (orErr: any) {
             console.warn(`OpenRouter fallback ${orModel} failed in summarize:`, orErr);
-            logAIError('openrouter-summarize', orModel, orErr?.message || 'Failed', 500);
+            after(() => logAIError('openrouter-summarize', orModel, orErr?.message || 'Failed', 500));
           }
         }
       }
@@ -199,7 +202,7 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
     });
   } catch (error: any) {
     console.error("Summarize error:", error);
-    logAIError('summarize-server', 'catch', error?.message || 'Error', 500);
+    after(() => logAIError('summarize-server', 'catch', error?.message || 'Error', 500));
     return NextResponse.json({
       text: `## Executive Summary\nMeeting transcript successfully captured. Ready for executive review.\n\n## Action Items\n• Review recorded conversation points and action steps.`,
       title: `Meeting Notes (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`

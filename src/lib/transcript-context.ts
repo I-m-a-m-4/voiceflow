@@ -1,17 +1,77 @@
 /**
- * Real-Time Transcript & Interview Context Extraction Engine
- * Intelligently analyzes ongoing live conversation transcripts to identify:
- * 1. The exact last question asked by an interviewer or meeting participant.
- * 2. Key discussion topics and architectural themes.
- * 3. High-impact first-person speaking points without generic canned replies.
+ * Dynamic Multi-Turn Context & Intent Engine for Voiceflow Co-Pilot
+ *
+ * Solves three core real-time AI assistant problems:
+ * 1. Zero Stale Repetition: Tracks transcript deltas (earlier vs. newly spoken speech) and
+ *    prior conversation turns so asking a 2nd question (or clicking Suggest Answer again)
+ *    never regurgitates Turn 1's answer or resurrects an already-answered old question.
+ * 2. Dynamic Response Adaptation: Automatically shifts persona, formatting, and temperature
+ *    for code/debugging/algorithms, visual screen analysis, live meeting teleprompter replies,
+ *    follow-up drill-downs, recaps, and standalone analytical questions.
+ * 3. Clean Context Isolation: Prevents unrelated meeting transcript chatter from hijacking
+ *    explicit standalone or code questions while preserving deep multi-turn continuity.
  */
 
-const QUESTION_STARTERS_REGEX = /\b(can you|could you|how did you|how do you|how would you|what is|what are|what was|what were|why did you|why do you|why would|tell me about|tell us about|tell me|tell us|explain|walk me through|walk us through|describe|in what scenario|how have you handled|what challenges|how does|what's your experience|have you ever|have you|has there|are you|were you|is there|was there|do you|did you|would you|should we|how can we|what if|what about|could we|who did|where did|which one|give me an example|give us an example|how will you|how do we|elaborate on|what do you think|what would you)\b/i;
+export type PromptIntent = "screen" | "recap" | "suggest" | "code" | "followup" | "custom";
 
-const GENERIC_PROMPT_PATTERNS = [
-  /^what\s+should\s+i\s+say(\s+next)?(\s+in\s+this\s+meeting)?(\?)?$/i,
+export type ResponseMode =
+  | "code_technical"
+  | "spoken_teleprompter"
+  | "recap_brief"
+  | "screen_adaptive"
+  | "direct_analytical"
+  | "fresh_alternative";
+
+export interface ConversationTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface ContextAnalysisOptions {
+  history?: ConversationTurn[];
+  hasImage?: boolean;
+  previousTranscriptLength?: number;
+  previousTranscriptTail?: string;
+  customContext?: string;
+  forceFreshAngle?: boolean;
+}
+
+export interface TranscriptDelta {
+  earlierTranscript: string;
+  newTranscript: string;
+  hasMeaningfulDelta: boolean;
+  fullLength: number;
+}
+
+export interface EnhancedPromptResult {
+  intent: PromptIntent;
+  responseMode: ResponseMode;
+  targetPrompt: string;
+  systemPrompt: string;
+  userMessageContent: string;
+  extractedQuestion: string | null;
+  isRepeatAsk: boolean;
+  isFollowUp: boolean;
+  isCodeRelated: boolean;
+  isTranscriptRelevant: boolean;
+  hasTranscriptDelta: boolean;
+  recommendedTemperature: number;
+  turnNumber: number;
+}
+
+const LEAD_IN_PREFIX_REGEX =
+  /^(?:(?:so|okay|ok|alright|great|right|well|now|actually|also|and|but|wait|hey|hi|hello|thanks|thank you|got it|makes sense|sure|yeah|yes|hmm|um|uh|good question|moving on|next)[,.\s-]*)+/i;
+
+const QUESTION_STARTERS_REGEX =
+  /^(?:can you|could you|how did you|how do you|how would you|how will you|how can we|how do we|how does|how have you|how is|how are|what is|what are|what was|what were|what if|what about|what challenges|what's your|what's the|what do you|what would you|why did you|why do you|why would|why is|why are|when did|when would|where did|which one|who did|have you ever|have you|has there|are you|were you|is there|was there|do you|did you|would you|should we|could we)\b/i;
+
+const IMPERATIVE_PROMPT_REGEX =
+  /^(?:tell me about|tell us about|tell me|tell us|explain|walk me through|walk us through|describe|in what scenario|give me an example|give us an example|elaborate on|implement|write a|write an|design a|design an|debug|fix this|fix the|refactor|optimize|compare|contrast|let's solve|let's look at|let's implement|show me how|build a|create a)\b/i;
+
+const GENERIC_ASSIST_PATTERNS = [
+  /^what\s+should\s+i\s+say(\s+right\s+now|\s+next)?(\s+in\s+this\s+meeting)?(\?)?$/i,
   /^what\s+to\s+say(\?)?$/i,
-  /^suggest\s+(an\s+)?answer(\s+suggestion)?(\s+for\s+the\s+current\s+meeting\s+point)?(\?)?$/i,
+  /^suggest\s+(an?\s+)?answer(\s+suggestion)?(\s+for\s+the\s+current\s+meeting\s+point)?(\?)?$/i,
   /^give\s+me\s+a\s+smart\s+real-time\s+answer\s+suggestion.*$/i,
   /^suggest\s+speaking(\s+points)?(\?)?$/i,
   /^how\s+should\s+i\s+respond(\?)?$/i,
@@ -20,189 +80,930 @@ const GENERIC_PROMPT_PATTERNS = [
   /^help(\s+me)?(\?)?$/i,
   /^answer(\s+this)?(\?)?$/i,
   /^respond(\?)?$/i,
-  /^analyze\s+what\s+is\s+on\s+my\s+screen.*$/i,
-  /^analyze\s+screen.*$/i,
-  /^what('s|\s+is)\s+on\s+my\s+screen.*$/i,
-  /^give\s+me\s+a\s+2-bullet\s+point\s+quick\s+recap.*$/i,
-  /^recap.*$/i,
 ];
 
-/**
- * Checks if the prompt is an assist shortcut or generic question rather than a specific query
- */
+const RECAP_PROMPT_REGEX =
+  /\b(recap|summarize|summary|what was (just )?said|catch me up|so far|tldr|tl;dr|key takeaways|action items)\b/i;
+
+const MEETING_REFERENCE_REGEX =
+  /\b(meeting|transcript|call|conversation|discussion|interviewer|speaker|they said|he said|she said|they asked|he asked|she asked|just said|so far|mentioned|discussed|earlier|catch me up|action items|what did (they|he|she|we)|recap)\b/i;
+
+const SCREEN_PROMPT_REGEX =
+  /\b(screen|slide|display|screenshot|what's on my screen|whats on my screen|picture|image|analyze (what is on )?my screen|look at my screen|on my screen|this image|this screenshot)\b/i;
+
+const EXPLICIT_ALTERNATIVE_REGEX =
+  /\b(try again|different answer|different angle|different take|different perspective|different approach|different example|another answer|another angle|another take|another way|another option|other angle|other options?|something else|something different|rephrase|say it differently|not that|give me another|regenerate|fresh take|second opinion|new answer)\b/i;
+
+const FOLLOWUP_PHRASE_REGEX =
+  /^(?:and\s+|but\s+|ok\s+|okay\s+|great\s+|now\s+|wait\s+|also\s+)?(?:explain more|go deeper|elaborate|give me an example|show me an example|more detail|more details|break (it|that|this) down|step by step|make (it|that|this) shorter|shorter|more concise|simpler|simplify|eli5|why\??$|how\??$|what else\??$|anything else\??$|what about\b|how about\b|what if\b|compare (that|it|them|this)|pros and cons|edge cases|expand on|convert (it|that|this) to|rewrite (it|that|this)|optimize (it|that|this)|fix (it|that|this)|debug (it|that|this)|in (python|javascript|typescript|java|go|rust|sql|c\+\+|c#|bash)|show (me )?(the )?code|with code|explain line\b|explain point\b|explain the (first|second|third|last))\b/i;
+
+const FOLLOWUP_ANAPHORA_REGEX =
+  /\b(that answer|your answer|previous answer|last answer|above|that approach|this approach|that code|this code|that snippet|that function|the first one|the second one|point \d|step \d)\b/i;
+
+const CODE_SYNTAX_REGEX =
+  /```|`[^`]{2,}`|=>|===|!==|\b(?:const|let|var)\s+[a-zA-Z_$][\w$]*\s*=|\bfunction\s*(?:[a-zA-Z_$][\w$]*)?\s*\(|\b(?:async\s+function|await\s+\w+\s*\()|\bimport\s+(?:\{[^}]+\}|\*\s+as\s+\w+|[a-zA-Z_$][\w$]*)\s+from\b|\bexport\s+(?:default\s+)?(?:const|let|var|function|class|interface|type|async)\b|\binterface\s+[A-Z]\w*\s*\{|\b(?:struct|enum|impl)\s+[A-Z]\w*|\b(?:fn|def)\s+[a-zA-Z_]\w*\s*\(|\b(?:elif|nullptr|console\.log|System\.out|fmt\.Print|printf|std::|SELECT\s+.+\s+FROM|INSERT\s+INTO|UPDATE\s+\w+\s+SET|CREATE\s+TABLE|useState\s*\(|useEffect\s*\(|useMemo\s*\(|useCallback\s*\(|try\s*\{|catch\s*\(|Traceback\s*\(|TypeError:|ReferenceError:|SyntaxError:|RangeError:|ValueError:|KeyError:|AttributeError:|NullPointerException)\b|#include\b|<\?php/;
+
+const CODE_INTENT_REGEX =
+  /\b(code|codebase|snippet|pseudocode|algorithm|leetcode|big[- ]?o|time complexity|space complexity|data structure|regex|regular expression|sql|query|graphql|json|yaml|dockerfile|docker|kubernetes|git|bash|shell|powershell|typescript|javascript|python|golang|rust|java\b|c\+\+|c#|kotlin|swift|react|next\.?js|node\.?js|html|css|tailwind|unit test|test case|debug|debugger|refactor|stack ?trace|traceback|syntax error|runtime error|compile error|build error|type error|api endpoint|binary search|linked list|binary tree|dynamic programming|sliding window|hash ?map|lru cache|recursion|memoization|closure|promise|async\/await|useEffect|useState|hydration|mutex|deadlock|race condition)\b/i;
+
+const CODE_ACTION_NOUN_REGEX =
+  /\b(write|implement|fix|debug|explain|understand|trace|dry[- ]?run|review|optimize|refactor|parse|compile|convert|translate)\s+(?:a\s+|an\s+|the\s+|this\s+|my\s+)?(?:(?:async|recursive|arrow|callback|helper|python|js|ts|javascript|typescript|java|rust|go|sql|react|next\.?js|custom|pure)\s+)?(code|snippet|script|program|bug|error|exception|loop|recursion|component|hook|query|endpoint|handler|algorithm|reducer|middleware|regex|sql|function|method|class)\b/i;
+
+const TRANSCRIPT_CODE_HINT_REGEX =
+  /\b(leetcode|coderpad|whiteboard|time complexity|space complexity|big[- ]?o|binary tree|linked list|lru cache|sliding window|dynamic programming|implement (a|an|the)|write a function|debug this|fix this bug|sql query|time and space|o\(n\)|o\(log n\)|o\(1\)|hash ?map|algorithm)\b/i;
+
+const STOPWORDS = new Set([
+  "a", "an", "the", "is", "are", "was", "were", "be", "been", "being", "am",
+  "to", "of", "in", "on", "for", "with", "at", "by", "from", "as", "into",
+  "it", "its", "this", "that", "these", "those", "i", "me", "my", "mine",
+  "you", "your", "yours", "we", "us", "our", "they", "them", "their",
+  "please", "can", "could", "would", "should", "will", "just", "now", "right",
+  "give", "tell", "about", "what", "how", "why", "when", "where", "which", "who",
+  "do", "does", "did", "have", "has", "had", "explain", "help", "say", "answer",
+  "suggestion", "suggest", "smart", "real", "time", "current", "point", "get",
+  "make", "some", "any", "more", "very", "really", "actually", "basically",
+  "like", "okay", "ok", "yeah", "yes", "no", "so", "and", "or", "but", "if",
+  "then", "than", "also", "too", "here", "there", "up", "out", "over",
+]);
+
+function normalizeText(text: string): string {
+  return (text || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9+#._/\s-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function lightStem(token: string): string {
+  if (token.length >= 5 && token.endsWith("ing") && !token.endsWith("string")) {
+    return token.slice(0, -3);
+  }
+  if (token.length >= 5 && token.endsWith("ies")) {
+    return `${token.slice(0, -3)}y`;
+  }
+  if (
+    token.length >= 4 &&
+    token.endsWith("s") &&
+    !token.endsWith("ss") &&
+    !token.endsWith("is") &&
+    !token.endsWith("us") &&
+    !token.endsWith("js") &&
+    !token.endsWith("ts") &&
+    !token.endsWith("css")
+  ) {
+    return token.slice(0, -1);
+  }
+  return token;
+}
+
+export function tokenizeContent(text: string): Set<string> {
+  const norm = normalizeText(text);
+  if (!norm) return new Set();
+  const tokens = norm
+    .split(/\s+/)
+    .filter((t) => t.length >= 2 && !STOPWORDS.has(t))
+    .map(lightStem)
+    .filter((t) => t.length >= 2 && !STOPWORDS.has(t));
+  return new Set(tokens);
+}
+
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 && b.size === 0) return 1;
+  if (a.size === 0 || b.size === 0) return 0;
+  let intersection = 0;
+  for (const t of a) {
+    if (b.has(t)) intersection++;
+  }
+  const union = a.size + b.size - intersection;
+  return union === 0 ? 0 : intersection / union;
+}
+
 export function isGenericAskPrompt(prompt: string): boolean {
   if (!prompt || !prompt.trim()) return true;
   const clean = prompt.trim().toLowerCase();
-  return GENERIC_PROMPT_PATTERNS.some(pattern => pattern.test(clean));
+  return GENERIC_ASSIST_PATTERNS.some((pattern) => pattern.test(clean));
+}
+
+export function isRecapPrompt(prompt: string): boolean {
+  if (!prompt || !prompt.trim()) return false;
+  const trimmed = prompt.trim();
+  if (!RECAP_PROMPT_REGEX.test(trimmed)) return false;
+  // Do NOT hijack "summarize this code" or "summarize this function/error" into a meeting recap!
+  const mentionsCodeTarget =
+    CODE_SYNTAX_REGEX.test(trimmed) ||
+    /\b(this code|the code|this function|this snippet|this error|this file|this class|this query|this script)\b/i.test(
+      trimmed
+    );
+  if (mentionsCodeTarget && !MEETING_REFERENCE_REGEX.test(trimmed)) {
+    return false;
+  }
+  return true;
+}
+
+export function isScreenFocusedPrompt(prompt: string): boolean {
+  if (!prompt) return false;
+  return SCREEN_PROMPT_REGEX.test(prompt.trim());
+}
+
+export function isCodeOrTechnicalPrompt(prompt: string, recentHistory: ConversationTurn[] = []): boolean {
+  if (!prompt || !prompt.trim()) return false;
+  const trimmed = prompt.trim();
+  if (CODE_SYNTAX_REGEX.test(trimmed)) return true;
+  if (CODE_INTENT_REGEX.test(trimmed)) return true;
+  if (CODE_ACTION_NOUN_REGEX.test(trimmed)) return true;
+
+  // Continue in code mode if the previous assistant turn had fenced code and the user is following up
+  const lastAssistant = [...recentHistory].reverse().find((m) => m.role === "assistant");
+  if (lastAssistant && /```/.test(lastAssistant.content)) {
+    if (
+      FOLLOWUP_PHRASE_REGEX.test(trimmed) ||
+      FOLLOWUP_ANAPHORA_REGEX.test(trimmed) ||
+      /\b(line \d+|complexity|edge case|null|empty|faster|cleaner|shorter|optimize|explain it|walk through|step by step|how does it work|why does it)\b/i.test(
+        trimmed
+      )
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function isFollowUpPrompt(prompt: string, history: ConversationTurn[] = []): boolean {
+  if (!prompt || !prompt.trim() || history.length === 0) return false;
+  const hasAssistantReply = history.some((h) => h.role === "assistant");
+  if (!hasAssistantReply) return false;
+
+  const trimmed = prompt.trim();
+  if (isGenericAskPrompt(trimmed) || isRecapPrompt(trimmed) || isScreenFocusedPrompt(trimmed)) {
+    return false;
+  }
+  if (EXPLICIT_ALTERNATIVE_REGEX.test(trimmed)) return true;
+  if (FOLLOWUP_PHRASE_REGEX.test(trimmed)) return true;
+  if (FOLLOWUP_ANAPHORA_REGEX.test(trimmed)) return true;
+
+  // Short pronoun-anchored follow-up (e.g., "Can you make it faster?", "What about edge cases for that?")
+  if (
+    trimmed.length <= 120 &&
+    /\b(it|that|this|those|them)\b/i.test(trimmed) &&
+    !MEETING_REFERENCE_REGEX.test(trimmed)
+  ) {
+    // Only treat as follow-up if it doesn't introduce an obviously self-contained new coding snippet
+    if (!CODE_SYNTAX_REGEX.test(trimmed)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function isTranscriptRelevantPrompt(
+  prompt: string,
+  transcript: string,
+  intent: PromptIntent
+): boolean {
+  if (intent === "recap" || intent === "suggest") return true;
+  if (!transcript || !transcript.trim()) return false;
+  if (MEETING_REFERENCE_REGEX.test(prompt)) return true;
+
+  // For explicit code prompts with pasted code or standalone technical questions,
+  // don't let unrelated transcript chatter hijack the answer unless there's clear topical overlap.
+  const promptTokens = tokenizeContent(prompt);
+  if (promptTokens.size === 0) return true;
+
+  const recentTranscriptTokens = tokenizeContent(transcript.slice(-1800));
+  if (recentTranscriptTokens.size === 0) return false;
+
+  let overlap = 0;
+  for (const tok of promptTokens) {
+    if (recentTranscriptTokens.has(tok)) overlap++;
+  }
+
+  // Require strong overlap for code prompts (at least 2 shared non-stopword terms and >=30% of prompt terms)
+  if (intent === "code") {
+    return overlap >= 2 && overlap / promptTokens.size >= 0.3;
+  }
+
+  // For custom/followup prompts, require at least 2 shared domain terms or >=25% overlap
+  return overlap >= 2 || (promptTokens.size <= 3 && overlap >= 1 && overlap / promptTokens.size >= 0.34);
 }
 
 /**
- * Clean timestamps, speaker labels, and formatting noise from transcript text
+ * Sanitizes and bounds prior conversation turns:
+ * - Preserves up to `maxTurns` turns (default 10 = 5 full Q&A exchanges)
+ * - Caps each turn at `maxCharsPerTurn` (default 1400 chars so code blocks remain intact)
+ * - Merges consecutive same-role turns cleanly instead of silently dropping user context
+ * - Guarantees clean `user` -> `assistant` alternation ending with `assistant`
  */
+export function sanitizeConversationHistory(
+  history: unknown,
+  maxTurns = 10,
+  maxCharsPerTurn = 1400
+): ConversationTurn[] {
+  if (!Array.isArray(history) || history.length === 0) return [];
+
+  const merged: ConversationTurn[] = [];
+  for (const raw of history.slice(-Math.max(maxTurns * 2, 16))) {
+    if (!raw || typeof raw !== "object") continue;
+    const role = (raw as any).role;
+    const content = (raw as any).content;
+    if ((role !== "user" && role !== "assistant") || typeof content !== "string") continue;
+
+    const trimmed = content.trim();
+    if (!trimmed) continue;
+
+    const bounded =
+      trimmed.length > maxCharsPerTurn ? `${trimmed.slice(0, maxCharsPerTurn)}...` : trimmed;
+
+    if (merged.length > 0 && merged[merged.length - 1].role === role) {
+      const combined = `${merged[merged.length - 1].content}\n${bounded}`;
+      merged[merged.length - 1].content =
+        combined.length > maxCharsPerTurn ? `${combined.slice(0, maxCharsPerTurn)}...` : combined;
+    } else {
+      merged.push({ role, content: bounded });
+    }
+  }
+
+  // Slice to maxTurns from the end
+  const recent = merged.slice(-maxTurns);
+
+  // Strip leading orphaned assistant turns so conversation starts cleanly with user
+  while (recent.length > 0 && recent[0].role === "assistant") {
+    recent.shift();
+  }
+
+  // Strip trailing orphaned user turns (the current turn appends the active user message)
+  while (recent.length > 0 && recent[recent.length - 1].role === "user") {
+    recent.pop();
+  }
+
+  return recent;
+}
+
 function cleanSentence(text: string): string {
   return text
-    .replace(/^(\[\d{1,2}:\d{2}(:\d{2})?\]|\d{1,2}:\d{2})\s*/, '') // Remove timestamps like [01:23]
-    .replace(/^(speaker\s*\d*|interviewer|host|participant|guest|person):\s*/i, '') // Remove speaker tags
-    .replace(/\s+/g, ' ')
+    .replace(/^(\[\d{1,2}:\d{2}(:\d{2})?\]|\d{1,2}:\d{2})\s*/, "")
+    .replace(/^(speaker\s*\d*|interviewer|host|participant|guest|person|them|you):\s*/i, "")
+    .replace(/^\.\.\.\s*/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function stripFillersForDeltaCheck(text: string): string {
+  return text
+    .replace(/\[\d{1,2}:\d{2}(:\d{2})?\]/g, " ")
+    .replace(/\.\.\./g, " ")
+    .replace(/\b(um+|uh+|hmm+|okay|ok|yeah|yes|right|sure|thanks|thank you|got it)\b/gi, " ")
+    .replace(/[^a-zA-Z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
 /**
- * Extracts the most recent question asked in the transcript.
- * Looks for question marks or prominent question phrasing in reverse chronological order.
- * Trims leading conversational chatter if the question begins mid-sentence.
+ * Splits live transcript into earlier background context vs. NEW speech since the previous AI reply.
+ * Handles Whisper re-timestamping and interim-preview replacement gracefully via anchor matching.
  */
-export function extractLastQuestion(transcript: string): string | null {
+export function splitTranscriptDelta(
+  transcript: string,
+  previousLength?: number,
+  previousTail?: string
+): TranscriptDelta {
+  const full = (transcript || "").trim();
+  if (!full) {
+    return {
+      earlierTranscript: "",
+      newTranscript: "",
+      hasMeaningfulDelta: false,
+      fullLength: 0,
+    };
+  }
+
+  const hasValidPrevLen = typeof previousLength === "number" && Number.isFinite(previousLength) && previousLength > 0;
+  const cleanTail = (previousTail || "").replace(/^\.\.\.\s*/, "").trim();
+
+  // First turn (no prior cursor)
+  if (!hasValidPrevLen && !cleanTail) {
+    const meaningful = stripFillersForDeltaCheck(full);
+    const words = meaningful ? meaningful.split(/\s+/).length : 0;
+    return {
+      earlierTranscript: "",
+      newTranscript: full.slice(-3000),
+      hasMeaningfulDelta: meaningful.length >= 16 && words >= 3,
+      fullLength: full.length,
+    };
+  }
+
+  let splitIdx = -1;
+
+  // 1. Try anchor matching with previousTail (resilient when interim "... " shifts into committed Whisper text)
+  if (cleanTail.length >= 20) {
+    const anchorCandidates = [
+      cleanTail.slice(-80),
+      cleanTail.slice(-45),
+      cleanTail.slice(-24),
+    ].filter((a) => a.length >= 16);
+
+    const lowerFull = full.toLowerCase();
+    for (const anchor of anchorCandidates) {
+      const found = lowerFull.lastIndexOf(anchor.toLowerCase());
+      if (found !== -1) {
+        splitIdx = found + anchor.length;
+        break;
+      }
+    }
+  }
+
+  // 2. Fallback to numeric length cursor
+  if (splitIdx === -1 && hasValidPrevLen) {
+    if (previousLength! <= full.length) {
+      splitIdx = previousLength!;
+    } else if (previousLength! - full.length > 300) {
+      // Transcript was reset to a brand-new shorter session
+      splitIdx = 0;
+    } else {
+      // Slight shrink after interim line collapsed into committed Whisper text — no new speech yet
+      splitIdx = full.length;
+    }
+  }
+
+  if (splitIdx < 0) splitIdx = 0;
+  if (splitIdx > full.length) splitIdx = full.length;
+
+  const earlierRaw = full.slice(0, splitIdx).trim();
+  const newRaw = full.slice(splitIdx).trim();
+
+  const meaningfulNew = stripFillersForDeltaCheck(newRaw);
+  const newWords = meaningfulNew ? meaningfulNew.split(/\s+/).length : 0;
+  const hasMeaningfulDelta = meaningfulNew.length >= 16 && newWords >= 3;
+
+  return {
+    earlierTranscript: earlierRaw.slice(-2200),
+    newTranscript: newRaw.slice(-2800),
+    hasMeaningfulDelta,
+    fullLength: full.length,
+  };
+}
+
+/**
+ * Extracts the active question or imperative prompt from a transcript slice.
+ * Improvements over naive scanning:
+ * - Only matches interrogative starters at sentence/clause start (prevents false mid-sentence matches)
+ * - Recognizes imperative coding/interview tasks ("Implement...", "Design...", "Walk me through...")
+ * - Avoids jumping backwards over newer substantive speech to resurrect an old already-answered question
+ */
+export function extractLastQuestion(transcript: string, excludeText?: string | null): string | null {
   if (!transcript || !transcript.trim()) return null;
 
-  // Split transcript into discrete sentences or speech turns
   const rawSegments = transcript
-    .split(/(?<=[.?!])\s+|\n+/)
-    .map(s => cleanSentence(s))
-    .filter(s => s.length > 8);
+    .split(/(?<=[.?!])(?:\s+|\n+)|\n+/)
+    .map((s) => cleanSentence(s))
+    .filter((s) => s.length > 6);
 
   if (rawSegments.length === 0) return null;
 
-  // Focus only on the most recent 15 speech turns (last ~2-3 minutes of conversation)
-  const segments = rawSegments.slice(-15);
+  const segments = rawSegments.slice(-10);
+  const excludeTokens = excludeText ? tokenizeContent(excludeText) : new Set<string>();
 
-  // Scan backwards from the newest speech segment
   for (let i = segments.length - 1; i >= 0; i--) {
     const segment = segments[i];
+    const distanceFromEnd = segments.length - 1 - i;
 
-    // 1. Sentence ending with a question mark
-    if (segment.endsWith('?')) {
-      const match = segment.match(QUESTION_STARTERS_REGEX);
-      if (match && typeof match.index === 'number' && match.index > 0) {
-        return segment.slice(match.index).trim();
+    // If there are >= 3 substantive newer sentences after this older segment,
+    // stop walking backwards so we don't resurrect an ancient already-passed question.
+    if (distanceFromEnd >= 3) {
+      const newerSubstantive = segments
+        .slice(i + 1)
+        .filter((s) => stripFillersForDeltaCheck(s).length >= 25);
+      if (newerSubstantive.length >= 2) {
+        break;
       }
-      return segment;
     }
 
-    // 2. Sentence containing explicit question opening pattern
-    const match = segment.match(QUESTION_STARTERS_REGEX);
-    if (match && segment.length > 12) {
-      const startIndex = typeof match.index === 'number' && match.index > 0 ? match.index : 0;
-      const questionPart = segment.slice(startIndex).trim();
-      return questionPart.endsWith('.') ? questionPart.slice(0, -1) + '?' : (questionPart.endsWith('?') ? questionPart : `${questionPart}?`);
+    const stripped = segment.replace(LEAD_IN_PREFIX_REGEX, "").trim();
+    if (stripped.length < 7) continue;
+
+    let candidate: string | null = null;
+
+    if (segment.endsWith("?")) {
+      candidate = stripped.length >= 7 ? stripped : segment;
+    } else if (QUESTION_STARTERS_REGEX.test(stripped) && stripped.length > 10) {
+      candidate = stripped.endsWith(".")
+        ? `${stripped.slice(0, -1)}?`
+        : `${stripped}?`;
+    } else if (IMPERATIVE_PROMPT_REGEX.test(stripped) && stripped.length > 14) {
+      candidate = stripped;
+    }
+
+    if (candidate) {
+      if (excludeTokens.size >= 2) {
+        const candTokens = tokenizeContent(candidate);
+        if (candTokens.size >= 2 && jaccardSimilarity(candTokens, excludeTokens) >= 0.78) {
+          continue;
+        }
+      }
+      return candidate;
     }
   }
 
   return null;
 }
 
-/**
- * Extracts the last substantive topic or statements if no direct question was found.
- */
 export function extractRecentTopic(transcript: string): string | null {
   if (!transcript || !transcript.trim()) return null;
 
   const lines = transcript
-    .split(/(?<=[.?!])\s+|\n+/)
-    .map(s => cleanSentence(s))
-    .filter(s => s.length > 10);
+    .split(/(?<=[.?!])(?:\s+|\n+)|\n+/)
+    .map((s) => cleanSentence(s))
+    .filter((s) => s.length > 10);
 
   if (lines.length === 0) return null;
-
-  // Grab the last 1 or 2 substantive utterances
-  const recentSlice = lines.slice(-2);
-  return recentSlice.join(' ').trim();
+  return lines.slice(-3).join(" ").trim();
 }
 
-/**
- * Enhances the prompt sent to AI models by binding it directly to the active interview question.
- */
+export function detectRepeatAsk(
+  prompt: string,
+  history: ConversationTurn[],
+  hasMeaningfulTranscriptDelta: boolean,
+  intentHint: { isGeneric: boolean; isRecap: boolean; isScreen: boolean; hasImage: boolean }
+): { isRepeat: boolean; repeatedTurnContent: string | null } {
+  const userTurns = history.filter((h) => h.role === "user");
+  const assistantTurns = history.filter((h) => h.role === "assistant");
+  if (userTurns.length === 0 || assistantTurns.length === 0) {
+    return { isRepeat: false, repeatedTurnContent: null };
+  }
+
+  const lastUser = userTurns[userTurns.length - 1].content;
+  const lastAssistant = assistantTurns[assistantTurns.length - 1].content;
+
+  // Explicit request for a different/fresh answer
+  if (EXPLICIT_ALTERNATIVE_REGEX.test(prompt)) {
+    return { isRepeat: true, repeatedTurnContent: lastAssistant };
+  }
+
+  // Repeated "Suggest Answer" when no new transcript arrived
+  if (intentHint.isGeneric) {
+    const prevWasGeneric = isGenericAskPrompt(lastUser);
+    if (prevWasGeneric && !hasMeaningfulTranscriptDelta) {
+      return { isRepeat: true, repeatedTurnContent: lastAssistant };
+    }
+    return { isRepeat: false, repeatedTurnContent: null };
+  }
+
+  // Repeated "Recap" when no new transcript arrived
+  if (intentHint.isRecap) {
+    const prevWasRecap = isRecapPrompt(lastUser);
+    if (prevWasRecap && !hasMeaningfulTranscriptDelta) {
+      return { isRepeat: true, repeatedTurnContent: lastAssistant };
+    }
+    return { isRepeat: false, repeatedTurnContent: null };
+  }
+
+  // Repeated "Analyze Screen" without a fresh screenshot
+  if (intentHint.isScreen && !intentHint.hasImage) {
+    const prevWasScreen = isScreenFocusedPrompt(lastUser);
+    if (prevWasScreen) {
+      return { isRepeat: true, repeatedTurnContent: lastAssistant };
+    }
+  }
+
+  // Compare typed prompt against last 3 user prompts
+  const normCurr = normalizeText(prompt);
+  const currTokens = tokenizeContent(prompt);
+
+  const recentUsers = userTurns.slice(-3);
+  for (let i = recentUsers.length - 1; i >= 0; i--) {
+    const prev = recentUsers[i].content;
+    const normPrev = normalizeText(prev);
+    if (normCurr && normCurr === normPrev) {
+      // Exact same typed question again (unless it's a fresh screen capture that might show a new screen!)
+      if (intentHint.isScreen && intentHint.hasImage) {
+        return { isRepeat: true, repeatedTurnContent: lastAssistant };
+      }
+      return { isRepeat: true, repeatedTurnContent: lastAssistant };
+    }
+
+    const prevTokens = tokenizeContent(prev);
+    if (currTokens.size >= 2 && prevTokens.size >= 2) {
+      let newTokenCount = 0;
+      for (const t of currTokens) {
+        if (!prevTokens.has(t)) newTokenCount++;
+      }
+      const sim = jaccardSimilarity(currTokens, prevTokens);
+      // Only consider near-duplicate if ZERO new content keywords were introduced
+      // (so "What is Redis?" vs "What is Kafka?" is NEVER mistaken for a repeat!)
+      if (newTokenCount === 0 && sim >= 0.78) {
+        return { isRepeat: true, repeatedTurnContent: lastAssistant };
+      }
+    }
+  }
+
+  return { isRepeat: false, repeatedTurnContent: null };
+}
+
+export function buildDynamicSystemPrompt(mode: ResponseMode, customContext?: string): string {
+  const profileSection =
+    customContext && customContext.trim()
+      ? `\n\n[Active User Profile & Role Context]\n${customContext.trim()}\n(Ground your perspective, credentials, and phrasing in this profile whenever relevant.)`
+      : "";
+
+  const universalProgressionRule = `
+Universal Multi-Turn & Anti-Repetition Rules:
+- Always answer the LATEST user request and the newest conversation context.
+- NEVER repeat, recycle, or lightly paraphrase your previous reply from conversation history.
+- If the user asks a new question, pivot cleanly to the new question — do NOT stay stuck on an earlier topic or older transcript question.
+- Never output robotic meta-commentary ("As an AI...", "Based on the transcript...", "Here is an answer...").`;
+
+  switch (mode) {
+    case "code_technical":
+      return `You are Voiceflow AI, an elite software engineering co-pilot, debugger, and technical advisor.
+You adapt dynamically to understand, explain, debug, optimize, and write production-quality code across any programming language, framework, or system architecture.
+
+Formatting & Technical Delivery:
+- Lead with a clear, direct diagnosis, solution, or takeaway in **bold**.
+- Use clean syntax-highlighted fenced Markdown code blocks (\`\`\`ts, \`\`\`python, \`\`\`sql, etc.) whenever code, a fix, or an algorithm is needed.
+- Explain *why* the code works (or why the bug happens), key edge cases, and Big-O time/space complexity when relevant.
+- Do NOT force awkward first-person interview speech ("In my experience...") when the user simply wants to understand, debug, or write code. If they are in a live technical interview and need to speak it aloud, include a crisp 1-2 sentence verbal explanation before or after the code.
+${universalProgressionRule}${profileSection}`;
+
+    case "screen_adaptive":
+      return `You are Voiceflow AI, an elite real-time visual co-pilot with sharp comprehension across code editors, terminals, slides, charts, quizzes, emails, and documents.
+
+Adaptive Visual Delivery:
+- Inspect everything visible in the attached screenshot carefully and adapt your format to what is actually on screen:
+  1. **Code / IDE / Terminal / Error / Coding Problem**: State the bug, output, or optimal approach FIRST in **bold**, provide the clean corrected/solution code in a fenced code block, and add 1-2 crisp notes on complexity or edge cases.
+  2. **Question / Multiple Choice / Assessment / Form**: State the exact direct answer FIRST in **bold**, followed by a brief 1-2 sentence justification.
+  3. **Slide / Dashboard / Chart / Document / Live Meeting**: State the core takeaway FIRST in **bold**, followed by 2-3 sharp talking points ready to use aloud.
+- If this is a follow-up or second screen capture, examine what is visibly on screen NOW: if the screen changed, answer the NEW content completely; if it shows the same content, give a clearer, deeper, or different angle rather than repeating your previous answer.
+${universalProgressionRule}${profileSection}`;
+
+    case "recap_brief":
+      return `You are Voiceflow AI, a crisp real-time meeting summarizer.
+
+Recap Delivery:
+- Give a sharp 1-sentence **bold** headline capturing the main theme of the discussion.
+- Follow with 2-3 concise bullet points highlighting the key points, decisions, or open questions from the transcript.
+- Strictly rely ONLY on the provided transcript. If the transcript is empty or very short, state that briefly and honestly.
+${universalProgressionRule}${profileSection}`;
+
+    case "fresh_alternative":
+      return `You are Voiceflow AI, an elite adaptive co-pilot.
+The user already received a prior answer in the conversation history and is explicitly asking again or requesting a fresh take.
+
+STRICT Fresh-Response Rules:
+- You MUST deliver a meaningfully DIFFERENT response from your previous reply above.
+- Do NOT reuse the same opening line, the same phrasing, or the same repeated bullets.
+- Shift to a genuinely new layer of value: a concrete real-world example, a code snippet/implementation, a sharper alternative framing, deeper nuance/trade-offs, or a smart counter-question they can ask.
+- Match the format naturally to the topic (code blocks for technical/coding topics; crisp spoken bullets for live meeting answers; direct clear explanation for conceptual questions).
+${universalProgressionRule}${profileSection}`;
+
+    case "direct_analytical":
+      return `You are Voiceflow AI, an intelligent, adaptive real-time co-pilot across any profession, technical domain, or subject matter.
+
+Dynamic Response Delivery:
+- Answer the user's EXACT question directly and accurately — lead with the core answer in **bold**.
+- Dynamically choose the best format for what they asked: concise paragraphs, sharp bullets, a comparison, a step-by-step breakdown, or fenced code blocks if technical.
+- On follow-ups, build directly on the prior turns without repeating points you already stated.
+- Only draw on the meeting transcript if it is directly relevant to the user's question; never let unrelated background transcript pull you off-topic.
+${universalProgressionRule}${profileSection}`;
+
+    case "spoken_teleprompter":
+    default:
+      return `You are Voiceflow AI, an elite real-time live meeting assistant, speaking co-pilot, and executive teleprompter.
+You assist the user discreetly, naturally, and authoritatively in any live meeting, interview, presentation, or discussion across ANY profession, industry, or subject matter.
+
+Spoken Teleprompter Delivery:
+- State the direct answer, solution, or core takeaway FIRST in **bold**.
+- Follow with 2 to 3 crisp, substantive bullet points the user can speak aloud naturally in first person ("I...", "My approach...", "We...").
+- Dynamically mirror the vocabulary and depth of the subject matter being discussed (and include a concise code snippet if the live meeting prompt is an explicit coding problem).
+- Prioritize the NEWEST spoken speech in the transcript — never re-answer an old question that was already addressed earlier.
+${universalProgressionRule}${profileSection}`;
+  }
+}
+
 export function buildEnhancedInterviewPrompt(
   rawPrompt: string,
   transcript: string,
-  hasImage = false
-): { targetPrompt: string; extractedQuestion: string | null } {
-  const isGeneric = isGenericAskPrompt(rawPrompt);
-  const lastQuestion = extractLastQuestion(transcript);
-  const recentTopic = extractRecentTopic(transcript);
-  const isScreenFocused = /\b(screen|slide|display|screenshot|what's on my screen|picture|image|analyze (what is on )?my screen)\b/i.test(rawPrompt);
+  hasImageOrOptions: boolean | ContextAnalysisOptions = false
+): EnhancedPromptResult {
+  const options: ContextAnalysisOptions =
+    typeof hasImageOrOptions === "boolean"
+      ? { hasImage: hasImageOrOptions }
+      : hasImageOrOptions || {};
 
-  // Case 0: Explicit visual screen analysis requested with attached image
-  if (hasImage && isScreenFocused) {
-    return {
-      extractedQuestion: "Screen Visual Analysis",
-      targetPrompt: `[Screen Visual Analysis Task]: Analyze what is actively displayed on the user's screen right now.
-- Examine all visible text, diagrams, documents, problems, questions, or interfaces shown on screen.
-- State the direct answer, solution, or core takeaway FIRST in bold.
-- Follow with 2 to 3 concise, high-impact speaking points ready to read aloud.
-- Deliver the exact words ready to speak in natural first-person voice without robotic meta-commentary.`,
-    };
+  const hasImage = Boolean(options.hasImage);
+  const cleanHistory = sanitizeConversationHistory(options.history || []);
+  const turnNumber = cleanHistory.filter((h) => h.role === "assistant").length + 1;
+  const trimmed = (rawPrompt || "").trim();
+  const cleanTranscript = (transcript || "").trim();
+
+  const delta = splitTranscriptDelta(
+    cleanTranscript,
+    options.previousTranscriptLength,
+    options.previousTranscriptTail
+  );
+
+  const isRecap = isRecapPrompt(trimmed);
+  const isScreenFocused = isScreenFocusedPrompt(trimmed);
+  const isGeneric = isGenericAskPrompt(trimmed);
+  const isCode = isCodeOrTechnicalPrompt(trimmed, cleanHistory);
+  const isFollowUp = isFollowUpPrompt(trimmed, cleanHistory);
+
+  const repeatCheck = detectRepeatAsk(trimmed, cleanHistory, delta.hasMeaningfulDelta, {
+    isGeneric,
+    isRecap,
+    isScreen: isScreenFocused,
+    hasImage,
+  });
+  const isRepeatAsk = Boolean(options.forceFreshAngle || repeatCheck.isRepeat);
+
+  const lastAssistantText =
+    [...cleanHistory].reverse().find((h) => h.role === "assistant")?.content || null;
+
+  // Prefer extracting active question from NEW transcript delta first so old questions never get re-answered!
+  const newQuestion = delta.hasMeaningfulDelta
+    ? extractLastQuestion(delta.newTranscript)
+    : null;
+  const newTopic = delta.hasMeaningfulDelta
+    ? extractRecentTopic(delta.newTranscript)
+    : null;
+
+  const fallbackQuestion =
+    newQuestion || extractLastQuestion(cleanTranscript, turnNumber > 1 ? lastAssistantText : null);
+  const fallbackTopic = newTopic || extractRecentTopic(cleanTranscript);
+
+  const buildTranscriptBlock = (
+    primary: boolean,
+    includeBackgroundOnly = false
+  ): string => {
+    if (!cleanTranscript) {
+      return primary ? "\n\nRecent Transcript Context:\nNone captured yet." : "";
+    }
+
+    if (includeBackgroundOnly) {
+      const compactBg = cleanTranscript.slice(-700);
+      return `\n\n[Optional Meeting Background — ONLY reference if directly relevant to the user's question]:\n${compactBg}`;
+    }
+
+    if (delta.earlierTranscript && delta.hasMeaningfulDelta) {
+      return `\n\n[Earlier Meeting Context (already covered background)]:\n${delta.earlierTranscript}\n\n[NEW Transcript Spoken Since Last Reply — PRIORITIZE THIS]:\n${delta.newTranscript}`;
+    }
+
+    return `\n\nRecent Transcript Context:\n${cleanTranscript.slice(-4500)}`;
+  };
+
+  let intent: PromptIntent;
+  let responseMode: ResponseMode;
+  let extractedQuestion: string | null = null;
+  let targetPrompt = "";
+  let isTranscriptRelevant = false;
+  let recommendedTemperature = 0.35;
+  let userMessageContent = "";
+
+  // ------------------------------------------------------------------
+  // 1. Explicit Meeting Recap / Summary
+  // ------------------------------------------------------------------
+  if (isRecap) {
+    intent = "recap";
+    isTranscriptRelevant = true;
+    responseMode = isRepeatAsk ? "fresh_alternative" : "recap_brief";
+    recommendedTemperature = isRepeatAsk ? 0.6 : 0.25;
+    extractedQuestion = null;
+
+    targetPrompt = isRepeatAsk
+      ? `[User Request]: "${trimmed}"
+[Anti-Repetition Note]: You already gave a recap in the previous turn and no new transcript arrived yet. Provide a DIFFERENT perspective — for example, concrete action items, open risks/questions, or next steps derived from the transcript rather than repeating the same summary.`
+      : `[User Request]: "${trimmed}"
+[Task]: Summarize what has actually been discussed in the meeting transcript below.
+- Give a crisp 1-sentence headline in **bold** capturing the main theme right now.
+- Follow with 2 to 3 concise bullet points highlighting the key points, decisions, or questions raised.
+- Strictly rely ONLY on the provided transcript. If the transcript is empty or very short, state that briefly and clearly.`;
+
+    userMessageContent = `${targetPrompt}${buildTranscriptBlock(true)}`;
+  }
+  // ------------------------------------------------------------------
+  // 2. Visual Screen Analysis (with attached image)
+  // ------------------------------------------------------------------
+  else if (hasImage && (isScreenFocused || isGeneric)) {
+    intent = "screen";
+    responseMode = isCode ? "code_technical" : "screen_adaptive";
+    isTranscriptRelevant = Boolean(cleanTranscript && cleanTranscript.length > 20);
+    recommendedTemperature = isRepeatAsk ? 0.55 : isCode ? 0.2 : 0.3;
+    extractedQuestion = "Screen Visual Analysis";
+
+    const repeatScreenGuidance = isRepeatAsk
+      ? "\n- IMPORTANT: This is a NEW screen capture after a previous analysis. Carefully inspect what is visible NOW — if the screen changed to new content/questions/code, answer the NEW content completely. If the screen shows the same problem, give a clearer, deeper, or alternative explanation instead of repeating your previous reply."
+      : "";
+
+    const customFocus =
+      !isGeneric && !/^analyze what is on my screen/i.test(trimmed)
+        ? `\n[Specific User Focus]: "${trimmed}"`
+        : "";
+
+    targetPrompt = `[Screen Visual Analysis Task]: Inspect what is actively displayed in the attached screenshot right now.${customFocus}
+- Dynamically adapt your answer to what is visible:
+  * If code, an IDE, terminal error, or coding problem is shown: diagnose or solve it directly with a clean fenced code block and concise explanation.
+  * If a question, quiz, or prompt is shown: state the exact answer FIRST in **bold** with brief reasoning.
+  * If slides, charts, docs, or meeting notes are shown: state the key takeaway FIRST in **bold** followed by 2-3 sharp talking points.${repeatScreenGuidance}`;
+
+    userMessageContent = `${targetPrompt}${
+      isTranscriptRelevant ? buildTranscriptBlock(false, true) : ""
+    }`;
+  }
+  // ------------------------------------------------------------------
+  // 3. Code Understanding / Debugging / Algorithm / Technical Request
+  // ------------------------------------------------------------------
+  else if (isCode) {
+    intent = "code";
+    isTranscriptRelevant = isTranscriptRelevantPrompt(trimmed, cleanTranscript, "code");
+    responseMode = isRepeatAsk ? "fresh_alternative" : "code_technical";
+    recommendedTemperature = isRepeatAsk ? 0.58 : 0.2;
+    extractedQuestion = null;
+
+    const imageNote = hasImage
+      ? "\n[Attached Screenshot]: Inspect the code, error, or diagram in the attached image directly."
+      : "";
+
+    const repeatNote = isRepeatAsk
+      ? "\n[Anti-Repetition Directive]: The user is asking again or requesting a different approach. Do NOT repeat your previous code or explanation — provide an alternative algorithm/implementation, deeper line-by-line walkthrough, concrete edge-case test, or optimization."
+      : "";
+
+    const followUpNote =
+      isFollowUp && !isRepeatAsk
+        ? "\n[Follow-Up Continuity]: Build directly on the code and explanation from the previous turn — do NOT re-explain what you already covered."
+        : "";
+
+    targetPrompt = `[Technical / Code Request]: "${trimmed}"${imageNote}${repeatNote}${followUpNote}
+[Task]: Directly understand, explain, debug, or implement what the user asked.
+- Start with the direct answer, root cause, or core idea in **bold**.
+- Use clean fenced Markdown code blocks with the proper language tag when showing code, fixes, or examples.
+- Include brief complexity or edge-case notes where helpful.`;
+
+    userMessageContent = `${targetPrompt}${
+      isTranscriptRelevant ? buildTranscriptBlock(false, true) : ""
+    }`;
+  }
+  // ------------------------------------------------------------------
+  // 4. Generic Live Assist ("Suggest Answer" / "What should I say?")
+  // ------------------------------------------------------------------
+  else if (isGeneric) {
+    intent = "suggest";
+    isTranscriptRelevant = true;
+
+    const activeSegmentText = delta.hasMeaningfulDelta ? delta.newTranscript : cleanTranscript;
+    const isLiveCodingPrompt = TRANSCRIPT_CODE_HINT_REGEX.test(activeSegmentText.slice(-1200));
+
+    if (delta.hasMeaningfulDelta) {
+      // Fresh speech arrived since last reply -> prioritize ONLY the new speech!
+      const focusItem = newQuestion || newTopic || fallbackQuestion || fallbackTopic;
+      extractedQuestion = focusItem;
+      responseMode = isLiveCodingPrompt ? "code_technical" : "spoken_teleprompter";
+      recommendedTemperature = isLiveCodingPrompt ? 0.25 : 0.35;
+
+      targetPrompt = `[NEW Live Conversation Moment]: Focus specifically on the NEW speech since your last reply — especially: "${focusItem}"
+[Task]: Deliver a direct, ready-to-use response for this NEW moment in the conversation.
+- Do NOT re-answer an older question from earlier in the meeting that was already handled.
+- ${
+        isLiveCodingPrompt
+          ? "This appears to be a live technical/coding prompt: give a crisp 1-2 sentence spoken intuition in **bold** FIRST, followed by clean fenced code and Big-O complexity."
+          : "State your core answer FIRST in **bold**, followed by 2 to 3 substantive, natural first-person speaking points."
+      }`;
+
+      userMessageContent = `${targetPrompt}${buildTranscriptBlock(true)}`;
+    } else if (isRepeatAsk) {
+      // User clicked "Suggest Answer" a 2nd time with NO new transcript -> MUST give a fresh, distinct response!
+      extractedQuestion = fallbackQuestion || fallbackTopic;
+      responseMode = "fresh_alternative";
+      recommendedTemperature = 0.68;
+
+      targetPrompt = `[Repeat Assist Request — Turn #${turnNumber}]: The user clicked "Suggest Answer" again on the same conversation point${
+        extractedQuestion ? ` ("${extractedQuestion}")` : ""
+      } with no new transcript speech yet.
+[STRICT Anti-Repetition Task]:
+- Look at your previous answer in the conversation history above. Do NOT repeat it, do NOT reuse its opening line, and do NOT just reword the exact same points.
+- Deliver a genuinely DIFFERENT, high-value alternative the user can say aloud directly in first person ("I...", "In one project...", "Another angle I focus on...") — NEVER give meta-coaching like "Frame your answer around..." or "Tell them...".
+- Pick a distinct angle from your prior reply, such as:
+  1. A concrete real-world example or metric-backed story illustrating the point, OR
+  2. A sharper, more concise alternative framing / deeper technical trade-off, OR
+  3. A smart follow-up question the user can ask back to lead the conversation.
+- Lead with the new spoken core point in **bold**, followed by 2 to 3 fresh first-person talking points.`;
+
+      userMessageContent = `${targetPrompt}${buildTranscriptBlock(true)}`;
+    } else if (fallbackQuestion) {
+      extractedQuestion = fallbackQuestion;
+      responseMode = isLiveCodingPrompt ? "code_technical" : "spoken_teleprompter";
+      recommendedTemperature = isLiveCodingPrompt ? 0.25 : 0.35;
+
+      targetPrompt = `[Recent Conversation Focus]: Look closely at the recent transcript below — especially around: "${fallbackQuestion}"
+[Task]: Identify the active question, prompt, or discussion point directed at the user and deliver the exact, direct answer immediately.
+- Note: The transcript contains all speakers. If a short question came from the user themselves, answer the broader point or question from the other participant instead.
+- ${
+        isLiveCodingPrompt
+          ? "Give a crisp spoken intuition FIRST in **bold**, followed by clean fenced code and complexity."
+          : "State your core answer FIRST in **bold**, followed by 2 to 3 substantive, natural first-person speaking points."
+      }`;
+
+      userMessageContent = `${targetPrompt}${buildTranscriptBlock(true)}`;
+    } else if (fallbackTopic) {
+      extractedQuestion = fallbackTopic;
+      responseMode = isLiveCodingPrompt ? "code_technical" : "spoken_teleprompter";
+      recommendedTemperature = 0.35;
+
+      targetPrompt = `[Active Discussion Context]: "${fallbackTopic}"
+[Task]: Review the recent transcript below and provide the strongest, most articulate response for this moment in the conversation.
+- State your core point or answer FIRST in **bold**.
+- Follow with 2 to 3 crisp, confident talking points with practical depth.`;
+
+      userMessageContent = `${targetPrompt}${buildTranscriptBlock(true)}`;
+    } else {
+      extractedQuestion = null;
+      responseMode = hasImage ? "screen_adaptive" : "spoken_teleprompter";
+      recommendedTemperature = 0.4;
+
+      targetPrompt = hasImage
+        ? `[Screen Visual Analysis]: Inspect what is actively displayed on screen and give the direct answer, code solution, or speaking points in **bold** first.`
+        : `[Task]: No transcript speech has been captured yet. Give 2 brief, natural opening talking points the user can use to kick off or clarify the agenda of the call.`;
+
+      userMessageContent = targetPrompt;
+    }
+  }
+  // ------------------------------------------------------------------
+  // 5. Conversational Follow-Up / Refinement / Pivot on Prior Turn
+  // ------------------------------------------------------------------
+  else if (isFollowUp) {
+    intent = "followup";
+    isTranscriptRelevant = isTranscriptRelevantPrompt(trimmed, cleanTranscript, "followup");
+    const wantsFresh = isRepeatAsk || EXPLICIT_ALTERNATIVE_REGEX.test(trimmed);
+    responseMode = wantsFresh ? "fresh_alternative" : "direct_analytical";
+    recommendedTemperature = wantsFresh ? 0.65 : 0.4;
+    extractedQuestion = null;
+
+    targetPrompt = `[User Follow-Up (Turn #${turnNumber})]: "${trimmed}"
+${hasImage ? "[Attached Screenshot]: Refer directly to the attached image.\n" : ""}[Task]: Build directly on the prior turns in conversation history to fulfill this exact follow-up request.
+- Do NOT repeat points you already gave in your previous reply — focus exclusively on the new angle, clarification, example, or refinement requested.
+- Lead with the key point in **bold**, adapting your format naturally (bullets, prose, table, or code block as needed).`;
+
+    userMessageContent = `${targetPrompt}${
+      isTranscriptRelevant ? buildTranscriptBlock(false, true) : ""
+    }`;
+  }
+  // ------------------------------------------------------------------
+  // 6. Custom Explicit User Question (Dynamic & Transcript-Aware Without Hijacking)
+  // ------------------------------------------------------------------
+  else {
+    intent = "custom";
+    isTranscriptRelevant = isTranscriptRelevantPrompt(trimmed, cleanTranscript, "custom");
+    responseMode = isRepeatAsk
+      ? "fresh_alternative"
+      : hasImage
+        ? "screen_adaptive"
+        : "direct_analytical";
+    recommendedTemperature = isRepeatAsk ? 0.65 : 0.35;
+    extractedQuestion = isTranscriptRelevant ? fallbackQuestion : null;
+
+    const repeatDirective = isRepeatAsk
+      ? `\n[STRICT Anti-Repetition Directive]: The user asked this same question again (Turn #${turnNumber}). Look at your previous answer in history — do NOT repeat it. Give a genuinely different, deeper, or alternative explanation, new examples, or a sharper angle.`
+      : "";
+
+    const transcriptInstruction = isTranscriptRelevant
+      ? "Use the relevant meeting transcript context below alongside conversation history."
+      : "Answer the user's exact question directly — ignore any unrelated background meeting chatter.";
+
+    targetPrompt = `[User Request]: "${trimmed}"
+${hasImage ? "[Attached Screenshot]: An active screenshot is attached — inspect and refer to it directly.\n" : ""}${repeatDirective}
+[Task]: ${transcriptInstruction}
+- State the direct answer FIRST in **bold**.
+- Adapt your structure naturally to what the user asked (concise points, explanation, comparison, or code if relevant).`;
+
+    userMessageContent = `${targetPrompt}${
+      isTranscriptRelevant
+        ? buildTranscriptBlock(true)
+        : cleanTranscript
+          ? buildTranscriptBlock(false, true)
+          : ""
+    }`;
   }
 
-  // Case 1: Generic assist button ("What should I say?") with an active question detected AND screen captured
-  if (isGeneric && lastQuestion && hasImage) {
-    return {
-      extractedQuestion: lastQuestion,
-      targetPrompt: `[Meeting Point / Active Question]: "${lastQuestion}"
-[Screen Visual Context Attached]: Refer to the active content on screen alongside the discussion.
-[Task]: Deliver the direct, first-person response to this point immediately.
-- State your core answer or position FIRST in bold.
-- Follow with 2 to 3 substantive, articulate speaking points tailored directly to the question and screen.
-- Deliver the exact words ready to speak aloud with confidence, avoiding robotic preambles.`,
-    };
-  }
-
-  // Case 2: Generic assist button ("What should I say?") with an active question detected (pure audio)
-  if (isGeneric && lastQuestion) {
-    return {
-      extractedQuestion: lastQuestion,
-      targetPrompt: `[Meeting Point / Active Question]: "${lastQuestion}"
-[Task]: Deliver the direct, first-person response to this question immediately.
-- State your core answer or position FIRST in bold.
-- Follow with 2 to 3 articulate, well-reasoned speaking points directly answering the question.
-- Deliver the exact words ready to speak aloud with confidence, avoiding robotic preambles.`,
-    };
-  }
-
-  // Case 3: Visual inspection requested or image attached with generic prompt
-  if (hasImage && isGeneric) {
-    return {
-      extractedQuestion: "Screen Visual Analysis",
-      targetPrompt: `[Screen Visual Analysis]: Analyze what is actively displayed on screen.
-- State the core finding, solution, or direct answer FIRST in bold.
-- Provide 2 to 3 crisp, articulate speaking points ready to read aloud.
-- Ground the answer in the specific content visible on the screen.`,
-    };
-  }
-
-  // Case 4: Generic assist button with recent discussion topic (no explicit '?')
-  if (isGeneric && recentTopic) {
-    return {
-      extractedQuestion: recentTopic,
-      targetPrompt: `[Active Discussion Context]: "${recentTopic}"
-[Task]: The participants just finished discussing this. Provide the optimal, articulate speaking response to address and build on this topic directly.
-- State your core response or insight FIRST in bold.
-- Follow with 2 to 3 crisp, confident talking points with practical real-world depth.`,
-    };
-  }
-
-  // Case 5: Specific user prompt (e.g., custom typed question)
-  const cleanedPrompt = rawPrompt.replace(/^(it is asking me that|can you explain|explain|tell me)\s*/i, '').trim();
-  
-  if (lastQuestion) {
-    return {
-      extractedQuestion: lastQuestion,
-      targetPrompt: `[Active Discussion Context]: "${lastQuestion}"
-[User Request]: "${cleanedPrompt}"
-${hasImage ? '[Screen Context]: Refer to the content visible on screen to ground this answer.' : ''}
-[Task]: Provide the exact, first-person answer directly addressing this topic. State the core answer in bold, followed by 2 to 3 clear points.`,
-    };
-  }
+  const systemPrompt = buildDynamicSystemPrompt(responseMode, options.customContext);
 
   return {
-    extractedQuestion: null,
-    targetPrompt: cleanedPrompt,
+    intent,
+    responseMode,
+    targetPrompt,
+    systemPrompt,
+    userMessageContent,
+    extractedQuestion,
+    isRepeatAsk,
+    isFollowUp,
+    isCodeRelated: isCode || responseMode === "code_technical",
+    isTranscriptRelevant,
+    hasTranscriptDelta: delta.hasMeaningfulDelta,
+    recommendedTemperature,
+    turnNumber,
   };
 }
 
 /**
- * Synthesizes a structured, substantive fallback response whenever all remote models fail or device is offline.
- * NEVER returns dismissive phrases like "I'm listening" and NEVER returns identical static strings.
+ * Minimal honest fallback retained only for legacy imports — live chat surfaces real retryable errors instead.
  */
 export function synthesizeIntelligentFallback(params: {
   prompt: string;
@@ -210,83 +1011,9 @@ export function synthesizeIntelligentFallback(params: {
   customContext?: string;
   hasImage?: boolean;
 }): string {
-  const { prompt, transcript, customContext, hasImage } = params;
-  const lastQuestion = extractLastQuestion(transcript);
-  const recentTopic = extractRecentTopic(transcript);
-  const cleanPrompt = prompt.replace(/^(it is asking me that|can you explain|explain|tell me)\s*/i, '').trim();
-
-  // Extract real topics from the active transcript
-  const transcriptLines = (transcript || '')
-    .split(/(?<=[.?!])\s+|\n+/)
-    .map(s => cleanSentence(s))
-    .filter(s => s.length > 15);
-
-  const keyTranscriptPoint = transcriptLines.length > 0 
-    ? transcriptLines[transcriptLines.length - 1] 
-    : null;
-  const secondTranscriptPoint = transcriptLines.length > 1 
-    ? transcriptLines[transcriptLines.length - 2] 
-    : null;
-
-  // Check user intent from prompt
-  const isRecap = /\b(recap|summarize|summary|what was (just )?said|repeat)\b/i.test(prompt);
-
-  // 1. If user asks for a Quick Recap
-  if (isRecap) {
-    if (keyTranscriptPoint) {
-      return `**2-Bullet Meeting Recap:**
-• **Current Focus**: ${keyTranscriptPoint}
-• **Context & Priority**: ${secondTranscriptPoint || "Aligning on core objectives, expectations, and next steps."}
-
-**Ready-to-Speak Response:**
-"To summarize where we are: we are focusing on ${keyTranscriptPoint.slice(0, 100)}, and our priority is ensuring the deliverables are clear, verified, and executed seamlessly."`;
-    }
-    return `**2-Bullet Meeting Recap:**
-• **Core Discussion**: Reviewing current requirements, scope, and key deliverables.
-• **Current Priority**: Ensuring alignment, predictable execution, and immediate next steps.
-
-**Ready-to-Speak Response:**
-"We are aligned on the core objectives and are now focusing on finalizing the exact implementation and execution details."`;
-  }
-
-  // 2. Direct answer to an extracted interview question or topic
-  if (lastQuestion) {
-    return `**Direct Answer to Meeting Point:**
-"Regarding **${lastQuestion.slice(0, 120)}**: my perspective is centered on structured execution, evidence-based rigor, and clear communication."
-
-**Key Speaking Highlights:**
-• **Direct Approach**: Address the core requirement with proven methodology and practical application.
-• **Execution & Quality**: Emphasize safety, reliability, and measured outcomes.
-• **Next Action**: Propose the recommended path forward and invite collaborative feedback.`;
-  }
-
-  // 3. Visual Screen Analysis (ONLY if explicitly requested and image is present)
-  if (hasImage) {
-    return `**Visual Screen Analysis:**
-"Reviewing what is actively displayed on screen: the primary focus is aligning on the active material and verifying core points."
-
-**Key Discussion Points:**
-• **Active Content**: Focus directly on the critical elements and priorities presented on screen.
-• **Execution**: Ensure expectations, constraints, and actionable deliverables are clearly addressed.
-• **Next Action**: Walk through the recommendations step-by-step and confirm alignment with the team.`;
-  }
-
-  // 4. Response to a recent discussion topic or general speaking point
-  if (recentTopic) {
-    return `**Suggested Speaking Response:**
-"Building directly on what was just mentioned regarding **${recentTopic.slice(0, 90)}**: our priority should be ensuring high quality, clear ownership, and reliable outcomes."
-
-**Core Discussion Points:**
-• **Primary Focus**: Maintain alignment on immediate goals and validate key parameters upfront.
-• **Actionable Next Step**: Confirm consensus on the proposed direction and proceed with execution.`;
-  }
-
-  // 5. General Prompt Fallback
-  return `**Direct Answer for "${cleanPrompt.slice(0, 80)}":**
-"To address this directly: our approach is built on structured methodology, clear priorities, and measurable outcomes."
-
-**Speaking Highlights:**
-• **Primary Principle**: Deliver a clean, effective solution that satisfies the core requirements.
-• **Reliability & Execution**: Guard against risks with disciplined validation and clear communication.
-• **Next Step**: State the trade-offs clearly and invite questions on the implementation details.`;
+  const { transcript } = params;
+  const recent = extractRecentTopic(transcript);
+  return recent
+    ? `Connection interrupted before AI could respond. Recent transcript captured: "${recent.slice(0, 160)}". Please tap Retry.`
+    : "Connection interrupted before AI could respond. Please tap Retry.";
 }

@@ -5,8 +5,18 @@ import { apiBase } from "@/lib/platform";
 import { recordDeviceSession } from "@/lib/device-fingerprint";
 import { copyToClipboard } from "@/lib/clipboard";
 
-const SILENCE_THRESHOLD = 5; // Very low volume threshold (0-255 scale)
-const SILENCE_DURATION = 2000; // 2 seconds of silence before pausing
+const SPEECH_ENERGY_THRESHOLD = 6; // Avg frequency magnitude (0-255) indicating actual audio activity
+const SEGMENT_DURATION_MS = 8000; // Rotate self-contained ~60KB WebM segments every 8 seconds
+
+export type TranscriptionHealth = "idle" | "listening" | "syncing" | "degraded";
+
+function getSupportedAudioMimeType(): string {
+  if (typeof MediaRecorder === "undefined") return "audio/webm";
+  if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) return "audio/webm;codecs=opus";
+  if (MediaRecorder.isTypeSupported("audio/webm")) return "audio/webm";
+  if (MediaRecorder.isTypeSupported("audio/mp4")) return "audio/mp4";
+  return "";
+}
 
 export function useAudioRecorder() {
   const { user } = useUser();
@@ -14,618 +24,729 @@ export function useAudioRecorder() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isPausedBySilence, setIsPausedBySilence] = useState(false);
   const [transcript, setTranscript] = useState("");
+  const [transcriptionHealth, setTranscriptionHealth] = useState<TranscriptionHealth>("idle");
+  const [systemAudioActive, setSystemAudioActive] = useState(false);
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<BlobPart[]>([]);
+  const activeRecorderRef = useRef<MediaRecorder | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const displayStreamRef = useRef<MediaStream | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const vadLoopRef = useRef<number | null>(null);
+  const finalStreamRef = useRef<MediaStream | null>(null);
+  const mixAudioCtxRef = useRef<AudioContext | null>(null);
+  const vadAudioCtxRef = useRef<AudioContext | null>(null);
+  const vadTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const rotateTimerRef = useRef<NodeJS.Timeout | null>(null);
   const recognitionRef = useRef<any>(null);
+
   const isRecordingRef = useRef<boolean>(false);
   const shouldRestartRecognitionRef = useRef<boolean>(true);
-  const startTimeRef = useRef<number>(0);
-  const liveTranscribeTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const isTranscribingLiveRef = useRef<boolean>(false);
-  const lastProcessedChunkCountRef = useRef<number>(0);
+  const sessionStartMsRef = useRef<number>(0);
+  const sessionTypeRef = useRef<"dictation" | "meeting">("dictation");
 
-  const triggerLiveWhisperTranscribe = async () => {
-    if (isTranscribingLiveRef.current || !isRecordingRef.current) return;
-    if (chunksRef.current.length < 3) return; // Wait for at least ~3 seconds of initial audio
-    if (chunksRef.current.length <= lastProcessedChunkCountRef.current) return;
+  // Ordered rolling segment store: guarantees out-of-order network responses never scramble transcript
+  const segmentIndexRef = useRef<number>(0);
+  const committedSegmentsRef = useRef<Map<number, string>>(new Map());
+  const pendingUploadsRef = useRef<Set<Promise<void>>>(new Set());
+  const segmentHadSpeechRef = useRef<boolean>(false);
+  const interimTextRef = useRef<string>("");
+  const consecutiveFailuresRef = useRef<number>(0);
 
-    isTranscribingLiveRef.current = true;
-    lastProcessedChunkCountRef.current = chunksRef.current.length;
+  const buildCombinedLiveTranscript = useCallback(() => {
+    const entries = Array.from(committedSegmentsRef.current.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([, text]) => text.trim())
+      .filter(Boolean);
 
-    try {
-      const mimeType = typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : "audio/webm";
+    const committed = entries.join("\n\n");
+    const interim = interimTextRef.current.trim();
 
-      // ALWAYS build blob from chunk 0 so the WebM EBML header and track metadata are preserved!
-      // Slicing mid-stream strips the header, causing Whisper to fail after 30 seconds.
-      const currentBlob = new Blob(chunksRef.current, { type: mimeType });
-      const formData = new FormData();
-      formData.append("file", currentBlob, "live-recording.webm");
+    // Show browser interim preview ONLY as a live trailing line so it never clobbers Whisper's committed history
+    if (interim && (!committed || !committed.toLowerCase().endsWith(interim.toLowerCase().slice(-24)))) {
+      return committed ? `${committed}\n\n... ${interim}` : interim;
+    }
+    return committed;
+  }, []);
 
-      const base = apiBase();
-      const transcribeUrl = base ? `${base}/api/transcribe` : "/api/transcribe";
+  const broadcastTranscript = useCallback((nextText: string, reset = false) => {
+    setTranscript(nextText);
+    if (typeof window !== "undefined") {
+      try {
+        if (reset && !nextText) {
+          localStorage.removeItem("voiceflow_live_transcript");
+          localStorage.removeItem("voiceflow_current_meeting_backup");
+        } else if (nextText) {
+          localStorage.setItem("voiceflow_live_transcript", nextText);
+          localStorage.setItem(
+            "voiceflow_current_meeting_backup",
+            JSON.stringify({
+              transcript: nextText,
+              updatedAt: new Date().toISOString(),
+              startTime: sessionStartMsRef.current,
+            })
+          );
+        }
+      } catch {
+        // ignore storage quota
+      }
+      window.dispatchEvent(
+        new CustomEvent("voiceflow-live-transcript", {
+          detail: { transcript: nextText, reset },
+        })
+      );
+    }
+  }, []);
 
-      const res = await fetch(transcribeUrl, {
-        method: "POST",
-        body: formData,
-        signal: AbortSignal.timeout(15000),
-      });
+  const uploadSegmentToWhisper = useCallback(
+    (blob: Blob, segIdx: number, offsetSeconds: number, hadSpeech: boolean) => {
+      // Skip tiny/empty blobs or purely silent windows to avoid Whisper hallucinations and save quota
+      if (blob.size < 1500) return Promise.resolve();
+      if (!hadSpeech && segIdx > 0) return Promise.resolve();
 
-      if (res.ok) {
-        const data = await res.json();
-        const liveText = (data.formattedTranscript || data.text || "").trim();
-        if (liveText && isRecordingRef.current) {
-          setTranscript(liveText);
-          if (typeof window !== 'undefined') {
-            try {
-              localStorage.setItem('voiceflow_live_transcript', liveText);
-              localStorage.setItem('voiceflow_current_meeting_backup', JSON.stringify({
-                transcript: liveText,
-                updatedAt: new Date().toISOString(),
-                startTime: startTimeRef.current,
-              }));
-            } catch (e) {}
-            window.dispatchEvent(new CustomEvent('voiceflow-live-transcript', { detail: { transcript: liveText } }));
+      const task = (async () => {
+        setTranscriptionHealth("syncing");
+        const base = apiBase();
+        const transcribeUrl = base ? `${base}/api/transcribe` : "/api/transcribe";
+
+        const formData = new FormData();
+        formData.append("file", blob, `segment-${segIdx}.webm`);
+        formData.append("offsetSeconds", String(Math.max(0, Math.round(offsetSeconds))));
+
+        try {
+          const res = await fetch(transcribeUrl, {
+            method: "POST",
+            body: formData,
+            signal: AbortSignal.timeout(25000),
+          });
+
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+          }
+
+          const data = await res.json();
+          const segmentText = (data.formattedTranscript || data.text || "").trim();
+          consecutiveFailuresRef.current = 0;
+          setTranscriptionHealth("listening");
+
+          if (segmentText) {
+            committedSegmentsRef.current.set(segIdx, segmentText);
+            // Clear stale interim preview once Whisper commits real text
+            interimTextRef.current = "";
+            broadcastTranscript(buildCombinedLiveTranscript());
+          }
+        } catch (err) {
+          consecutiveFailuresRef.current += 1;
+          console.warn(`Live transcription segment #${segIdx} failed:`, err);
+          if (consecutiveFailuresRef.current >= 2) {
+            setTranscriptionHealth("degraded");
           }
         }
-      }
-    } catch (err) {
-      console.warn("Live transcription slice skipped:", err);
-    } finally {
-      isTranscribingLiveRef.current = false;
-    }
-  };
+      })();
 
-  const startRecording = useCallback(async (captureSystemAudio = false) => {
-    try {
-      startTimeRef.current = Date.now();
-      // 1. Get Microphone Audio (reuse healthy stream if already open to prevent permission prompts)
-      // Note: echoCancellation: false is critical so laptop/desktop speaker audio isn't cancelled out by the OS
-      let micStream = micStreamRef.current;
-      const isStreamActive = micStream && micStream.getAudioTracks().some(track => track.readyState === 'live');
-      
-      if (!isStreamActive) {
-        micStream = await navigator.mediaDevices.getUserMedia({ 
+      pendingUploadsRef.current.add(task);
+      task.finally(() => pendingUploadsRef.current.delete(task));
+      return task;
+    },
+    [broadcastTranscript, buildCombinedLiveTranscript]
+  );
+
+  // Starts a self-contained MediaRecorder for one rolling window (~8s = ~64KB valid WebM with EBML header)
+  const spawnSegmentRecorder = useCallback(
+    (stream: MediaStream, mimeType: string) => {
+      const segIdx = segmentIndexRef.current++;
+      const segStartMs = Date.now();
+      const offsetSeconds = Math.max(0, (segStartMs - sessionStartMsRef.current) / 1000);
+      const localChunks: BlobPart[] = [];
+      let localHadSpeech = false;
+
+      // Capture speech flag for this window right before rotation
+      segmentHadSpeechRef.current = false;
+
+      const options: MediaRecorderOptions = { audioBitsPerSecond: 64000 };
+      if (mimeType) options.mimeType = mimeType;
+
+      const recorder = new MediaRecorder(stream, options);
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          localChunks.push(e.data);
+        }
+        if (segmentHadSpeechRef.current) {
+          localHadSpeech = true;
+        }
+      };
+
+      recorder.onstop = () => {
+        if (segmentHadSpeechRef.current) {
+          localHadSpeech = true;
+        }
+        if (localChunks.length > 0) {
+          const segmentBlob = new Blob(localChunks, { type: mimeType || "audio/webm" });
+          void uploadSegmentToWhisper(segmentBlob, segIdx, offsetSeconds, localHadSpeech || segIdx === 0);
+        }
+      };
+
+      recorder.start(1000);
+      activeRecorderRef.current = recorder;
+      return recorder;
+    },
+    [uploadSegmentToWhisper]
+  );
+
+  const releaseAllMediaResources = useCallback(() => {
+    if (rotateTimerRef.current) {
+      clearInterval(rotateTimerRef.current);
+      rotateTimerRef.current = null;
+    }
+    if (vadTimerRef.current) {
+      clearInterval(vadTimerRef.current);
+      vadTimerRef.current = null;
+    }
+    if (recognitionRef.current) {
+      shouldRestartRecognitionRef.current = false;
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        // ignore
+      }
+      recognitionRef.current = null;
+    }
+    if (vadAudioCtxRef.current) {
+      vadAudioCtxRef.current.close().catch(() => {});
+      vadAudioCtxRef.current = null;
+    }
+    if (mixAudioCtxRef.current) {
+      mixAudioCtxRef.current.close().catch(() => {});
+      mixAudioCtxRef.current = null;
+    }
+    if (displayStreamRef.current) {
+      displayStreamRef.current.getTracks().forEach((t) => t.stop());
+      displayStreamRef.current = null;
+    }
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach((t) => t.stop());
+      micStreamRef.current = null;
+    }
+    finalStreamRef.current = null;
+    setSystemAudioActive(false);
+  }, []);
+
+  const finalizeAndSaveMeeting = useCallback(
+    async (type: "dictation" | "meeting", elapsedSecs: number) => {
+      setIsProcessing(true);
+      if (typeof window !== "undefined") {
+        localStorage.setItem("voiceflow_is_processing", "true");
+        window.dispatchEvent(new CustomEvent("voiceflow-processing-state", { detail: { isProcessing: true } }));
+      }
+
+      let savedMeetingId: string | null = null;
+      let combinedTranscript = "";
+
+      try {
+        // Wait for the final segment recorder's onstop & any in-flight Whisper uploads (bounded to 15s)
+        await new Promise((r) => setTimeout(r, 350));
+        if (pendingUploadsRef.current.size > 0) {
+          await Promise.race([
+            Promise.allSettled(Array.from(pendingUploadsRef.current)),
+            new Promise((r) => setTimeout(r, 15000)),
+          ]);
+        }
+
+        const committedOnly = Array.from(committedSegmentsRef.current.entries())
+          .sort((a, b) => a[0] - b[0])
+          .map(([, text]) => text.trim())
+          .filter(Boolean)
+          .join("\n\n");
+
+        const fallbackInterim = interimTextRef.current.trim();
+        const newTranscript = committedOnly || fallbackInterim || "";
+
+        // Check if resuming an existing meeting session
+        const resumeMeetingId = typeof window !== "undefined" ? localStorage.getItem("voiceflow_resume_meeting_id") : null;
+        const prevTranscript = typeof window !== "undefined" ? localStorage.getItem("voiceflow_resume_previous_transcript") || "" : "";
+        const prevDuration = typeof window !== "undefined" ? parseInt(localStorage.getItem("voiceflow_resume_previous_duration") || "0", 10) : 0;
+
+        combinedTranscript =
+          resumeMeetingId && prevTranscript
+            ? `${prevTranscript}\n\n${newTranscript}`.trim()
+            : newTranscript.trim();
+
+        if (!combinedTranscript) {
+          combinedTranscript =
+            (typeof window !== "undefined" ? localStorage.getItem("voiceflow_live_transcript") || "" : "").trim();
+        }
+
+        const sessionDuration = Math.max(1, elapsedSecs);
+        const totalDurationSeconds = resumeMeetingId ? prevDuration + sessionDuration : sessionDuration;
+        const totalDurationMinutes = Math.max(1, Math.round(totalDurationSeconds / 60));
+
+        // Extract current widget chat messages & assists (stripped of heavy base64)
+        let currentChatMessages: any[] = [];
+        let currentAssists: any[] = [];
+        try {
+          const rawChat = typeof window !== "undefined" ? localStorage.getItem("voiceflow_widget_messages") : null;
+          if (rawChat) {
+            currentChatMessages = JSON.parse(rawChat);
+            if (Array.isArray(currentChatMessages)) {
+              for (let i = 0; i < currentChatMessages.length; i++) {
+                const u = currentChatMessages[i];
+                const a = currentChatMessages[i + 1];
+                if (u && a && u.sender === "user" && a.sender === "ai" && !a.isError) {
+                  currentAssists.push({
+                    prompt: u.text,
+                    type: "Assist",
+                    response: a.text,
+                    timestamp: u.timestamp || a.timestamp,
+                  });
+                  i++;
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("Could not parse widget messages for meeting save:", e);
+        }
+
+        // Derive clean initial title
+        const activeTitle = typeof window !== "undefined" ? localStorage.getItem("voiceflow_active_meeting_title") : null;
+        const cleanFirstLine = combinedTranscript
+          .replace(/^\[\d+:\d+\]\s*/gm, "")
+          .split("\n")
+          .map((l) => l.trim())
+          .find((l) => l.length > 5) || "";
+
+        const derivedTitle =
+          activeTitle ||
+          (cleanFirstLine.length > 5
+            ? cleanFirstLine.length > 52
+              ? `${cleanFirstLine.slice(0, 49)}...`
+              : cleanFirstLine
+            : `Meeting Session (${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })})`);
+
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("voiceflow_active_meeting_title");
+        }
+
+        // --- PHASE 1 IMMEDIATE SAVE ---
+        if (user?.uid && (combinedTranscript || currentChatMessages.length > 0)) {
+          if (resumeMeetingId) {
+            savedMeetingId = resumeMeetingId;
+            const { updateMeeting } = await import("@/firebase/meetings");
+            await updateMeeting(
+              resumeMeetingId,
+              {
+                transcript: combinedTranscript,
+                durationSeconds: totalDurationSeconds,
+                durationMinutes: totalDurationMinutes,
+                chatMessages: currentChatMessages,
+                assists: currentAssists,
+                status: "summarizing",
+              },
+              user.uid
+            );
+          } else {
+            savedMeetingId = await saveMeeting({
+              userId: user.uid,
+              title: derivedTitle,
+              transcript: combinedTranscript,
+              summary: "Generating executive AI summary...",
+              durationSeconds: totalDurationSeconds,
+              durationMinutes: totalDurationMinutes,
+              type,
+              chatMessages: currentChatMessages,
+              assists: currentAssists,
+            });
+          }
+
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new CustomEvent("voiceflow-meeting-saved"));
+          }
+        }
+
+        // --- PHASE 2 SUMMARIZE ---
+        const base = apiBase();
+        const summarizeUrl = base ? `${base}/api/summarize` : "/api/summarize";
+        const customContext = typeof window !== "undefined" ? localStorage.getItem("voiceflow_custom_context") || "" : "";
+        let finalOutput = "";
+        let aiTitle = "";
+
+        if (combinedTranscript.length >= 15) {
+          try {
+            const summarizeRes = await fetch(summarizeUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                text: combinedTranscript,
+                type,
+                customContext,
+              }),
+              signal: AbortSignal.timeout(35000),
+            });
+
+            if (summarizeRes.ok) {
+              const summarizeData = await summarizeRes.json();
+              finalOutput = summarizeData.text || "";
+              aiTitle = summarizeData.title || "";
+            }
+          } catch (sumErr) {
+            console.warn("Remote summarization failed, using local summary:", sumErr);
+          }
+        }
+
+        if (!finalOutput || !finalOutput.trim()) {
+          if (combinedTranscript) {
+            const sentences = combinedTranscript
+              .replace(/\[\d+:\d+\]\s*/g, "")
+              .split(/(?<=[.!?])\s+/)
+              .filter((s) => s.trim().length > 15);
+            const lead = sentences.slice(0, 2).join(" ") || combinedTranscript.slice(0, 200);
+            const keyPoints = sentences.slice(2, 6);
+            finalOutput = `## Executive Summary\n${lead}\n\n## Key Takeaways\n`;
+            if (keyPoints.length > 0) {
+              keyPoints.forEach((kp) => {
+                finalOutput += `• **Discussion Point**: ${kp.trim()}\n`;
+              });
+            } else {
+              finalOutput += `• **Discussion Point**: ${combinedTranscript.slice(0, 250).trim()}\n`;
+            }
+          } else {
+            finalOutput = "## Executive Summary\nNo spoken audio was detected during this session.";
+          }
+        }
+
+        // Update saved meeting with summary (do NOT overwrite live transcript state with summary)
+        if (user?.uid && savedMeetingId) {
+          const { updateMeeting } = await import("@/firebase/meetings");
+          const updatePayload: any = {
+            summary: finalOutput,
+            status: "completed",
+          };
+          if (!activeTitle && aiTitle && aiTitle.length > 5 && !resumeMeetingId) {
+            updatePayload.title = aiTitle;
+          }
+          await updateMeeting(savedMeetingId, updatePayload, user.uid);
+
+          try {
+            const { getFirestore, doc, updateDoc, increment } = await import("firebase/firestore");
+            const db = getFirestore();
+            await updateDoc(doc(db, "users", user.uid), {
+              sessionCount: increment(resumeMeetingId ? 0 : 1),
+              usedMinutes: increment(Math.max(1, Math.round(sessionDuration / 60))),
+            });
+            recordDeviceSession(db, sessionDuration).catch(() => {});
+          } catch (planErr) {
+            console.warn("Could not increment user usage in firestore:", planErr);
+          }
+        }
+
+        if (typeof window !== "undefined") {
+          const curSessions = parseInt(localStorage.getItem("voiceflow_session_count") || "0", 10);
+          const curMins = parseInt(localStorage.getItem("voiceflow_used_minutes") || "0", 10);
+          if (!resumeMeetingId) {
+            localStorage.setItem("voiceflow_session_count", String(curSessions + 1));
+          }
+          localStorage.setItem("voiceflow_used_minutes", String(curMins + Math.max(1, Math.round(sessionDuration / 60))));
+          window.dispatchEvent(new CustomEvent("voiceflow-usage-updated"));
+          window.dispatchEvent(new CustomEvent("voiceflow-meeting-saved"));
+        }
+
+        if (resumeMeetingId && typeof window !== "undefined") {
+          localStorage.removeItem("voiceflow_resume_meeting_id");
+          localStorage.removeItem("voiceflow_resume_meeting_title");
+          localStorage.removeItem("voiceflow_resume_previous_transcript");
+          localStorage.removeItem("voiceflow_resume_previous_duration");
+          localStorage.removeItem("voiceflow_resume_chat_messages");
+          localStorage.removeItem("voiceflow_auto_start_record");
+          window.location.href = `/dashboard/meeting?id=${resumeMeetingId}`;
+        }
+
+        if (type === "dictation" && finalOutput) {
+          await copyToClipboard(finalOutput);
+        }
+      } catch (err) {
+        console.error("Meeting finalization error:", err);
+      } finally {
+        setIsProcessing(false);
+        setTranscriptionHealth("idle");
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("voiceflow_is_processing");
+          window.dispatchEvent(new CustomEvent("voiceflow-processing-state", { detail: { isProcessing: false } }));
+        }
+      }
+    },
+    [user?.uid]
+  );
+
+  const startRecording = useCallback(
+    async (captureSystemAudio = false) => {
+      if (isRecordingRef.current) return;
+
+      try {
+        // Reset session state cleanly BEFORE starting so zero stale context leaks from prior sessions
+        sessionStartMsRef.current = Date.now();
+        segmentIndexRef.current = 0;
+        committedSegmentsRef.current = new Map();
+        pendingUploadsRef.current = new Set();
+        segmentHadSpeechRef.current = false;
+        interimTextRef.current = "";
+        consecutiveFailuresRef.current = 0;
+        setTranscriptionHealth("listening");
+        broadcastTranscript("", true);
+
+        let hasSystemAudio = false;
+        let displayStream: MediaStream | null = null;
+
+        // 1. Optional System / Tab Call Audio (must be requested during user click gesture)
+        if (captureSystemAudio && typeof navigator !== "undefined" && navigator.mediaDevices?.getDisplayMedia) {
+          try {
+            displayStream = await navigator.mediaDevices.getDisplayMedia({
+              video: true, // required by browser spec to expose audio checkbox
+              audio: {
+                echoCancellation: false,
+                noiseSuppression: false,
+                autoGainControl: false,
+              } as any,
+            });
+            displayStreamRef.current = displayStream;
+            // Immediately stop the video track so no screen-share indicator stays unnecessarily heavy
+            displayStream.getVideoTracks().forEach((t) => t.stop());
+            hasSystemAudio = displayStream.getAudioTracks().length > 0;
+          } catch (e) {
+            console.info("System audio share skipped by user, proceeding with microphone:", e);
+          }
+        }
+
+        setSystemAudioActive(hasSystemAudio);
+        sessionTypeRef.current = hasSystemAudio ? "meeting" : "dictation";
+
+        // 2. Request Microphone Audio ONLY when recording starts (never permanently locked on mount!)
+        // When system audio is captured directly, enable echoCancellation on mic so speakers don't double-record.
+        // When mic-only, disable echoCancellation so speakers can still be picked up if user isn't on headphones.
+        const micStream = await navigator.mediaDevices.getUserMedia({
           audio: {
-            echoCancellation: false,
-            noiseSuppression: false,
+            echoCancellation: hasSystemAudio,
+            noiseSuppression: hasSystemAudio,
             autoGainControl: true,
-          } 
+          },
         });
         micStreamRef.current = micStream;
-      }
 
-      let finalStream = micStream!;
-
-      // 2. Combine with System Audio (if user explicitly requested and supported)
-      if (captureSystemAudio && navigator.mediaDevices?.getDisplayMedia) {
-        try {
-          const displayStream = await navigator.mediaDevices.getDisplayMedia({
-            video: true, // required by browser spec to get display media
-            audio: true,
-          });
-          displayStreamRef.current = displayStream;
-          
-          const audioContext = new AudioContext();
-          const dest = audioContext.createMediaStreamDestination();
-          
-          const micSource = audioContext.createMediaStreamSource(micStream!);
-          micSource.connect(dest);
-
-          // Check if user actually shared audio
-          if (displayStream.getAudioTracks().length > 0) {
-            const sysSource = audioContext.createMediaStreamSource(displayStream);
-            sysSource.connect(dest);
-          }
-          
+        let finalStream: MediaStream = micStream;
+        if (hasSystemAudio && displayStream) {
+          const mixCtx = new AudioContext();
+          mixAudioCtxRef.current = mixCtx;
+          const dest = mixCtx.createMediaStreamDestination();
+          mixCtx.createMediaStreamSource(micStream).connect(dest);
+          mixCtx.createMediaStreamSource(displayStream).connect(dest);
           finalStream = dest.stream;
-
-          // Keep display stream around to stop video tracks immediately
-          displayStream.getVideoTracks().forEach(track => {
-             track.stop();
-          });
-        } catch (e) {
-          console.info("System audio share cancelled or not provided, proceeding with microphone:", e);
         }
-      }
+        finalStreamRef.current = finalStream;
 
-      streamRef.current = finalStream;
-      chunksRef.current = [];
-      lastProcessedChunkCountRef.current = 0;
+        const mimeType = getSupportedAudioMimeType();
 
-      const mimeType = typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : "audio/webm";
+        // 3. Start rolling self-contained segment recorder (8s windows = ~60KB each, scales to hours without 413!)
+        isRecordingRef.current = true;
+        setIsRecording(true);
+        setIsPausedBySilence(false);
 
-      const mediaRecorder = new MediaRecorder(finalStream, { 
-        mimeType,
-        audioBitsPerSecond: 64000 // Voice-optimized 64kbps Opus for lightweight fast uploads
-      });
-      mediaRecorderRef.current = mediaRecorder;
-
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          chunksRef.current.push(e.data);
+        if (typeof window !== "undefined") {
+          try {
+            localStorage.setItem("voiceflow_is_recording", "true");
+            window.dispatchEvent(new CustomEvent("voiceflow-record-state", { detail: { isRecording: true } }));
+          } catch {
+            // ignore
+          }
         }
-      };
 
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(chunksRef.current, { type: "audio/webm" });
-        const elapsedSecs = Math.max(1, Math.round((Date.now() - (startTimeRef.current || Date.now())) / 1000));
-        await processAudio(audioBlob, captureSystemAudio ? "meeting" : "dictation", elapsedSecs);
-      };
+        spawnSegmentRecorder(finalStream, mimeType);
 
-      mediaRecorder.start(1000); // chunk every second
-      setIsRecording(true);
-      isRecordingRef.current = true;
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.setItem('voiceflow_is_recording', 'true');
-          window.dispatchEvent(new CustomEvent('voiceflow-record-state', { detail: { isRecording: true } }));
-        } catch (e) {}
-      }
-      shouldRestartRecognitionRef.current = true;
-      setIsPausedBySilence(false);
-      setTranscript("");
-
-      // Start periodic live Whisper transcription every 5 seconds
-      if (liveTranscribeTimerRef.current) clearInterval(liveTranscribeTimerRef.current);
-      liveTranscribeTimerRef.current = setInterval(triggerLiveWhisperTranscribe, 5000);
-
-      // --- Real-Time Speech Recognition Setup (local fast bonus when supported) ---
-      const SpeechRecognitionAPI = typeof window !== "undefined" && ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
-      if (SpeechRecognitionAPI) {
-        try {
-          const recognition = new SpeechRecognitionAPI();
-          recognition.continuous = true;
-          recognition.interimResults = true;
-          recognition.lang = "en-US";
-
-          let finalTranscript = "";
-
-          recognition.onresult = (event: any) => {
-            let interimTranscript = "";
-            for (let i = event.resultIndex; i < event.results.length; ++i) {
-              if (event.results[i].isFinal) {
-                finalTranscript += event.results[i][0].transcript + " ";
-              } else {
-                interimTranscript += event.results[i][0].transcript;
-              }
+        // Rotate recorder cleanly every 8 seconds: start next BEFORE stopping previous so 0ms audio is lost!
+        rotateTimerRef.current = setInterval(() => {
+          if (!isRecordingRef.current || !finalStreamRef.current) return;
+          const previousRecorder = activeRecorderRef.current;
+          spawnSegmentRecorder(finalStreamRef.current, mimeType);
+          if (previousRecorder && previousRecorder.state !== "inactive") {
+            try {
+              previousRecorder.stop();
+            } catch {
+              // ignore
             }
-            const currentText = (finalTranscript + interimTranscript).trim();
-            if (currentText) {
-              setTranscript(currentText);
-              if (typeof window !== 'undefined') {
-                try {
-                  localStorage.setItem('voiceflow_live_transcript', currentText);
-                  // Also maintain an ongoing emergency backup of the current meeting in progress
-                  localStorage.setItem('voiceflow_current_meeting_backup', JSON.stringify({
-                    transcript: currentText,
-                    updatedAt: new Date().toISOString(),
-                    startTime: startTimeRef.current,
-                  }));
-                } catch (e) {}
-                window.dispatchEvent(new CustomEvent('voiceflow-live-transcript', { detail: { transcript: currentText } }));
-              }
-            }
-          };
+          }
+        }, SEGMENT_DURATION_MS);
 
-          recognition.onerror = (event: any) => {
-            if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-              shouldRestartRecognitionRef.current = false;
-              console.info(`SpeechRecognition disabled (${event.error}). Recording continues via Whisper AI.`);
+        // 4. Lightweight 10Hz Speech Activity Detector (no 60fps React re-renders!)
+        try {
+          const vadCtx = new AudioContext();
+          vadAudioCtxRef.current = vadCtx;
+          const analyser = vadCtx.createAnalyser();
+          analyser.fftSize = 256;
+          vadCtx.createMediaStreamSource(finalStream).connect(analyser);
+          const freqData = new Uint8Array(analyser.frequencyBinCount);
+          let silentTicks = 0;
+
+          vadTimerRef.current = setInterval(() => {
+            if (!isRecordingRef.current) return;
+            analyser.getByteFrequencyData(freqData);
+            let sum = 0;
+            for (let i = 0; i < freqData.length; i++) sum += freqData[i];
+            const avg = sum / freqData.length;
+
+            if (avg >= SPEECH_ENERGY_THRESHOLD) {
+              segmentHadSpeechRef.current = true;
+              silentTicks = 0;
+              setIsPausedBySilence((prev) => (prev ? false : prev));
             } else {
-              console.warn("SpeechRecognition transient warning:", event.error);
+              silentTicks += 1;
+              if (silentTicks >= 20) {
+                setIsPausedBySilence((prev) => (!prev ? true : prev));
+              }
+            }
+          }, 100);
+        } catch (vadErr) {
+          // If AudioContext fails, default hadSpeech to true so segments always upload
+          segmentHadSpeechRef.current = true;
+          console.warn("VAD init skipped:", vadErr);
+        }
+
+        // 5. Optional Browser SpeechRecognition strictly for low-latency interim preview (NEVER overwrites Whisper!)
+        const SpeechRecognitionAPI =
+          typeof window !== "undefined" &&
+          ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+        if (SpeechRecognitionAPI) {
+          try {
+            shouldRestartRecognitionRef.current = true;
+            const recognition = new SpeechRecognitionAPI();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = "en-US";
+
+            recognition.onresult = (event: any) => {
+              if (!isRecordingRef.current) return;
+              let latest = "";
+              for (let i = event.resultIndex; i < event.results.length; i++) {
+                latest += event.results[i][0].transcript + " ";
+              }
+              const cleaned = latest.trim();
+              if (cleaned) {
+                segmentHadSpeechRef.current = true;
+                interimTextRef.current = cleaned;
+                broadcastTranscript(buildCombinedLiveTranscript());
+              }
+            };
+
+            recognition.onerror = (event: any) => {
+              if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+                shouldRestartRecognitionRef.current = false;
+              }
+            };
+
+            recognition.onend = () => {
               if (isRecordingRef.current && shouldRestartRecognitionRef.current) {
                 setTimeout(() => {
                   try {
                     if (isRecordingRef.current && recognitionRef.current) {
                       recognitionRef.current.start();
                     }
-                  } catch (e) {}
-                }, 2000);
+                  } catch {
+                    // ignore
+                  }
+                }, 800);
               }
-            }
-          };
+            };
 
-          recognition.onend = () => {
-            if (isRecordingRef.current && shouldRestartRecognitionRef.current) {
-              try {
-                recognition.start();
-              } catch (e) {
-                // Ignore if already running
-              }
-            }
-          };
-
-          recognition.start();
-          recognitionRef.current = recognition;
-        } catch (recErr) {
-          console.warn("SpeechRecognition start failed:", recErr);
+            recognition.start();
+            recognitionRef.current = recognition;
+          } catch {
+            // Whisper handles everything even without SpeechRecognition
+          }
         }
+      } catch (err) {
+        console.error("Error starting recording:", err);
+        isRecordingRef.current = false;
+        setIsRecording(false);
+        setTranscriptionHealth("idle");
+        releaseAllMediaResources();
       }
-
-      // --- Volume Level Monitor (VAD without disruptive recorder pausing) ---
-      const audioCtx = new AudioContext();
-      audioCtxRef.current = audioCtx;
-      const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 256;
-      analyserRef.current = analyser;
-      
-      const source = audioCtx.createMediaStreamSource(finalStream);
-      source.connect(analyser);
-
-      const bufferLength = analyser.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
-
-      const checkVolume = () => {
-        if (!mediaRecorderRef.current || mediaRecorderRef.current.state === "inactive") return;
-
-        analyser.getByteFrequencyData(dataArray);
-        const average = dataArray.reduce((acc, val) => acc + val, 0) / bufferLength;
-
-        if (average < SILENCE_THRESHOLD) {
-          setIsPausedBySilence(true);
-        } else {
-          setIsPausedBySilence(false);
-        }
-
-        vadLoopRef.current = requestAnimationFrame(checkVolume);
-      };
-
-      checkVolume();
-      // -----------------------------------
-
-    } catch (err) {
-      console.error("Error starting recording", err);
-    }
-  }, []);
+    },
+    [broadcastTranscript, buildCombinedLiveTranscript, releaseAllMediaResources, spawnSegmentRecorder]
+  );
 
   const stopRecording = useCallback(() => {
+    if (!isRecordingRef.current) return;
     isRecordingRef.current = false;
-    if (liveTranscribeTimerRef.current) {
-      clearInterval(liveTranscribeTimerRef.current);
-      liveTranscribeTimerRef.current = null;
-    }
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch (e) {}
-      recognitionRef.current = null;
+
+    const elapsedSecs = Math.max(1, Math.round((Date.now() - (sessionStartMsRef.current || Date.now())) / 1000));
+    const sessionType = sessionTypeRef.current;
+
+    if (rotateTimerRef.current) {
+      clearInterval(rotateTimerRef.current);
+      rotateTimerRef.current = null;
     }
 
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stop();
+    // Flush the final in-progress <8s segment
+    const finalRecorder = activeRecorderRef.current;
+    activeRecorderRef.current = null;
+    if (finalRecorder && finalRecorder.state !== "inactive") {
+      try {
+        // Ensure final short segment gets transcribed even if user spoke briefly
+        segmentHadSpeechRef.current = true;
+        finalRecorder.stop();
+      } catch {
+        // ignore
+      }
     }
-    
-    // Cleanup VAD
-    if (vadLoopRef.current) cancelAnimationFrame(vadLoopRef.current);
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-    if (audioCtxRef.current) {
-      audioCtxRef.current.close().catch(() => {});
-      audioCtxRef.current = null;
-    }
-    
-    // Stop display stream tracks
-    if (displayStreamRef.current) {
-      displayStreamRef.current.getTracks().forEach(track => track.stop());
-      displayStreamRef.current = null;
-    }
+
+    // Release mic, system audio, VAD, and SpeechRecognition cleanly
+    setTimeout(() => {
+      releaseAllMediaResources();
+    }, 150);
 
     setIsRecording(false);
     setIsPausedBySilence(false);
-    if (typeof window !== 'undefined') {
+
+    if (typeof window !== "undefined") {
       try {
-        localStorage.setItem('voiceflow_is_recording', 'false');
-        window.dispatchEvent(new CustomEvent('voiceflow-record-state', { detail: { isRecording: false } }));
-      } catch (e) {}
+        localStorage.setItem("voiceflow_is_recording", "false");
+        window.dispatchEvent(new CustomEvent("voiceflow-record-state", { detail: { isRecording: false } }));
+      } catch {
+        // ignore
+      }
     }
-  }, []);
 
+    void finalizeAndSaveMeeting(sessionType, elapsedSecs);
+  }, [finalizeAndSaveMeeting, releaseAllMediaResources]);
+
+  // Offline meeting sync listener + cleanup on unmount
   useEffect(() => {
-    // Pre-authorize audio permission once on mount so starting Voiceflow is automatic and never prompts repeatedly
-    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
-      navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: true,
-        }
-      }).then((stream) => {
-        micStreamRef.current = stream;
-      }).catch((err) => {
-        console.info("Audio auto-access warmup:", err);
-      });
-    }
-
-    // Auto-sync any offline saved meetings when device goes online
     const handleOnline = async () => {
       try {
-        const { syncOfflineMeetings } = await import('@/firebase/meetings');
+        const { syncOfflineMeetings } = await import("@/firebase/meetings");
         const count = await syncOfflineMeetings();
-        if (count > 0 && typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('voiceflow-meeting-saved'));
+        if (count > 0 && typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("voiceflow-meeting-saved"));
         }
-      } catch (e) {
-        console.warn("Offline sync retry failed:", e);
+      } catch {
+        // ignore
       }
     };
-    if (typeof window !== 'undefined') {
-      window.addEventListener('online', handleOnline);
-      handleOnline(); // check on mount as well
+    if (typeof window !== "undefined") {
+      window.addEventListener("online", handleOnline);
+      void handleOnline();
     }
-
     return () => {
-      if (liveTranscribeTimerRef.current) {
-        clearInterval(liveTranscribeTimerRef.current);
-        liveTranscribeTimerRef.current = null;
+      if (typeof window !== "undefined") {
+        window.removeEventListener("online", handleOnline);
       }
-      if (micStreamRef.current) {
-        micStreamRef.current.getTracks().forEach(track => track.stop());
-        micStreamRef.current = null;
-      }
+      releaseAllMediaResources();
     };
-  }, []);
+  }, [releaseAllMediaResources]);
 
-  const processAudio = async (blob: Blob, type: "dictation" | "meeting", elapsedSecs = 0) => {
-    setIsProcessing(true);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('voiceflow_is_processing', 'true');
-      window.dispatchEvent(new CustomEvent('voiceflow-processing-state', { detail: { isProcessing: true } }));
-    }
-
-    let savedMeetingId: string | null = null;
-    let combinedTranscript = "";
-
-    try {
-      const formData = new FormData();
-      formData.append("file", blob, "audio.webm");
-
-      const base = apiBase();
-      const transcribeUrl = base ? `${base}/api/transcribe` : "/api/transcribe";
-      const summarizeUrl = base ? `${base}/api/summarize` : "/api/summarize";
-
-      // 1. Transcribe (NO keepalive: true, since payloads > 64KB throw TypeError)
-      const transcribeRes = await fetch(transcribeUrl, {
-        method: "POST",
-        body: formData,
-      });
-      const transcribeData = await transcribeRes.json();
-
-      if (!transcribeRes.ok) throw new Error(transcribeData.error || "Transcription failed");
-
-      // Check if resuming an existing meeting session
-      const resumeMeetingId = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_resume_meeting_id') : null;
-      const prevTranscript = typeof window !== 'undefined' ? (localStorage.getItem('voiceflow_resume_previous_transcript') || '') : '';
-      const prevDuration = typeof window !== 'undefined' ? parseInt(localStorage.getItem('voiceflow_resume_previous_duration') || '0', 10) : 0;
-
-      const newTranscript = transcribeData.formattedTranscript || transcribeData.text || "";
-      combinedTranscript = resumeMeetingId && prevTranscript
-        ? `${prevTranscript}\n\n${newTranscript}`
-        : newTranscript;
-
-      const sessionDuration = elapsedSecs || (typeof transcribeData.duration === 'number' ? transcribeData.duration : 0);
-      const totalDurationSeconds = resumeMeetingId ? (prevDuration + sessionDuration) : sessionDuration;
-      const totalDurationMinutes = Math.max(1, Math.round(totalDurationSeconds / 60));
-
-      // Extract current widget chat messages & assists
-      let currentChatMessages: any[] = [];
-      let currentAssists: any[] = [];
-      try {
-        const rawChat = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_widget_messages') : null;
-        if (rawChat) {
-          currentChatMessages = JSON.parse(rawChat);
-          if (Array.isArray(currentChatMessages)) {
-            for (let i = 0; i < currentChatMessages.length; i += 2) {
-              const u = currentChatMessages[i];
-              const a = currentChatMessages[i + 1];
-              if (u && a && u.sender === 'user' && a.sender === 'ai') {
-                currentAssists.push({
-                  prompt: u.text,
-                  type: 'Assist',
-                  response: a.text,
-                  timestamp: u.timestamp || a.timestamp,
-                });
-              }
-            }
-          }
-        }
-      } catch (e) {
-        console.warn("Could not parse widget messages for meeting save:", e);
-      }
-
-      // Generate a meaningful initial title from the first sentences of the transcript
-      const firstLine = combinedTranscript.split('\n').filter(Boolean)[0] || "";
-      const derivedTitle = firstLine.length > 5 
-        ? (firstLine.length > 50 ? `${firstLine.slice(0, 47)}...` : firstLine)
-        : `Meeting Session (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`;
-
-      // --- PHASE 1 IMMEDIATE SAVE ---
-      // Save transcript to Firestore IMMEDIATELY before starting summarization.
-      // Even if the user navigates away or network drops during summarization, the transcript is 100% preserved!
-      if (user?.uid) {
-        if (resumeMeetingId) {
-          savedMeetingId = resumeMeetingId;
-          const { updateMeeting } = await import("@/firebase/meetings");
-          await updateMeeting(resumeMeetingId, {
-            transcript: combinedTranscript,
-            durationSeconds: totalDurationSeconds,
-            durationMinutes: totalDurationMinutes,
-            chatMessages: currentChatMessages,
-            assists: currentAssists,
-            status: 'summarizing'
-          }, user.uid);
-        } else {
-          savedMeetingId = await saveMeeting({
-            userId: user.uid,
-            title: derivedTitle,
-            transcript: combinedTranscript,
-            summary: "Generating executive AI summary...",
-            durationSeconds: totalDurationSeconds,
-            durationMinutes: totalDurationMinutes,
-            type,
-            chatMessages: currentChatMessages,
-            assists: currentAssists,
-          });
-        }
-
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('voiceflow-meeting-saved'));
-        }
-      }
-
-      // 2. Summarize with keepalive
-      const customContext = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_custom_context') || '' : '';
-      let finalOutput = "";
-
-      try {
-        const summarizeRes = await fetch(summarizeUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ 
-            text: combinedTranscript, 
-            type, 
-            customContext 
-          }),
-        });
-
-        if (summarizeRes.ok) {
-          const summarizeData = await summarizeRes.json();
-          finalOutput = summarizeData.text || "";
-        }
-      } catch (sumErr) {
-        console.warn("Remote summarization call interrupted or failed, using local synthesis:", sumErr);
-      }
-
-      // If remote summarization failed or returned blank, synthesize a clean structured summary locally from transcript
-      if (!finalOutput || !finalOutput.trim() || finalOutput.includes("Meeting recorded offline")) {
-        const sentences = combinedTranscript.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 15);
-        const lead = sentences.slice(0, 2).join(' ') || combinedTranscript.slice(0, 200);
-        const keyPoints = sentences.slice(2, 6);
-
-        finalOutput = `## Executive Summary\n${lead}\n\n## Key Takeaways\n`;
-        if (keyPoints.length > 0) {
-          keyPoints.forEach(kp => {
-            finalOutput += `• **Discussion Point**: ${kp.trim()}\n`;
-          });
-        } else {
-          finalOutput += `• **Discussion Point**: ${combinedTranscript.slice(0, 250).trim()}...\n`;
-        }
-        finalOutput += `\n## Action Items\n• **Follow-Up**: Review session transcript notes and align on deliverables.`;
-      }
-
-      setTranscript(finalOutput);
-
-      // --- PHASE 2 UPDATE SUMMARY ---
-      if (user?.uid && savedMeetingId) {
-        const { updateMeeting } = await import("@/firebase/meetings");
-        await updateMeeting(savedMeetingId, {
-          summary: finalOutput,
-          status: 'completed'
-        }, user.uid);
-
-        // Also persist user plan usage directly to Firestore (anti-cheating)
-        try {
-          const { getFirestore, doc, updateDoc, increment } = await import("firebase/firestore");
-          const db = getFirestore();
-          await updateDoc(doc(db, "users", user.uid), {
-            sessionCount: increment(resumeMeetingId ? 0 : 1),
-            usedMinutes: increment(Math.max(1, Math.round(sessionDuration / 60)))
-          });
-          recordDeviceSession(db, sessionDuration).catch(() => {});
-        } catch (planErr) {
-          console.warn("Could not increment user usage in firestore:", planErr);
-        }
-      }
-
-      // Track usage & increment session count locally
-      if (typeof window !== 'undefined') {
-        const curSessions = parseInt(localStorage.getItem('voiceflow_session_count') || '0', 10);
-        const curMins = parseInt(localStorage.getItem('voiceflow_used_minutes') || '0', 10);
-        if (!resumeMeetingId) {
-          localStorage.setItem('voiceflow_session_count', String(curSessions + 1));
-        }
-        localStorage.setItem('voiceflow_used_minutes', String(curMins + Math.max(1, Math.round(sessionDuration / 60))));
-        window.dispatchEvent(new CustomEvent('voiceflow-usage-updated'));
-      }
-
-      // Clean up resumption state & redirect if resumed
-      if (resumeMeetingId && typeof window !== 'undefined') {
-        localStorage.removeItem('voiceflow_resume_meeting_id');
-        localStorage.removeItem('voiceflow_resume_meeting_title');
-        localStorage.removeItem('voiceflow_resume_previous_transcript');
-        localStorage.removeItem('voiceflow_resume_previous_duration');
-        localStorage.removeItem('voiceflow_resume_chat_messages');
-        localStorage.removeItem('voiceflow_auto_start_record');
-
-        // Redirect back to meeting details page so user sees resumed transcript immediately
-        window.location.href = `/dashboard/meeting?id=${resumeMeetingId}`;
-      }
-
-      // Notify dashboard to refresh meetings feed immediately
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('voiceflow-meeting-saved'));
-      }
-
-      // 4. Auto Copy to Clipboard
-      if (type === "dictation") {
-        await copyToClipboard(finalOutput);
-      }
-      
-    } catch (err) {
-      console.error("Processing encountered error, checking if emergency backup is needed:", err);
-      // Emergency offline backup: ONLY execute if the meeting wasn't already saved above
-      if (!savedMeetingId) {
-        try {
-          const cachedTranscript = combinedTranscript || transcript || (typeof window !== 'undefined' ? localStorage.getItem('voiceflow_live_transcript') || '' : '');
-          if (cachedTranscript.trim() && user?.uid) {
-            const rawChat = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_widget_messages') : null;
-            let currentChatMessages: any[] = [];
-            if (rawChat) {
-              try { currentChatMessages = JSON.parse(rawChat); } catch {}
-            }
-
-            // Synthesize a structured summary rather than a static network interruption alert
-            const sentences = cachedTranscript.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 15);
-            const lead = sentences.slice(0, 2).join(' ') || cachedTranscript.slice(0, 200);
-            const synthesizedSummary = `## Executive Summary\n${lead}\n\n## Key Takeaways\n• **Preserved Transcript**: Full real-time conversation safely retained.\n\n## Action Items\n• Click 'Regenerate Summary' anytime to format with AI.`;
-
-            await saveMeeting({
-              userId: user.uid,
-              transcript: cachedTranscript,
-              summary: synthesizedSummary,
-              durationSeconds: elapsedSecs,
-              durationMinutes: Math.max(1, Math.round(elapsedSecs / 60)),
-              type,
-              chatMessages: currentChatMessages,
-              title: `Session Notes (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`
-            });
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(new CustomEvent('voiceflow-meeting-saved'));
-            }
-          }
-        } catch (backupErr) {
-          console.error("Emergency backup write failed:", backupErr);
-        }
-      }
-    } finally {
-      setIsProcessing(false);
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('voiceflow_is_processing');
-        window.dispatchEvent(new CustomEvent('voiceflow-processing-state', { detail: { isProcessing: false } }));
-      }
-    }
+  return {
+    startRecording,
+    stopRecording,
+    isRecording,
+    isProcessing,
+    isPausedBySilence,
+    transcript,
+    transcriptionHealth,
+    systemAudioActive,
   };
-
-  return { startRecording, stopRecording, isRecording, isProcessing, isPausedBySilence, transcript };
 }
-

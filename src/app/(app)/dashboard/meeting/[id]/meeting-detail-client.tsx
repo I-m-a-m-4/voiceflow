@@ -557,12 +557,25 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
     try {
       const base = apiBase();
       const endpoint = base ? `${base}/api/ask-screen` : "/api/ask-screen";
+      const historyPayload: Array<{ role: "user" | "assistant"; content: string }> = [];
+      for (const ast of assists.slice(-5)) {
+        if (!ast.prompt || !ast.response || ast.response.startsWith("Error:")) continue;
+        // Skip synthetic placeholder assist if meeting never had real assists
+        if (assists.length === 1 && ast.prompt === "What should I say?" && !meeting?.assists) continue;
+        historyPayload.push({ role: "user", content: ast.prompt });
+        historyPayload.push({ role: "assistant", content: ast.response });
+      }
+      const customContext =
+        typeof window !== "undefined" ? localStorage.getItem("voiceflow_custom_context") || "" : "";
+
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: q,
           transcript: meeting?.transcript || meeting?.summary || "Meeting transcript unavailable.",
+          customContext,
+          history: historyPayload,
         }),
       });
       const data = await res.json();

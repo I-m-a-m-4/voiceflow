@@ -61,8 +61,9 @@ fn set_ignore_cursor_events(window: tauri::Window, ignore: bool) -> Result<(), S
 }
 
 #[tauri::command]
-fn enter_hud_mode(window: tauri::Window, is_expanded: bool, is_hidden: bool) -> Result<(), String> {
-    println!("Voiceflow: Entering HUD mode (expanded: {}, hidden: {})...", is_expanded, is_hidden);
+fn enter_hud_mode(window: tauri::Window, is_expanded: bool, is_hidden: bool, reposition: Option<bool>) -> Result<(), String> {
+    let should_reposition = reposition.unwrap_or(true);
+    println!("Voiceflow: Entering HUD mode (expanded: {}, hidden: {}, reposition: {})...", is_expanded, is_hidden, should_reposition);
 
     // 1. Unmaximize first if window is maximized (Windows OS requirement)
     if window.is_maximized().unwrap_or(false) {
@@ -80,15 +81,17 @@ fn enter_hud_mode(window: tauri::Window, is_expanded: bool, is_hidden: bool) -> 
     // 2. Set size
     window.set_size(tauri::LogicalSize::new(target_w, target_h)).map_err(|e| e.to_string())?;
 
-    // 3. Position top-center of the active screen
-    if let Ok(Some(monitor)) = window.current_monitor() {
-        let scale = monitor.scale_factor();
-        let screen_w = monitor.size().width as f64 / scale;
-        let pos_x = ((screen_w - target_w) / 2.0).max(0.0);
-        let pos_y = 35.0; // 35px from top
-        let _ = window.set_position(tauri::LogicalPosition::new(pos_x, pos_y));
-    } else {
-        let _ = window.center();
+    // 3. Only reposition on initial entry into HUD mode so user drag location is preserved on expand/collapse
+    if should_reposition {
+        if let Ok(Some(monitor)) = window.current_monitor() {
+            let scale = monitor.scale_factor();
+            let screen_w = monitor.size().width as f64 / scale;
+            let pos_x = ((screen_w - target_w) / 2.0).max(0.0);
+            let pos_y = 35.0; // 35px from top
+            let _ = window.set_position(tauri::LogicalPosition::new(pos_x, pos_y));
+        } else {
+            let _ = window.center();
+        }
     }
 
     // 4. Always on top, skip taskbar, and stealth exclude from screen capture
@@ -289,8 +292,8 @@ pub fn run() {
                     use std::str::FromStr;
                     
                     let toggle = Shortcut::from_str("CommandOrControl+`").unwrap();
-                    let ask = Shortcut::from_str("CommandOrControl+Enter").unwrap();
-                    let clear = Shortcut::from_str("CommandOrControl+R").unwrap();
+                    let ask = Shortcut::from_str("CommandOrControl+Shift+Enter").unwrap();
+                    let clear = Shortcut::from_str("CommandOrControl+Shift+K").unwrap();
                     let session = Shortcut::from_str("CommandOrControl+Shift+\\").unwrap();
 
                     if shortcut == &toggle {
@@ -402,17 +405,13 @@ pub fn run() {
             use tauri_plugin_global_shortcut::Shortcut;
             use std::str::FromStr;
             
+            // Use non-conflicting chords so browser refresh (Ctrl+R), form submit (Ctrl+Enter),
+            // and text selection (Ctrl+Arrows) are NEVER hijacked across the user's OS.
             let shortcuts = vec![
                 "CommandOrControl+`",
-                "CommandOrControl+Enter",
-                "CommandOrControl+R",
-                "CommandOrControl+Shift+\\",
-                "CommandOrControl+Up",
-                "CommandOrControl+Down",
-                "CommandOrControl+Left",
-                "CommandOrControl+Right",
-                "CommandOrControl+Shift+Up",
-                "CommandOrControl+Shift+Down"
+                "CommandOrControl+Shift+Enter",
+                "CommandOrControl+Shift+K",
+                "CommandOrControl+Shift+\\"
             ];
             
             for s in shortcuts {

@@ -33,8 +33,23 @@ export default function RightPanel() {
   const { toast } = useToast();
   const userEmail = auth?.currentUser?.email || 'user@example.com';
   
-  const { startRecording, stopRecording, isRecording, isProcessing, transcript } = useAudioRecorder();
+  const {
+    startRecording,
+    stopRecording,
+    isRecording,
+    isProcessing,
+    transcript,
+    transcriptionHealth,
+    systemAudioActive,
+  } = useAudioRecorder();
   const { isPro, sessionCount, maxFreeSessions, isLimitReached, bonusMinutes, maxMinutes } = usePlanUsage();
+  const [includeCallAudio, setIncludeCallAudio] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('voiceflow_capture_call_audio');
+      return saved !== null ? saved === 'true' : true;
+    }
+    return true;
+  });
   
   const [recordingTime, setRecordingTime] = useState(0);
   const [resumingInfo, setResumingInfo] = useState<{ id: string; title: string; prevDuration: number } | null>(null);
@@ -124,11 +139,11 @@ export default function RightPanel() {
       if (autoStart === 'true') {
         localStorage.removeItem('voiceflow_auto_start_record');
         setTimeout(() => {
-          startRecording(false);
+          startRecording(includeCallAudio);
         }, 350);
       }
     }
-  }, [startRecording]);
+  }, [startRecording, includeCallAudio]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -171,12 +186,12 @@ export default function RightPanel() {
           localStorage.removeItem('voiceflow_widget_messages');
           localStorage.removeItem('voiceflow_resume_chat_messages');
         }
-        startRecording(false);
+        startRecording(includeCallAudio);
       }
     };
     window.addEventListener('voiceflow-toggle-record', handleToggle);
     return () => window.removeEventListener('voiceflow-toggle-record', handleToggle);
-  }, [isRecording, stopRecording, startRecording, isLimitReached, resumingInfo]);
+  }, [isRecording, stopRecording, startRecording, isLimitReached, resumingInfo, includeCallAudio]);
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60).toString().padStart(2, '0');
@@ -398,7 +413,7 @@ export default function RightPanel() {
     if (typeof window !== 'undefined') {
       localStorage.setItem('voiceflow_active_meeting_title', meeting.title);
     }
-    startRecording(false);
+    startRecording(includeCallAudio);
   };
 
   return (
@@ -407,7 +422,9 @@ export default function RightPanel() {
       <MeetingWidget 
         isRecording={isRecording} 
         stopRecording={stopRecording} 
-        transcript={transcript} 
+        transcript={transcript}
+        transcriptionHealth={transcriptionHealth}
+        systemAudioActive={systemAudioActive}
       />
 
       {!isRecording && (
@@ -445,6 +462,44 @@ export default function RightPanel() {
                   </button>
                 </div>
               )}
+              {/* Audio Capture Mode Selector (Solves headphone vs speaker call audio) */}
+              <div className="grid grid-cols-2 gap-1.5 p-1 bg-background/80 border border-border rounded-xl text-[11px] font-semibold">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIncludeCallAudio(true);
+                    if (typeof window !== 'undefined') {
+                      localStorage.setItem('voiceflow_capture_call_audio', 'true');
+                    }
+                  }}
+                  className={`py-1.5 px-2 rounded-lg transition-all ${
+                    includeCallAudio
+                      ? 'bg-voiceflow-orange/15 text-voiceflow-orange border border-voiceflow-orange/30'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                  title="Capture both your microphone and meeting tab/system audio (recommended for headphones)"
+                >
+                  Mic + Call Audio
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIncludeCallAudio(false);
+                    if (typeof window !== 'undefined') {
+                      localStorage.setItem('voiceflow_capture_call_audio', 'false');
+                    }
+                  }}
+                  className={`py-1.5 px-2 rounded-lg transition-all ${
+                    !includeCallAudio
+                      ? 'bg-voiceflow-orange/15 text-voiceflow-orange border border-voiceflow-orange/30'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                  title="Capture microphone only (works when call audio plays on open speakers)"
+                >
+                  Mic Only
+                </button>
+              </div>
+
               <button 
                 onClick={() => {
                   if (isLimitReached) {
@@ -457,7 +512,7 @@ export default function RightPanel() {
                     localStorage.removeItem('voiceflow_widget_messages');
                     localStorage.removeItem('voiceflow_resume_chat_messages');
                   }
-                  startRecording(false);
+                  startRecording(includeCallAudio);
                 }} 
                 className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl transition-all font-semibold shadow-sm active:scale-[0.98] bg-voiceflow-orange hover:bg-orange-600 text-white shadow-orange-500/20"
                 title={isLimitReached ? "Upgrade to Pro to start a new session" : "Launch Voiceflow Floating Assistant and start live listening"}

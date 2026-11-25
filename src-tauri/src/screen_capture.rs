@@ -10,13 +10,31 @@ pub fn capture_primary_screen_bmp() -> Result<Vec<u8>, String> {
             return Err("Failed to get desktop DC".into());
         }
 
-        let width = GetSystemMetrics(SM_CXSCREEN);
-        let height = GetSystemMetrics(SM_CYSCREEN);
+        // Use physical desktop resolution (DESKTOPHORZRES/DESKTOPVERTRES) so Windows DPI scaling (125%/150%)
+        // NEVER clips the right/bottom edges of the screen!
+        let mut src_w = GetDeviceCaps(Some(hdc_screen), DESKTOPHORZRES);
+        let mut src_h = GetDeviceCaps(Some(hdc_screen), DESKTOPVERTRES);
+        if src_w <= 0 || src_h <= 0 {
+            src_w = GetSystemMetrics(SM_CXSCREEN);
+            src_h = GetSystemMetrics(SM_CYSCREEN);
+        }
 
-        if width <= 0 || height <= 0 {
+        if src_w <= 0 || src_h <= 0 {
             ReleaseDC(None, hdc_screen);
             return Err("Invalid display metrics".into());
         }
+
+        // Downscale right in GDI if wider/taller than 1280px to cut IPC payload from ~8.3MB to ~1.4MB
+        let max_dim = 1280;
+        let (dst_w, dst_h) = if src_w > max_dim || src_h > max_dim {
+            if src_w >= src_h {
+                (max_dim, ((src_h as f64 * max_dim as f64) / src_w as f64).round() as i32)
+            } else {
+                (((src_w as f64 * max_dim as f64) / src_h as f64).round() as i32, max_dim)
+            }
+        } else {
+            (src_w, src_h)
+        };
 
         let hdc_mem = CreateCompatibleDC(Some(hdc_screen));
         if hdc_mem.0.is_null() {
@@ -24,7 +42,7 @@ pub fn capture_primary_screen_bmp() -> Result<Vec<u8>, String> {
             return Err("Failed to create memory DC".into());
         }
 
-        let hbitmap = CreateCompatibleBitmap(hdc_screen, width, height);
+        let hbitmap = CreateCompatibleBitmap(hdc_screen, dst_w, dst_h);
         if hbitmap.0.is_null() {
             let _ = DeleteDC(hdc_mem);
             ReleaseDC(None, hdc_screen);
@@ -33,31 +51,50 @@ pub fn capture_primary_screen_bmp() -> Result<Vec<u8>, String> {
 
         let old_bitmap = SelectObject(hdc_mem, hbitmap.into());
 
-        let blt_res = BitBlt(
-            hdc_mem,
-            0,
-            0,
-            width,
-            height,
-            Some(hdc_screen),
-            0,
-            0,
-            SRCCOPY,
-        );
+        let copy_ok = if dst_w != src_w || dst_h != src_h {
+            SetStretchBltMode(hdc_mem, HALFTONE);
+            StretchBlt(
+                hdc_mem,
+                0,
+                0,
+                dst_w,
+                dst_h,
+                Some(hdc_screen),
+                0,
+                0,
+                src_w,
+                src_h,
+                SRCCOPY,
+            )
+            .as_bool()
+        } else {
+            BitBlt(
+                hdc_mem,
+                0,
+                0,
+                dst_w,
+                dst_h,
+                Some(hdc_screen),
+                0,
+                0,
+                SRCCOPY,
+            )
+            .is_ok()
+        };
 
-        if blt_res.is_err() {
+        if !copy_ok {
             SelectObject(hdc_mem, old_bitmap);
             let _ = DeleteObject(hbitmap.into());
             let _ = DeleteDC(hdc_mem);
             ReleaseDC(None, hdc_screen);
-            return Err("BitBlt desktop failed".into());
+            return Err("Screen capture blit failed".into());
         }
 
         let mut bmi = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
                 biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: width,
-                biHeight: height,
+                biWidth: dst_w,
+                biHeight: dst_h,
                 biPlanes: 1,
                 biBitCount: 24,
                 biCompression: BI_RGB.0,
@@ -70,15 +107,15 @@ pub fn capture_primary_screen_bmp() -> Result<Vec<u8>, String> {
             bmiColors: [RGBQUAD::default()],
         };
 
-        let row_stride = ((width * 3 + 3) / 4) * 4;
-        let image_size = (row_stride * height) as usize;
+        let row_stride = ((dst_w * 3 + 3) / 4) * 4;
+        let image_size = (row_stride * dst_h) as usize;
         let mut pixel_data = vec![0u8; image_size];
 
         let lines_copied = GetDIBits(
             hdc_screen,
             hbitmap,
             0,
-            height as u32,
+            dst_h as u32,
             Some(pixel_data.as_mut_ptr() as *mut _),
             &mut bmi,
             DIB_RGB_COLORS,
@@ -106,8 +143,8 @@ pub fn capture_primary_screen_bmp() -> Result<Vec<u8>, String> {
         bmp_bytes.extend_from_slice(&(data_offset as u32).to_le_bytes());
 
         bmp_bytes.extend_from_slice(&(info_header_size as u32).to_le_bytes());
-        bmp_bytes.extend_from_slice(&(width as i32).to_le_bytes());
-        bmp_bytes.extend_from_slice(&(height as i32).to_le_bytes());
+        bmp_bytes.extend_from_slice(&(dst_w as i32).to_le_bytes());
+        bmp_bytes.extend_from_slice(&(dst_h as i32).to_le_bytes());
         bmp_bytes.extend_from_slice(&1u16.to_le_bytes()); // Planes
         bmp_bytes.extend_from_slice(&24u16.to_le_bytes()); // 24-bit RGB
         bmp_bytes.extend_from_slice(&0u32.to_le_bytes()); // BI_RGB
