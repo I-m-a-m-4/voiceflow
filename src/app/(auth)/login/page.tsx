@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { signInWithEmailAndPassword, signInWithPopup, signInWithRedirect, signInWithCredential, getRedirectResult, getAdditionalUserInfo, signOut, GoogleAuthProvider } from 'firebase/auth';
+import { signInWithEmailAndPassword, signInWithPopup, signInWithRedirect, signInWithCredential, signInWithCustomToken, getRedirectResult, getAdditionalUserInfo, signOut, GoogleAuthProvider } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 import { handleGoogleSignupSuccess } from '@/firebase/users';
@@ -209,10 +209,19 @@ export default function LoginPage() {
           payload = JSON.parse(tokenString);
         }
 
-        if (payload?.uid || payload?.idToken || payload?.firebaseToken) {
+        if (payload?.customToken || payload?.uid || payload?.idToken || payload?.firebaseToken) {
           let user: any = null;
 
-          if (payload.idToken) {
+          if (payload.customToken) {
+            try {
+              const result = await signInWithCustomToken(auth, payload.customToken);
+              user = result.user;
+            } catch (ctErr: any) {
+              console.warn('signInWithCustomToken failed, falling back to Google credential:', ctErr);
+            }
+          }
+
+          if (!user && payload.idToken) {
             try {
               const credential = GoogleAuthProvider.credential(payload.idToken, payload.accessToken || undefined);
               const result = await signInWithCredential(auth, credential);

@@ -5,8 +5,8 @@ import { apiBase, isNativeApp } from "@/lib/platform";
 import { recordDeviceSession } from "@/lib/device-fingerprint";
 import { copyToClipboard } from "@/lib/clipboard";
 
-const SPEECH_ENERGY_THRESHOLD = 6; // Avg frequency magnitude (0-255) indicating actual audio activity
-const SEGMENT_DURATION_MS = 8000; // Rotate self-contained ~60KB WebM segments every 8 seconds
+const SPEECH_ENERGY_THRESHOLD = 3.5; // Avg frequency magnitude (0-255) tuned to catch softer mics & laptop speakers
+const SEGMENT_DURATION_MS = 5000; // Rotate self-contained ~40KB WebM segments every 5 seconds for low-latency live transcript
 
 export type TranscriptionHealth = "idle" | "listening" | "syncing" | "degraded";
 
@@ -39,25 +39,33 @@ export function useAudioRecorder() {
 
   const isRecordingRef = useRef<boolean>(false);
   const isStartingRef = useRef<boolean>(false);
+  const activeMimeTypeRef = useRef<string>("");
   const shouldRestartRecognitionRef = useRef<boolean>(true);
   const sessionStartMsRef = useRef<number>(0);
   const sessionTypeRef = useRef<"dictation" | "meeting">("dictation");
 
-  // Ordered rolling segment store: guarantees out-of-order network responses never scramble transcript
+  // Ordered rolling segment store keyed by millisecond timestamp so dual-channel
+  // ([THEM] WASAPI system audio + [YOU] microphone) always merges in exact chronological order!
   const segmentIndexRef = useRef<number>(0);
-  const committedSegmentsRef = useRef<Map<number, string>>(new Map());
+  const committedSegmentsRef = useRef<Map<number, { orderKey: number; text: string }>>(new Map());
   const pendingUploadsRef = useRef<Set<Promise<void>>>(new Set());
   const segmentHadSpeechRef = useRef<boolean>(false);
   const interimTextRef = useRef<string>("");
   const consecutiveFailuresRef = useRef<number>(0);
+  const nativeLoopbackActiveRef = useRef<boolean>(false);
+  const lastLoopbackDrainMsRef = useRef<number>(0);
+  const lastTranscriptTailRef = useRef<string>("");
 
   const buildCombinedLiveTranscript = useCallback(() => {
     const entries = Array.from(committedSegmentsRef.current.entries())
-      .sort((a, b) => a[0] - b[0])
-      .map(([, text]) => text.trim())
+      .sort((a, b) => a[1].orderKey - b[1].orderKey || a[0] - b[0])
+      .map(([, item]) => item.text.trim())
       .filter(Boolean);
 
     const committed = entries.join("\n\n");
+    if (committed) {
+      lastTranscriptTailRef.current = committed.replace(/\[\d+:\d+\]\s*(?:\[(?:THEM|YOU)\]\s*)?/g, "").slice(-200).trim();
+    }
     const interim = interimTextRef.current.trim();
 
     // Show browser interim preview ONLY as a live trailing line so it never clobbers Whisper's committed history
@@ -97,10 +105,19 @@ export function useAudioRecorder() {
   }, []);
 
   const uploadSegmentToWhisper = useCallback(
-    (blob: Blob, segIdx: number, offsetSeconds: number, hadSpeech: boolean) => {
+    (
+      blob: Blob,
+      segIdx: number,
+      offsetSeconds: number,
+      hadSpeech: boolean,
+      speaker?: "THEM" | "YOU",
+      filename?: string
+    ) => {
       // Skip tiny/empty blobs or purely silent windows to avoid Whisper hallucinations and save quota
-      if (blob.size < 1500) return Promise.resolve();
+      if (blob.size < 1200) return Promise.resolve();
       if (!hadSpeech && segIdx > 0) return Promise.resolve();
+
+      const orderKey = Math.max(0, Math.round(offsetSeconds * 1000)) + (speaker === "THEM" ? 0 : 1);
 
       const task = (async () => {
         setTranscriptionHealth("syncing");
@@ -108,8 +125,14 @@ export function useAudioRecorder() {
         const transcribeUrl = base ? `${base}/api/transcribe` : "/api/transcribe";
 
         const formData = new FormData();
-        formData.append("file", blob, `segment-${segIdx}.webm`);
+        formData.append("file", blob, filename || `segment-${segIdx}.webm`);
         formData.append("offsetSeconds", String(Math.max(0, Math.round(offsetSeconds))));
+        if (speaker) {
+          formData.append("speaker", speaker);
+        }
+        if (lastTranscriptTailRef.current) {
+          formData.append("prompt", lastTranscriptTailRef.current);
+        }
 
         try {
           const res = await fetch(transcribeUrl, {
@@ -128,14 +151,14 @@ export function useAudioRecorder() {
           setTranscriptionHealth("listening");
 
           if (segmentText) {
-            committedSegmentsRef.current.set(segIdx, segmentText);
+            committedSegmentsRef.current.set(segIdx, { orderKey, text: segmentText });
             // Clear stale interim preview once Whisper commits real text
             interimTextRef.current = "";
             broadcastTranscript(buildCombinedLiveTranscript());
           }
         } catch (err) {
           consecutiveFailuresRef.current += 1;
-          console.warn(`Live transcription segment #${segIdx} failed:`, err);
+          console.warn(`Live transcription segment #${segIdx} (${speaker || "MIC"}) failed:`, err);
           if (consecutiveFailuresRef.current >= 2) {
             setTranscriptionHealth("degraded");
           }
@@ -148,6 +171,40 @@ export function useAudioRecorder() {
     },
     [broadcastTranscript, buildCombinedLiveTranscript]
   );
+
+  // Drains Windows native WASAPI system audio loopback buffer ([THEM] — interviewer / call audio on headphones!)
+  const drainNativeSystemAudio = useCallback(async () => {
+    if (!nativeLoopbackActiveRef.current) return;
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const nowMs = Date.now();
+      const chunkStartMs = lastLoopbackDrainMsRef.current || sessionStartMsRef.current || nowMs;
+      lastLoopbackDrainMsRef.current = nowMs;
+
+      const chunk = await invoke<{
+        supported: boolean;
+        active: boolean;
+        wav_base64: string;
+        duration_ms: number;
+        rms: number;
+        has_speech: boolean;
+      }>("drain_system_audio_wav");
+
+      if (!chunk?.has_speech || !chunk.wav_base64) return;
+
+      const binary = atob(chunk.wav_base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      const wavBlob = new Blob([bytes], { type: "audio/wav" });
+      const segIdx = segmentIndexRef.current++;
+      const offsetSeconds = Math.max(0, (chunkStartMs - sessionStartMsRef.current) / 1000);
+      await uploadSegmentToWhisper(wavBlob, segIdx, offsetSeconds, true, "THEM", `system-${segIdx}.wav`);
+    } catch (err) {
+      console.warn("Native WASAPI loopback drain warning:", err);
+    }
+  }, [uploadSegmentToWhisper]);
 
   // Starts a self-contained MediaRecorder for one rolling window (~8s = ~64KB valid WebM with EBML header)
   const spawnSegmentRecorder = useCallback(
@@ -187,7 +244,8 @@ export function useAudioRecorder() {
         }
         if (localChunks.length > 0) {
           const segmentBlob = new Blob(localChunks, { type: mimeType || "audio/webm" });
-          void uploadSegmentToWhisper(segmentBlob, segIdx, offsetSeconds, localHadSpeech || segIdx === 0);
+          const speaker = nativeLoopbackActiveRef.current ? "YOU" : undefined;
+          void uploadSegmentToWhisper(segmentBlob, segIdx, offsetSeconds, localHadSpeech || segIdx === 0, speaker);
         }
       };
 
@@ -232,6 +290,12 @@ export function useAudioRecorder() {
       micStreamRef.current.getTracks().forEach((t) => t.stop());
       micStreamRef.current = null;
     }
+    if (nativeLoopbackActiveRef.current) {
+      nativeLoopbackActiveRef.current = false;
+      import("@tauri-apps/api/core")
+        .then(({ invoke }) => invoke("stop_system_audio_capture").catch(() => {}))
+        .catch(() => {});
+    }
     finalStreamRef.current = null;
     setSystemAudioActive(false);
   }, []);
@@ -258,8 +322,8 @@ export function useAudioRecorder() {
         }
 
         const committedOnly = Array.from(committedSegmentsRef.current.entries())
-          .sort((a, b) => a[0] - b[0])
-          .map(([, text]) => text.trim())
+          .sort((a, b) => a[1].orderKey - b[1].orderKey || a[0] - b[0])
+          .map(([, item]) => item.text.trim())
           .filter(Boolean)
           .join("\n\n");
 
@@ -499,14 +563,29 @@ export function useAudioRecorder() {
         setTranscriptionHealth("listening");
         broadcastTranscript("", true);
 
+        // 0. On Windows Desktop (Tauri), silently start NATIVE WASAPI System Audio Loopback!
+        // Captures crystal-clear [THEM] audio (Zoom/Meet/Teams/headphones) with ZERO "Share Screen" popup!
+        let nativeLoopbackStarted = false;
+        if (isNativeApp()) {
+          try {
+            const { invoke } = await import("@tauri-apps/api/core");
+            nativeLoopbackStarted = Boolean(await invoke<boolean>("start_system_audio_capture"));
+            nativeLoopbackActiveRef.current = nativeLoopbackStarted;
+            lastLoopbackDrainMsRef.current = Date.now();
+          } catch (loopErr) {
+            nativeLoopbackActiveRef.current = false;
+            console.info("Native WASAPI loopback unavailable on this platform/device, using mic:", loopErr);
+          }
+        }
+
         // 1. Always acquire Microphone Audio FIRST (with safe fallback to plain `{ audio: true }`)
-        // Note: echoCancellation: false lets laptop/desktop speakers still be picked up naturally
+        // When native WASAPI loopback is active, enable echoCancellation on mic so speakers don't double-record as [YOU]
         let micStream: MediaStream;
         try {
           micStream = await navigator.mediaDevices.getUserMedia({
             audio: {
-              echoCancellation: false,
-              noiseSuppression: false,
+              echoCancellation: nativeLoopbackStarted,
+              noiseSuppression: nativeLoopbackStarted,
               autoGainControl: true,
             },
           });
@@ -516,7 +595,7 @@ export function useAudioRecorder() {
         micStreamRef.current = micStream;
 
         // 2. Optional Browser Tab/System Audio (strictly web opt-in, NEVER blocks or crashes desktop start!)
-        let hasSystemAudio = false;
+        let hasSystemAudio = nativeLoopbackStarted;
         let finalStream: MediaStream = micStream;
 
         if (
@@ -569,6 +648,7 @@ export function useAudioRecorder() {
         finalStreamRef.current = finalStream;
 
         const mimeType = getSupportedAudioMimeType();
+        activeMimeTypeRef.current = mimeType;
 
         // 3. Start rolling self-contained segment recorder (8s windows = ~60KB each, scales to hours without 413!)
         try {
@@ -595,9 +675,13 @@ export function useAudioRecorder() {
           }
         }
 
-        // Rotate recorder cleanly every 8 seconds: start next BEFORE stopping previous so 0ms audio is lost!
+        // Rotate recorder cleanly every 5 seconds: start next BEFORE stopping previous so 0ms audio is lost!
+        // Also drain native Windows WASAPI system audio ([THEM]) on the same cadence!
         rotateTimerRef.current = setInterval(() => {
           if (!isRecordingRef.current || !finalStreamRef.current) return;
+          if (nativeLoopbackActiveRef.current) {
+            void drainNativeSystemAudio();
+          }
           const previousRecorder = activeRecorderRef.current;
           spawnSegmentRecorder(finalStreamRef.current, mimeType);
           if (previousRecorder && previousRecorder.state !== "inactive") {
@@ -714,7 +798,7 @@ export function useAudioRecorder() {
         isStartingRef.current = false;
       }
     },
-    [broadcastTranscript, buildCombinedLiveTranscript, releaseAllMediaResources, spawnSegmentRecorder]
+    [broadcastTranscript, buildCombinedLiveTranscript, drainNativeSystemAudio, releaseAllMediaResources, spawnSegmentRecorder]
   );
 
   const stopRecording = useCallback(() => {
@@ -729,7 +813,12 @@ export function useAudioRecorder() {
       rotateTimerRef.current = null;
     }
 
-    // Flush the final in-progress <8s segment
+    // Flush final native WASAPI system audio buffer before stopping
+    if (nativeLoopbackActiveRef.current) {
+      void drainNativeSystemAudio();
+    }
+
+    // Flush the final in-progress segment
     const finalRecorder = activeRecorderRef.current;
     activeRecorderRef.current = null;
     if (finalRecorder && finalRecorder.state !== "inactive") {
@@ -760,7 +849,7 @@ export function useAudioRecorder() {
     }
 
     void finalizeAndSaveMeeting(sessionType, elapsedSecs);
-  }, [finalizeAndSaveMeeting, releaseAllMediaResources]);
+  }, [drainNativeSystemAudio, finalizeAndSaveMeeting, releaseAllMediaResources]);
 
   // Offline meeting sync listener + cleanup on unmount
   useEffect(() => {
@@ -787,9 +876,64 @@ export function useAudioRecorder() {
     };
   }, [releaseAllMediaResources]);
 
+  /**
+   * Immediately flushes the in-progress audio window to Whisper and awaits any in-flight
+   * transcription (capped at 4.2s) so "Suggest Answer" / "Recap" ALWAYS sees speech spoken
+   * right up to the moment the user clicked the button — even inside WebView2 where browser
+   * SpeechRecognition is unavailable.
+   */
+  const flushPendingAudio = useCallback(async (): Promise<string> => {
+    try {
+      const flushPromises: Promise<any>[] = [];
+
+      // 1. Immediately drain Windows native WASAPI system audio ([THEM] — interviewer's latest words!)
+      if (isRecordingRef.current && nativeLoopbackActiveRef.current) {
+        flushPromises.push(drainNativeSystemAudio());
+      }
+
+      // 2. Immediately rotate & flush the user's microphone segment ([YOU])
+      if (isRecordingRef.current && finalStreamRef.current) {
+        const previousRecorder = activeRecorderRef.current;
+        if (previousRecorder && previousRecorder.state === "recording") {
+          segmentHadSpeechRef.current = true;
+          try {
+            spawnSegmentRecorder(finalStreamRef.current, activeMimeTypeRef.current);
+          } catch {
+            // ignore if stream closed
+          }
+          try {
+            previousRecorder.stop();
+          } catch {
+            // ignore
+          }
+          // Let recorder.onstop fire and enqueue the Whisper upload into pendingUploadsRef
+          await new Promise((r) => setTimeout(r, 180));
+        }
+      }
+
+      if (flushPromises.length > 0) {
+        await Promise.race([
+          Promise.allSettled(flushPromises),
+          new Promise((r) => setTimeout(r, 4200)),
+        ]);
+      }
+
+      if (pendingUploadsRef.current.size > 0) {
+        await Promise.race([
+          Promise.allSettled(Array.from(pendingUploadsRef.current)),
+          new Promise((r) => setTimeout(r, 4200)),
+        ]);
+      }
+    } catch {
+      // Non-fatal: fall through to whatever transcript is already captured
+    }
+    return buildCombinedLiveTranscript();
+  }, [buildCombinedLiveTranscript, drainNativeSystemAudio, spawnSegmentRecorder]);
+
   return {
     startRecording,
     stopRecording,
+    flushPendingAudio,
     isRecording,
     isProcessing,
     isPausedBySilence,

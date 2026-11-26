@@ -35,17 +35,17 @@ export function usePlanUsage(): PlanUsageState {
     currentUserEmail === 'bimex4@gmail.com' ||
     currentUserEmail === 'safewayderma@gmail.com';
   const isTauriDesktop = typeof window !== 'undefined' && Boolean((window as any).__TAURI_INTERNALS__ || (window as any).__TAURI__);
-  const isAdmin = isInternalAccount || (isTauriDesktop && (currentUserEmail === '' || isInternalAccount));
+  const isAdmin = isInternalAccount;
 
   const [isPro, setIsPro] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
-    if (isAdmin || isTauriDesktop) return true;
+    if (isAdmin) return true;
     return localStorage.getItem('voiceflow_is_pro') === 'true';
   });
 
   const [isDeviceExceeded, setIsDeviceExceeded] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
-    if (isAdmin || isTauriDesktop) return false;
+    if (isAdmin) return false;
     return localStorage.getItem('voiceflow_device_trial_exceeded') === 'true';
   });
 
@@ -133,43 +133,15 @@ export function usePlanUsage(): PlanUsageState {
   // Sync with Firestore user document and meetings (Server authoritative)
   useEffect(() => {
     if (!auth?.currentUser?.uid || !firestore) {
-      // Unauthenticated users are strictly non-pro
-      if (typeof window !== 'undefined') {
+      // Do not wipe cached Pro state while desktop auth is still hydrating on startup
+      if (!isTauriDesktop && typeof window !== 'undefined') {
         localStorage.removeItem('voiceflow_is_pro');
+        setIsPro(false);
       }
-      setIsPro(false);
       return;
     }
     const uid = auth.currentUser.uid;
     const userDocRef = doc(firestore, 'users', uid);
-
-    // Merge any orphaned pre-granted document for this email
-    const email = auth.currentUser.email?.toLowerCase();
-    if (email) {
-      const orphanQuery = query(collection(firestore, 'users'), where('email', '==', email));
-      getDocs(orphanQuery).then((snap) => {
-        snap.forEach((d) => {
-          if (d.id !== uid) {
-            const oData = d.data();
-            if (oData.bonusMinutesGranted || oData.isPro || oData.subscriptionPlan) {
-              const updates: any = {};
-              if (typeof oData.bonusMinutesGranted === 'number') {
-                updates.bonusMinutesGranted = increment(oData.bonusMinutesGranted);
-              }
-              if (oData.isPro) updates.isPro = true;
-              if (oData.subscriptionPlan) updates.subscriptionPlan = oData.subscriptionPlan;
-              if (oData.planTier) updates.planTier = oData.planTier;
-              updates.dashedBy = oData.dashedBy || 'admin';
-              updates.dashedAt = oData.dashedAt || serverTimestamp();
-              updates.updatedAt = serverTimestamp();
-
-              updateDoc(userDocRef, updates).catch(() => {});
-              deleteDoc(doc(firestore, 'users', d.id)).catch(() => {});
-            }
-          }
-        });
-      }).catch(() => {});
-    }
 
     if (isAdmin) {
       setIsPro(true);

@@ -68,20 +68,29 @@ export default function AiProviderQuotaMonitor({ totalMeetingsCount = 0 }: AiPro
     return () => unsubscribe();
   }, [firestore]);
 
-  // If live tracker doc has no data yet, provide sensible calculated baseline from meeting count
+  // Show real logged counts honestly (zero fabricated minimums!)
   const groqRequests = useMemo(() => {
     const raw = quotaData?.groq?.totalRequests;
-    if (typeof raw === 'number' && raw > 0) return raw;
-    // Estimate ~4 queries per recorded meeting session
-    return Math.max(12, totalMeetingsCount * 4);
-  }, [quotaData, totalMeetingsCount]);
+    return typeof raw === 'number' && raw >= 0 ? raw : 0;
+  }, [quotaData]);
 
   const openRouterRequests = useMemo(() => {
     const raw = quotaData?.openrouter?.totalRequests;
-    if (typeof raw === 'number' && raw > 0) return raw;
-    // Estimate screen capture usage (~1 per 2 meetings)
-    return Math.max(8, Math.round(totalMeetingsCount * 1.5));
-  }, [quotaData, totalMeetingsCount]);
+    return typeof raw === 'number' && raw >= 0 ? raw : 0;
+  }, [quotaData]);
+
+  const handleManualRefresh = async () => {
+    if (!firestore) return;
+    try {
+      const snap = await getDoc(doc(firestore, 'platform_stats', 'ai_provider_quotas'));
+      if (snap.exists()) {
+        setQuotaData(snap.data() as ProviderQuotaData);
+      }
+      setLastCheckTime(new Date());
+    } catch {
+      setLastCheckTime(new Date());
+    }
+  };
 
   // Capacities based on free tier thresholds
   // Groq Free Tier has ~14,400 requests/day (~432,000/month)
@@ -139,7 +148,7 @@ export default function AiProviderQuotaMonitor({ totalMeetingsCount = 0 }: AiPro
             <Button 
               variant="outline" 
               size="sm" 
-              onClick={() => setLastCheckTime(new Date())}
+              onClick={() => void handleManualRefresh()}
               className="h-7 px-2 text-xs gap-1"
             >
               <RefreshCw size={11} />
@@ -184,7 +193,9 @@ export default function AiProviderQuotaMonitor({ totalMeetingsCount = 0 }: AiPro
                 </div>
                 <div>
                   <h4 className="text-sm font-bold text-foreground">Groq AI (Fast Co-Pilot)</h4>
-                  <p className="text-[11px] text-muted-foreground">Llama-3.3 70B & Qwen 27B</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {quotaData?.groq?.lastModel || 'qwen/qwen3.8-27b / gpt-oss-120b'}
+                  </p>
                 </div>
               </div>
               {getStatusBadge(groqPercent)}

@@ -523,6 +523,88 @@ function runDeterministicSuite() {
     // Backwards-compatible boolean 3rd arg
     const legacyCall = buildEnhancedInterviewPrompt("What is on my screen?", "", true);
     check("6.9 Legacy boolean 3rd arg still works", legacyCall.intent === "screen");
+
+    // 7. Crazy-engineering conversation tests: Dual-channel [THEM]/[YOU], split chunks,
+    //    pronoun setup preservation, trailing backchannels, and 48-turn marathon!
+    const dualChannelTx = [
+      "[0:10] [THEM] Tell me about your experience scaling PostgreSQL.",
+      "[0:35] [YOU] Sure, I led a migration to partitioned tables and read replicas.",
+      "[1:02] [THEM] We are currently using Redis Pub/Sub for order notifications and dropping messages during deploys.",
+      "[1:08] [THEM] how would you make that resilient without losing events?",
+      "[1:14] [YOU] Yeah, good question, let me think for a second.",
+    ].join("\n\n");
+
+    const dualRes = buildEnhancedInterviewPrompt(
+      "Give me a smart real-time answer suggestion for the current meeting point.",
+      dualChannelTx,
+      { history: [], previousTranscriptLength: 0 }
+    );
+    check(
+      "7.1 Dual-channel stitches split [THEM] chunks & preserves Redis Pub/Sub setup sentence",
+      Boolean(
+        dualRes.extractedQuestion?.toLowerCase().includes("redis pub/sub") &&
+          dualRes.extractedQuestion?.toLowerCase().includes("resilient")
+      ),
+      dualRes.extractedQuestion
+    );
+    check(
+      "7.2 Dual-channel ignores trailing [YOU] filler ('good question, let me think')",
+      !dualRes.extractedQuestion?.toLowerCase().includes("good question"),
+      dualRes.extractedQuestion
+    );
+    check(
+      "7.3 Recency-anchored prompt places ACTIVE QUESTION marker at end",
+      dualRes.userMessageContent.includes("<<< ACTIVE QUESTION / MOMENT TO ANSWER RIGHT NOW >>>")
+    );
+
+    // Unlabeled split-chunk question across Whisper boundary + implicit spoken question
+    const implicitSplitTx = [
+      "[0:20] We noticed hydration warnings on our Next.js App Router checkout page after adding a dynamic theme.",
+      "[0:26] I'm curious how you would track that down and fix it cleanly.",
+      "[0:31] Yeah, okay, um, good question.",
+    ].join("\n\n");
+    const implicitRes = buildEnhancedInterviewPrompt("What should I say?", implicitSplitTx, {});
+    check(
+      "7.4 Implicit spoken question ('I'm curious how...') preserves Next.js hydration setup & ignores trailing filler",
+      Boolean(
+        implicitRes.extractedQuestion?.toLowerCase().includes("hydration") &&
+          implicitRes.extractedQuestion?.toLowerCase().includes("track that down")
+      ),
+      implicitRes.extractedQuestion
+    );
+
+    // 48-turn marathon stress test (simulating the real user's 48-conversation session!)
+    const marathonHistory: ConversationTurn[] = [];
+    for (let i = 1; i <= 48; i++) {
+      marathonHistory.push(
+        { role: "user", content: `[Asked for live answer to]: Question number ${i} about topic_${i}` },
+        { role: "assistant", content: `**Direct answer for topic_${i}.**\n- Concrete point for topic_${i}.` }
+      );
+    }
+    const marathonTx =
+      "[40:00] [THEM] Earlier we talked about topic_48.\n\n[41:00] [YOU] Yes that worked well.\n\n[41:15] [THEM] Final question: how do you prevent memory leaks in long-lived WebSocket connections in Node.js?";
+    const mStart = performance.now();
+    const marathonRes = buildEnhancedInterviewPrompt(
+      "Give me a smart real-time answer suggestion for the current meeting point.",
+      marathonTx,
+      {
+        history: marathonHistory,
+        previousTranscriptLength: marathonTx.indexOf("[41:15]"),
+        previousTranscriptTail: "[41:00] [YOU] Yes that worked well.",
+      }
+    );
+    const mDt = performance.now() - mStart;
+    check("7.5 48-turn marathon executes in < 25ms", mDt < 25, `${mDt.toFixed(1)}ms`);
+    check(
+      "7.6 48-turn marathon locks cleanly onto final WebSocket memory leak question",
+      Boolean(marathonRes.extractedQuestion?.toLowerCase().includes("websocket")),
+      marathonRes.extractedQuestion
+    );
+    check(
+      "7.7 48-turn marathon does NOT confuse new WebSocket question with repeat ask",
+      marathonRes.isRepeatAsk === false,
+      marathonRes.isRepeatAsk
+    );
   }
 
   const elapsed = (performance.now() - start).toFixed(1);

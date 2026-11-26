@@ -1,5 +1,6 @@
 mod win_grid;
 mod screen_capture;
+mod audio_loopback;
 
 use tauri::Emitter;
 #[cfg(desktop)]
@@ -70,10 +71,23 @@ fn enter_hud_mode(window: tauri::Window, is_expanded: bool, is_hidden: bool, rep
         let _ = window.unmaximize();
     }
 
+    let (screen_w, screen_h) = if let Ok(Some(monitor)) = window.current_monitor() {
+        let scale = monitor.scale_factor();
+        (
+            monitor.size().width as f64 / scale,
+            monitor.size().height as f64 / scale,
+        )
+    } else {
+        (1440.0, 900.0)
+    };
+
     let (target_w, target_h) = if is_hidden {
         (440.0, 70.0)
     } else if is_expanded {
-        (660.0, 600.0)
+        // Generous expanded reading size for long AI answers & code blocks, clamped cleanly to screen bounds
+        let max_w = (screen_w - 60.0).max(680.0);
+        let max_h = (screen_h - 80.0).max(600.0);
+        (940.0_f64.min(max_w), 780.0_f64.min(max_h))
     } else {
         (580.0, 480.0)
     };
@@ -81,16 +95,23 @@ fn enter_hud_mode(window: tauri::Window, is_expanded: bool, is_hidden: bool, rep
     // 2. Set size
     window.set_size(tauri::LogicalSize::new(target_w, target_h)).map_err(|e| e.to_string())?;
 
-    // 3. Only reposition on initial entry into HUD mode so user drag location is preserved on expand/collapse
+    // 3. Reposition on initial HUD entry, or clamp inside monitor bounds when expanding so it never clips off-screen
     if should_reposition {
+        let pos_x = ((screen_w - target_w) / 2.0).max(0.0);
+        let pos_y = 28.0;
+        let _ = window.set_position(tauri::LogicalPosition::new(pos_x, pos_y));
+    } else if is_expanded {
         if let Ok(Some(monitor)) = window.current_monitor() {
             let scale = monitor.scale_factor();
-            let screen_w = monitor.size().width as f64 / scale;
-            let pos_x = ((screen_w - target_w) / 2.0).max(0.0);
-            let pos_y = 35.0; // 35px from top
-            let _ = window.set_position(tauri::LogicalPosition::new(pos_x, pos_y));
-        } else {
-            let _ = window.center();
+            if let Ok(outer_pos) = window.outer_position() {
+                let cur_x = outer_pos.x as f64 / scale;
+                let cur_y = outer_pos.y as f64 / scale;
+                let clamped_x = cur_x.min((screen_w - target_w - 16.0).max(0.0)).max(8.0);
+                let clamped_y = cur_y.min((screen_h - target_h - 24.0).max(0.0)).max(8.0);
+                if (clamped_x - cur_x).abs() > 2.0 || (clamped_y - cur_y).abs() > 2.0 {
+                    let _ = window.set_position(tauri::LogicalPosition::new(clamped_x, clamped_y));
+                }
+            }
         }
     }
 
@@ -270,6 +291,9 @@ pub fn run() {
         win_grid::list_desktop_windows,
         win_grid::read_desktop_grid,
         screen_capture::capture_screen,
+        audio_loopback::start_system_audio_capture,
+        audio_loopback::drain_system_audio_wav,
+        audio_loopback::stop_system_audio_capture,
         open_url,
         start_oauth_listener
     ])
@@ -353,8 +377,8 @@ pub fn run() {
             }
 
             // Build tray menu
-            let quit_i = MenuItem::with_id(app, "quit", "Quit Zeneva", true, None::<&str>)?;
-            let show_i = MenuItem::with_id(app, "show", "Show Zeneva Dashboard", true, None::<&str>)?;
+            let quit_i = MenuItem::with_id(app, "quit", "Quit Voiceflow", true, None::<&str>)?;
+            let show_i = MenuItem::with_id(app, "show", "Show Voiceflow Dashboard", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
 
             // Build tray icon (non-fatal if icon is missing)

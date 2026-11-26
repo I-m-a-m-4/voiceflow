@@ -51,6 +51,9 @@ export async function POST(req: NextRequest) {
     const file = formData.get("file") as File;
     const rawOffset = formData.get("offsetSeconds");
     const offsetSeconds = Math.max(0, Number(rawOffset) || 0);
+    const rawSpeaker = String(formData.get("speaker") || "").trim().toUpperCase();
+    const speakerTag = rawSpeaker === "THEM" || rawSpeaker === "YOU" ? `[${rawSpeaker}] ` : "";
+    const whisperPrompt = String(formData.get("prompt") || "").trim().slice(-220);
 
     if (!file || file.size === 0) {
       return NextResponse.json(
@@ -85,6 +88,9 @@ export async function POST(req: NextRequest) {
         groqFormData.append("response_format", "verbose_json");
         groqFormData.append("language", "en");
         groqFormData.append("temperature", "0.0");
+        if (whisperPrompt) {
+          groqFormData.append("prompt", whisperPrompt);
+        }
 
         const groqRes = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
           method: "POST",
@@ -151,7 +157,7 @@ export async function POST(req: NextRequest) {
       for (let i = 1; i < segments.length; i++) {
         const seg = segments[i];
         if (seg.start - currentStart > 14 || currentTexts.join(" ").length > 260) {
-          blocks.push(`[${formatTimestamp(currentStart)}] ${currentTexts.join(" ")}`);
+          blocks.push(`[${formatTimestamp(currentStart)}] ${speakerTag}${currentTexts.join(" ")}`);
           currentStart = seg.start;
           currentTexts = [seg.text];
         } else {
@@ -159,11 +165,11 @@ export async function POST(req: NextRequest) {
         }
       }
       if (currentTexts.length > 0) {
-        blocks.push(`[${formatTimestamp(currentStart)}] ${currentTexts.join(" ")}`);
+        blocks.push(`[${formatTimestamp(currentStart)}] ${speakerTag}${currentTexts.join(" ")}`);
       }
       formattedTranscript = blocks.join("\n\n");
     } else if (transcriptionText) {
-      formattedTranscript = `[${formatTimestamp(offsetSeconds)}] ${transcriptionText}`;
+      formattedTranscript = `[${formatTimestamp(offsetSeconds)}] ${speakerTag}${transcriptionText}`;
     } else {
       formattedTranscript = "";
     }

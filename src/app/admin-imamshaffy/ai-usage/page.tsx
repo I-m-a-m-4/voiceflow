@@ -42,6 +42,7 @@ import {
 } from 'recharts';
 import VoiceflowAiInterviewDiagnostics from '@/components/admin/voiceflow-ai-interview-diagnostics';
 import AiProviderQuotaMonitor from '@/components/admin/ai-provider-quota-monitor';
+import ContextDriftMonitor from '@/components/admin/context-drift-monitor';
 
 /**
  * Admin AI board.
@@ -796,6 +797,9 @@ export default function AdminAIUsage() {
           </Button>
         </div>
       </div>
+
+      {/* Context Reliability & Multi-Turn Drift Telemetry */}
+      <ContextDriftMonitor />
 
       {/* AI Provider Quotas & Free Tier Monitor (Groq & OpenRouter) */}
       <AiProviderQuotaMonitor />

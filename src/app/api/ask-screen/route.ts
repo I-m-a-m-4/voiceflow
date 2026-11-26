@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from "next/server";
 import {
   buildEnhancedInterviewPrompt,
   sanitizeConversationHistory,
+  tokenizeContent,
 } from "@/lib/transcript-context";
 
 export const maxDuration = 60;
@@ -26,6 +27,7 @@ interface ProviderAttemptResult {
 }
 
 export async function POST(req: NextRequest) {
+  const requestStartedAt = Date.now();
   try {
     const body = await req.json();
     const {
@@ -50,6 +52,8 @@ export async function POST(req: NextRequest) {
 
     // Sanitize & bound prior conversation history (last 10 turns / 5 full exchanges, capped at 1400 chars each)
     const cleanHistory = sanitizeConversationHistory(history, 10, 1400);
+    const prevAssistantReply =
+      [...cleanHistory].reverse().find((h) => h.role === "assistant")?.content || "";
 
     const prevTranscriptLen =
       typeof lastTranscriptLength === "number" && Number.isFinite(lastTranscriptLength)
@@ -72,6 +76,7 @@ export async function POST(req: NextRequest) {
       isRepeatAsk: promptCtx.isRepeatAsk,
       hasTranscriptDelta: promptCtx.hasTranscriptDelta,
       turnNumber: promptCtx.turnNumber,
+      extractedQuestion: promptCtx.extractedQuestion || undefined,
     };
 
     const openRouterKey = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
@@ -142,14 +147,34 @@ export async function POST(req: NextRequest) {
           if (orRes.ok) {
             if (wantStream && orRes.body) {
               after(() => recordUsage("openrouter", model));
-              return createSSEResponseFromUpstream(orRes, "openrouter", model, responseMeta);
+              return createSSEResponseFromUpstream(
+                orRes,
+                "openrouter",
+                model,
+                responseMeta,
+                prevAssistantReply,
+                requestStartedAt,
+                promptCtx.isTranscriptRelevant
+              );
             }
             const orData = await orRes.json();
             const rawMsg = orData.choices?.[0]?.message;
             const text = ((rawMsg?.content && rawMsg.content.trim()) || (rawMsg?.reasoning && rawMsg.reasoning.trim()) || "").trim();
             if (text && !text.includes("User Safety: safe")) {
-              after(() => recordUsage("openrouter", model));
-              return NextResponse.json({ text, provider: "openrouter", model, ...responseMeta }, { headers: CORS_HEADERS });
+              const drift = evaluateContextDrift(text, prevAssistantReply, Date.now() - requestStartedAt, promptCtx.isRepeatAsk);
+              after(() => {
+                void recordUsage("openrouter", model);
+                void recordContextTelemetry({
+                  ...responseMeta,
+                  isTranscriptRelevant: promptCtx.isTranscriptRelevant,
+                  provider: "openrouter",
+                  model,
+                  latencyMs: Date.now() - requestStartedAt,
+                  responseChars: text.length,
+                  ...drift,
+                });
+              });
+              return NextResponse.json({ text, provider: "openrouter", model, ...responseMeta, ...drift }, { headers: CORS_HEADERS });
             }
           } else {
             const errData: any = await orRes.json().catch(() => ({}));
@@ -196,6 +221,7 @@ export async function POST(req: NextRequest) {
       isRepeatAsk: textCtx.isRepeatAsk,
       hasTranscriptDelta: textCtx.hasTranscriptDelta,
       turnNumber: textCtx.turnNumber,
+      extractedQuestion: textCtx.extractedQuestion || undefined,
     };
 
     // ------------------------------------------------------------------
@@ -239,13 +265,33 @@ export async function POST(req: NextRequest) {
           if (groqRes.ok) {
             if (wantStream && groqRes.body) {
               after(() => recordUsage("groq", model));
-              return createSSEResponseFromUpstream(groqRes, "groq", model, textMeta);
+              return createSSEResponseFromUpstream(
+                groqRes,
+                "groq",
+                model,
+                textMeta,
+                prevAssistantReply,
+                requestStartedAt,
+                textCtx.isTranscriptRelevant
+              );
             }
             const data = await groqRes.json();
             const textOutput = (data?.choices?.[0]?.message?.content || "").trim();
             if (textOutput) {
-              after(() => recordUsage("groq", model));
-              return NextResponse.json({ text: textOutput, provider: "groq", model, ...textMeta }, { headers: CORS_HEADERS });
+              const drift = evaluateContextDrift(textOutput, prevAssistantReply, Date.now() - requestStartedAt, textCtx.isRepeatAsk);
+              after(() => {
+                void recordUsage("groq", model);
+                void recordContextTelemetry({
+                  ...textMeta,
+                  isTranscriptRelevant: textCtx.isTranscriptRelevant,
+                  provider: "groq",
+                  model,
+                  latencyMs: Date.now() - requestStartedAt,
+                  responseChars: textOutput.length,
+                  ...drift,
+                });
+              });
+              return NextResponse.json({ text: textOutput, provider: "groq", model, ...textMeta, ...drift }, { headers: CORS_HEADERS });
             }
           } else {
             const errData: any = await groqRes.json().catch(() => ({}));
@@ -295,13 +341,33 @@ export async function POST(req: NextRequest) {
           if (orRes.ok) {
             if (wantStream && orRes.body) {
               after(() => recordUsage("openrouter", model));
-              return createSSEResponseFromUpstream(orRes, "openrouter", model, textMeta);
+              return createSSEResponseFromUpstream(
+                orRes,
+                "openrouter",
+                model,
+                textMeta,
+                prevAssistantReply,
+                requestStartedAt,
+                textCtx.isTranscriptRelevant
+              );
             }
             const orData = await orRes.json();
             const answer = (orData.choices?.[0]?.message?.content || "").trim();
             if (answer && !answer.includes("User Safety: safe")) {
-              after(() => recordUsage("openrouter", model));
-              return NextResponse.json({ text: answer, provider: "openrouter", model, ...textMeta }, { headers: CORS_HEADERS });
+              const drift = evaluateContextDrift(answer, prevAssistantReply, Date.now() - requestStartedAt, textCtx.isRepeatAsk);
+              after(() => {
+                void recordUsage("openrouter", model);
+                void recordContextTelemetry({
+                  ...textMeta,
+                  isTranscriptRelevant: textCtx.isTranscriptRelevant,
+                  provider: "openrouter",
+                  model,
+                  latencyMs: Date.now() - requestStartedAt,
+                  responseChars: answer.length,
+                  ...drift,
+                });
+              });
+              return NextResponse.json({ text: answer, provider: "openrouter", model, ...textMeta, ...drift }, { headers: CORS_HEADERS });
             }
           } else {
             const errData: any = await orRes.json().catch(() => ({}));
@@ -337,11 +403,44 @@ export async function POST(req: NextRequest) {
  * Proxies an OpenAI-compatible SSE stream (Groq / OpenRouter) into a clean, normalized SSE stream
  * emitting `{ delta }`, `{ done: true, provider, model }`, or `{ error }`.
  */
+function evaluateContextDrift(
+  responseText: string,
+  prevAssistantReply: string,
+  latencyMs: number,
+  isRepeatAsk: boolean
+): { overlapWithPrev: number | null; driftStatus: "healthy" | "watch" | "drifting" } {
+  const cleanResp = (responseText || "").trim();
+  if (cleanResp.length < 20) {
+    return { overlapWithPrev: null, driftStatus: "drifting" };
+  }
+  let overlapWithPrev: number | null = null;
+  if (prevAssistantReply && prevAssistantReply.trim().length > 15) {
+    const a = tokenizeContent(cleanResp);
+    const b = tokenizeContent(prevAssistantReply);
+    if (a.size > 0 && b.size > 0) {
+      let inter = 0;
+      for (const t of a) if (b.has(t)) inter++;
+      overlapWithPrev = Number((inter / (a.size + b.size - inter)).toFixed(3));
+    }
+  }
+  const repeatThreshold = isRepeatAsk ? 0.58 : 0.68;
+  if (overlapWithPrev !== null && overlapWithPrev >= repeatThreshold) {
+    return { overlapWithPrev, driftStatus: "drifting" };
+  }
+  if ((overlapWithPrev !== null && overlapWithPrev >= 0.45) || latencyMs > 7000) {
+    return { overlapWithPrev, driftStatus: "watch" };
+  }
+  return { overlapWithPrev, driftStatus: "healthy" };
+}
+
 function createSSEResponseFromUpstream(
   upstreamRes: Response,
   provider: string,
   model: string,
-  meta: Record<string, unknown> = {}
+  meta: Record<string, any> = {},
+  prevAssistantReply = "",
+  startedAt = Date.now(),
+  isTranscriptRelevant = false
 ): Response {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
@@ -357,6 +456,7 @@ function createSSEResponseFromUpstream(
 
       let buffer = "";
       let emittedAny = false;
+      let accumulatedText = "";
       let reasoningFallback = "";
 
       try {
@@ -380,6 +480,7 @@ function createSSEResponseFromUpstream(
               const chunkText = deltaObj?.content || "";
               if (chunkText) {
                 emittedAny = true;
+                accumulatedText += chunkText;
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify({ delta: chunkText })}\n\n`));
               } else if (deltaObj?.reasoning) {
                 reasoningFallback += deltaObj.reasoning;
@@ -392,7 +493,8 @@ function createSSEResponseFromUpstream(
 
         if (!emittedAny && reasoningFallback.trim()) {
           emittedAny = true;
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ delta: reasoningFallback.trim() })}\n\n`));
+          accumulatedText = reasoningFallback.trim();
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ delta: accumulatedText })}\n\n`));
         }
 
         if (!emittedAny) {
@@ -400,7 +502,24 @@ function createSSEResponseFromUpstream(
             encoder.encode(`data: ${JSON.stringify({ error: "Model returned an empty response. Please tap Retry." })}\n\n`)
           );
         } else {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true, provider, model, ...meta })}\n\n`));
+          const latencyMs = Date.now() - startedAt;
+          const drift = evaluateContextDrift(accumulatedText, prevAssistantReply, latencyMs, Boolean(meta.isRepeatAsk));
+          void recordContextTelemetry({
+            intent: String(meta.intent || "custom"),
+            responseMode: String(meta.responseMode || "direct_analytical"),
+            isRepeatAsk: Boolean(meta.isRepeatAsk),
+            hasTranscriptDelta: Boolean(meta.hasTranscriptDelta),
+            isTranscriptRelevant,
+            turnNumber: Number(meta.turnNumber || 1),
+            provider,
+            model,
+            latencyMs,
+            responseChars: accumulatedText.length,
+            ...drift,
+          });
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ done: true, provider, model, ...meta, ...drift })}\n\n`)
+          );
         }
       } catch (streamErr: any) {
         controller.enqueue(
@@ -452,6 +571,69 @@ async function recordUsage(provider: "groq" | "openrouter", model: string) {
     }
   } catch {
     // silently ignore metrics failure
+  }
+}
+
+async function recordContextTelemetry(event: {
+  intent: string;
+  responseMode: string;
+  isRepeatAsk: boolean;
+  hasTranscriptDelta: boolean;
+  isTranscriptRelevant: boolean;
+  turnNumber: number;
+  provider: string;
+  model: string;
+  latencyMs: number;
+  responseChars: number;
+  overlapWithPrev: number | null;
+  driftStatus: "healthy" | "watch" | "drifting";
+}) {
+  try {
+    const { adminFirestore } = await import("@/firebase/admin");
+    if (!adminFirestore) return;
+    const admin = (await import("firebase-admin")).default;
+    const inc = admin.firestore.FieldValue.increment;
+
+    const safeMode = event.responseMode.replace(/[^a-zA-Z0-9_]/g, "_");
+    const safeIntent = event.intent.replace(/[^a-zA-Z0-9_]/g, "_");
+
+    const rollupUpdate: Record<string, any> = {
+      totalTurns: inc(1),
+      [`status_${event.driftStatus}`]: inc(1),
+      [`mode_${safeMode}`]: inc(1),
+      [`intent_${safeIntent}`]: inc(1),
+      latencyMsSum: inc(Math.max(0, Math.round(event.latencyMs))),
+      lastDriftStatus: event.driftStatus,
+      lastModel: event.model,
+      lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    if (event.isRepeatAsk) {
+      rollupUpdate.repeatAskTurns = inc(1);
+      if (event.driftStatus !== "drifting") {
+        rollupUpdate.freshRepeatTurns = inc(1);
+      }
+    }
+    if (event.hasTranscriptDelta) {
+      rollupUpdate.transcriptDeltaHits = inc(1);
+    }
+    if (event.overlapWithPrev !== null) {
+      rollupUpdate.overlapSum = inc(event.overlapWithPrev);
+      rollupUpdate.overlapCount = inc(1);
+    }
+
+    await Promise.all([
+      adminFirestore
+        .collection("platform_stats")
+        .doc("context_telemetry")
+        .set(rollupUpdate, { merge: true }),
+      adminFirestore.collection("context_telemetry_events").add({
+        ...event,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      }),
+    ]);
+  } catch {
+    // Telemetry must never degrade live responses
   }
 }
 

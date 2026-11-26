@@ -38,12 +38,13 @@ import remarkGfm from "remark-gfm";
 import { usePlanUsage } from "@/hooks/use-plan-usage";
 import { apiBase } from "@/lib/platform";
 import { copyToClipboard } from "@/lib/clipboard";
-import { isScreenFocusedPrompt } from "@/lib/transcript-context";
+import { isGenericAskPrompt, isScreenFocusedPrompt } from "@/lib/transcript-context";
 import type { TranscriptionHealth } from "@/hooks/useAudioRecorder";
 
 interface MeetingWidgetProps {
   isRecording: boolean;
   stopRecording: () => void;
+  flushPendingAudio?: () => Promise<string>;
   transcript?: string;
   transcriptionHealth?: TranscriptionHealth;
   systemAudioActive?: boolean;
@@ -60,6 +61,8 @@ interface ChatMessage {
   hadImage?: boolean;
   provider?: string;
   model?: string;
+  answeredQuestion?: string;
+  responseMode?: string;
   isStreaming?: boolean;
   isError?: boolean;
   retryPrompt?: string;
@@ -79,16 +82,33 @@ interface SavedSession {
 function stripImagesForStorage(msgs: ChatMessage[]): ChatMessage[] {
   return msgs
     .filter((m) => !m.isStreaming)
-    .slice(-30)
+    .slice(-50)
     .map(({ imageBase64, retryImageBase64, ...rest }) => ({
       ...rest,
       hadImage: rest.hadImage || Boolean(imageBase64),
     }));
 }
 
+// Keep in-memory DOM light during 48+ turn screenshot marathons: retain base64 thumbnails only on the newest 8 images
+function trimOldInMemoryImages(msgs: ChatMessage[]): ChatMessage[] {
+  let seenImages = 0;
+  const out = [...msgs];
+  for (let i = out.length - 1; i >= 0; i--) {
+    if (out[i].imageBase64) {
+      seenImages++;
+      if (seenImages > 8) {
+        const { imageBase64, ...rest } = out[i];
+        out[i] = { ...rest, hadImage: true };
+      }
+    }
+  }
+  return out;
+}
+
 export default function MeetingWidget({
   isRecording,
   stopRecording,
+  flushPendingAudio,
   transcript,
   transcriptionHealth = "listening",
   systemAudioActive = false,
@@ -102,6 +122,7 @@ export default function MeetingWidget({
   const [secondsElapsed, setSecondsElapsed] = useState(0);
   const [previewModalImage, setPreviewModalImage] = useState<string | null>(null);
   const [copiedTranscript, setCopiedTranscript] = useState(false);
+  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>(() => {
@@ -128,9 +149,13 @@ export default function MeetingWidget({
 
   const [liveTranscript, setLiveTranscript] = useState<string>("");
   const [hasAttachedImage, setHasAttachedImage] = useState<boolean>(false);
+  const [showJumpToLatest, setShowJumpToLatest] = useState<boolean>(false);
+  const [isSyncingAudio, setIsSyncingAudio] = useState<boolean>(false);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const transcriptContainerRef = useRef<HTMLDivElement>(null);
+  const chatPinnedToBottomRef = useRef<boolean>(true);
+  const transcriptPinnedToBottomRef = useRef<boolean>(true);
   const lastImageBase64Ref = useRef<string | null>(null);
   const lastAskedTranscriptLenRef = useRef<number>(0);
   const lastAskedTranscriptTailRef = useRef<string>("");
@@ -333,8 +358,8 @@ export default function MeetingWidget({
             await win.unmaximize();
           }
 
-          const targetW = isHidden ? 440 : isExpanded ? 660 : 580;
-          const targetH = isHidden ? 70 : isExpanded ? 600 : 480;
+          const targetW = isHidden ? 440 : isExpanded ? 920 : 580;
+          const targetH = isHidden ? 70 : isExpanded ? 760 : 480;
           await win.setSize(new LogicalSize(targetW, targetH));
 
           if (shouldReposition) {
@@ -476,14 +501,46 @@ export default function MeetingWidget({
     }
   }, [messages]);
 
-  // Smooth auto-scroll when messages stream or transcript updates
+  // Track whether user scrolled up to read earlier content — NEVER yank them back to bottom!
+  const handleChatScroll = useCallback(() => {
+    const el = chatContainerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const isNearBottom = distanceFromBottom <= 48;
+    chatPinnedToBottomRef.current = isNearBottom;
+    setShowJumpToLatest(!isNearBottom && el.scrollHeight > el.clientHeight + 40);
+  }, []);
+
+  const handleTranscriptScroll = useCallback(() => {
+    const el = transcriptContainerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    transcriptPinnedToBottomRef.current = distanceFromBottom <= 48;
+  }, []);
+
+  const jumpChatToBottom = useCallback(() => {
+    const el = chatContainerRef.current;
+    if (!el) return;
+    chatPinnedToBottomRef.current = true;
+    setShowJumpToLatest(false);
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, []);
+
+  // Auto-scroll CHAT only when user is already pinned near bottom (NEVER triggered by liveTranscript updates!)
   useEffect(() => {
-    if (activeTab === "chat" && chatContainerRef.current) {
+    if (activeTab !== "chat" || !chatContainerRef.current) return;
+    if (chatPinnedToBottomRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-    } else if (activeTab === "transcript" && transcriptContainerRef.current) {
+    }
+  }, [messages, isQuerying, activeTab]);
+
+  // Auto-scroll TRANSCRIPT tab independently only when user is pinned near bottom
+  useEffect(() => {
+    if (activeTab !== "transcript" || !transcriptContainerRef.current) return;
+    if (transcriptPinnedToBottomRef.current) {
       transcriptContainerRef.current.scrollTop = transcriptContainerRef.current.scrollHeight;
     }
-  }, [messages, liveTranscript, isQuerying, activeTab]);
+  }, [liveTranscript, activeTab]);
 
   const applyStealth = useCallback(async (stealthOn: boolean) => {
     try {
@@ -632,18 +689,54 @@ export default function MeetingWidget({
           isStreaming: true,
         };
 
-        const historyPayload = messagesRef.current
-          .filter((m) => !m.isError && !m.isStreaming && m.text.trim())
-          .slice(-10)
-          .map((m) => ({
+        // Build clean semantic history: replace repetitive boilerplate "Suggest Answer" prompts
+        // with the actual extracted question that was answered so 48-turn chats never poison LLM attention!
+        const validHistoryMsgs = messagesRef.current.filter((m) => !m.isError && !m.isStreaming && m.text.trim());
+        const historyPayload = validHistoryMsgs.slice(-10).map((m, idx, arr) => {
+          if (m.sender === "user" && isGenericAskPrompt(m.text)) {
+            const pairedAi = arr[idx + 1];
+            if (pairedAi?.sender === "ai" && pairedAi.answeredQuestion) {
+              return {
+                role: "user",
+                content: `[Asked for live answer to]: ${pairedAi.answeredQuestion}`,
+              };
+            }
+          }
+          return {
             role: m.sender === "user" ? "user" : "assistant",
             content: m.text,
-          }));
+          };
+        });
 
-        setMessages((prev) => [...prev, userMsg, placeholderAiMsg]);
+        // User initiated a new turn: re-pin chat to bottom so the new response starts in view,
+        // while any subsequent upward scroll immediately releases auto-scroll!
+        chatPinnedToBottomRef.current = true;
+        setShowJumpToLatest(false);
+        setMessages((prev) => trimOldInMemoryImages([...prev, userMsg, placeholderAiMsg]));
+
+        // For Suggest Answer / Recap (text-only), flush any buffered live audio segment to Whisper
+        // BEFORE querying AI so speech from the last 1-5 seconds is guaranteed to be included!
+        let flushedTranscript = "";
+        if (mode === "text-only" && isRecording && flushPendingAudio) {
+          setIsSyncingAudio(true);
+          try {
+            flushedTranscript = (await flushPendingAudio()) || "";
+            if (flushedTranscript.trim()) {
+              liveTranscriptRef.current = flushedTranscript;
+              setLiveTranscript(flushedTranscript);
+            }
+          } catch {
+            // non-fatal
+          } finally {
+            setIsSyncingAudio(false);
+          }
+        }
+
+        if (controller.signal.aborted) return;
 
         const customContext = typeof window !== "undefined" ? localStorage.getItem("voiceflow_custom_context") || "" : "";
         const activeTranscript =
+          flushedTranscript ||
           liveTranscriptRef.current ||
           transcript ||
           (typeof window !== "undefined" ? localStorage.getItem("voiceflow_live_transcript") || "" : "");
@@ -700,6 +793,8 @@ export default function MeetingWidget({
           let streamError = "";
           let providerUsed = "voiceflow";
           let modelUsed = "";
+          let extractedQ = "";
+          let modeUsed = "";
 
           try {
             while (true) {
@@ -730,6 +825,8 @@ export default function MeetingWidget({
                   } else if (evt.done) {
                     providerUsed = evt.provider || "voiceflow";
                     modelUsed = evt.model || "";
+                    extractedQ = typeof evt.extractedQuestion === "string" ? evt.extractedQuestion : "";
+                    modeUsed = typeof evt.responseMode === "string" ? evt.responseMode : "";
                   } else if (evt.error) {
                     streamError = evt.error;
                   }
@@ -759,6 +856,8 @@ export default function MeetingWidget({
                       isStreaming: false,
                       provider: providerUsed,
                       model: modelUsed,
+                      answeredQuestion: extractedQ || undefined,
+                      responseMode: modeUsed || undefined,
                     }
                   : m
               )
@@ -797,6 +896,8 @@ export default function MeetingWidget({
                       isStreaming: false,
                       provider: data.provider || "voiceflow",
                       model: data.model || "",
+                      answeredQuestion: typeof data.extractedQuestion === "string" ? data.extractedQuestion : undefined,
+                      responseMode: typeof data.responseMode === "string" ? data.responseMode : undefined,
                     }
                   : m
               )
@@ -879,10 +980,11 @@ export default function MeetingWidget({
         });
       } finally {
         abortControllerRef.current = null;
+        setIsSyncingAudio(false);
         setIsQuerying(false);
       }
     },
-    [isHidden, isQuerying, query, recordScreenCapture, transcript]
+    [flushPendingAudio, isHidden, isQuerying, isRecording, query, recordScreenCapture, transcript]
   );
 
   // Keep shortcut refs pointing to the latest closures every render
@@ -902,8 +1004,9 @@ export default function MeetingWidget({
     void handleAskAI(msg.retryPrompt, msg.retryMode || "auto", msg.retryImageBase64);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
       void handleAskAI();
     }
   };
@@ -955,7 +1058,7 @@ export default function MeetingWidget({
       : transcriptionHealth === "syncing"
         ? "Transcribing live audio..."
         : systemAudioActive
-          ? "Listening (Mic + Call Audio)"
+          ? "Call Audio (Them) + Mic (You)"
           : "Listening (Microphone)";
 
   return createPortal(
@@ -1009,7 +1112,7 @@ export default function MeetingWidget({
         className={
           isTauri
             ? `fixed inset-0 top-0 left-0 w-full h-full flex flex-col items-center justify-start p-2 pointer-events-auto select-none font-dm-sans z-[2147483647]`
-            : `fixed top-12 sm:top-14 inset-x-0 mx-auto z-[2147483647] w-[92%] ${isExpanded ? "max-w-[700px]" : "max-w-[620px]"} flex flex-col items-center pointer-events-none select-none font-dm-sans`
+            : `fixed top-10 sm:top-12 inset-x-0 mx-auto z-[2147483647] w-[95%] ${isExpanded ? "max-w-[900px]" : "max-w-[620px]"} flex flex-col items-center pointer-events-none select-none font-dm-sans`
         }
       >
         {/* Top Pill Controls - Stealth Floating Handle */}
@@ -1101,7 +1204,13 @@ export default function MeetingWidget({
         {/* Main Floating Card */}
         {!isHidden && (
           <div
-            className={`w-full bg-[#18181b]/95 backdrop-blur-xl border border-white/10 rounded-2xl p-3.5 shadow-2xl pointer-events-auto animate-in fade-in slide-in-from-top-4 duration-300 relative overflow-hidden transition-all duration-300 ${isExpanded ? "max-w-[660px]" : "max-w-[560px]"}`}
+            className={`w-full bg-[#18181b]/95 backdrop-blur-xl border border-white/10 rounded-2xl p-3.5 shadow-2xl pointer-events-auto animate-in fade-in slide-in-from-top-4 duration-300 relative overflow-hidden transition-all duration-300 flex flex-col ${
+              isTauri
+                ? `flex-1 min-h-0 ${isExpanded ? "max-w-[940px]" : "max-w-[560px]"}`
+                : isExpanded
+                  ? "max-w-[900px]"
+                  : "max-w-[560px]"
+            }`}
           >
             {/* Top Navigation Tabs */}
             <div className="flex items-center gap-1 mb-2.5 bg-black/40 p-1 rounded-xl border border-white/5">
@@ -1178,10 +1287,18 @@ export default function MeetingWidget({
                 </div>
 
                 {/* Messages Container */}
-                <div
-                  ref={chatContainerRef}
-                  className={`mb-2.5 bg-white/5 p-3 rounded-xl border border-white/5 overflow-y-auto space-y-3 transition-all duration-300 ${isExpanded ? "h-[320px] max-h-[320px]" : "h-56 max-h-56"} select-text pointer-events-auto scrollbar-thin scrollbar-thumb-white/20 hover:scrollbar-thumb-white/30 scrollbar-track-transparent pr-1.5`}
-                >
+                <div className={`relative mb-2.5 flex flex-col ${isTauri ? "flex-1 min-h-0" : ""}`}>
+                  <div
+                    ref={chatContainerRef}
+                    onScroll={handleChatScroll}
+                    className={`bg-white/5 p-3 rounded-xl border border-white/5 overflow-y-auto space-y-3 transition-all duration-300 ${
+                      isTauri
+                        ? "flex-1 min-h-0"
+                        : isExpanded
+                          ? "h-[60vh] min-h-[440px] max-h-[600px]"
+                          : "h-56 max-h-56"
+                    } select-text pointer-events-auto scrollbar-thin scrollbar-thumb-white/20 hover:scrollbar-thumb-white/30 scrollbar-track-transparent pr-1.5`}
+                  >
                   {messages.length === 0 ? (
                     <div className="text-white/70 text-[13px] leading-relaxed py-3 text-center">
                       <p className="font-semibold text-white/90 mb-1">Live Meeting Co-Pilot Active</p>
@@ -1210,7 +1327,7 @@ export default function MeetingWidget({
                           )}
                         </div>
 
-                        {msg.imageBase64 && (
+                        {msg.imageBase64 ? (
                           <div className="mb-1.5 flex flex-col items-end">
                             <div
                               onClick={() => setPreviewModalImage(msg.imageBase64!)}
@@ -1224,7 +1341,11 @@ export default function MeetingWidget({
                             </div>
                             <span className="text-[9px] text-white/40 mt-0.5">Attached Screen Capture</span>
                           </div>
-                        )}
+                        ) : msg.hadImage && msg.sender === "user" ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] text-blue-300/70 mb-1 px-1">
+                            <ImageIcon size={10} /> Screenshot analyzed
+                          </span>
+                        ) : null}
 
                         <div
                           className={`max-w-[92%] break-words selection:bg-white selection:text-voiceflow-orange ${
@@ -1258,7 +1379,7 @@ export default function MeetingWidget({
                             <div className="flex items-center justify-between gap-4">
                               <div className="flex items-center gap-2 text-white/80">
                                 <Loader2 size={14} className="animate-spin text-voiceflow-orange" />
-                                <span>Thinking...</span>
+                                <span>{isSyncingAudio ? "Syncing live audio..." : "Thinking..."}</span>
                               </div>
                               <button
                                 onClick={handleHaltGeneration}
@@ -1270,6 +1391,12 @@ export default function MeetingWidget({
                             </div>
                           ) : (
                             <>
+                              {msg.answeredQuestion && msg.answeredQuestion !== "Screen Visual Analysis" && (
+                                <div className="mb-2 px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-[10px] text-white/65 leading-snug">
+                                  <span className="text-voiceflow-orange font-bold mr-1">↳ Answering:</span>
+                                  <span className="italic">&ldquo;{msg.answeredQuestion.slice(0, 140)}{msg.answeredQuestion.length > 140 ? "..." : ""}&rdquo;</span>
+                                </div>
+                              )}
                               <ReactMarkdown
                                 remarkPlugins={[remarkGfm]}
                                 components={{
@@ -1291,14 +1418,25 @@ export default function MeetingWidget({
                                   ),
                                   code: ({ node, className, children, ...props }: any) => {
                                     const isInline = !className;
+                                    const codeText = String(children || "").replace(/\n$/, "");
                                     return isInline ? (
                                       <code {...props} className="px-1 py-0.5 rounded bg-white/10 text-orange-300 font-mono text-[11px]">
                                         {children}
                                       </code>
                                     ) : (
-                                      <pre className="p-2.5 rounded-lg bg-black/40 text-orange-200 font-mono text-[11px] overflow-x-auto my-1.5 border border-white/10">
-                                        <code {...props}>{children}</code>
-                                      </pre>
+                                      <div className="relative group/code my-1.5">
+                                        <button
+                                          type="button"
+                                          onClick={() => void copyToClipboard(codeText)}
+                                          className="absolute top-1.5 right-1.5 opacity-0 group-hover/code:opacity-100 px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 text-[10px] text-white/80 font-sans transition-opacity"
+                                          title="Copy code"
+                                        >
+                                          Copy
+                                        </button>
+                                        <pre className="p-2.5 rounded-lg bg-black/50 text-orange-200 font-mono text-[11px] overflow-x-auto border border-white/10">
+                                          <code {...props}>{children}</code>
+                                        </pre>
+                                      </div>
                                     );
                                   },
                                   blockquote: ({ node, ...props }) => (
@@ -1311,15 +1449,81 @@ export default function MeetingWidget({
                               {msg.isStreaming ? (
                                 <span className="inline-block w-1.5 h-3.5 bg-voiceflow-orange animate-pulse ml-0.5 align-middle" />
                               ) : (
-                                <span className="text-[9px] text-white/40 block mt-1.5 border-t border-white/5 pt-1">
-                                  ⚡ Voiceflow AI
-                                </span>
+                                <div className="mt-2 pt-1.5 border-t border-white/5 flex flex-wrap items-center justify-between gap-2">
+                                  <span className="text-[9px] text-white/40 flex items-center gap-1.5">
+                                    <span>⚡ Voiceflow AI</span>
+                                    {msg.responseMode === "code_technical" && (
+                                      <span className="px-1.5 py-0.2 rounded bg-blue-500/15 text-blue-300 font-semibold">Code</span>
+                                    )}
+                                    {msg.responseMode === "fresh_alternative" && (
+                                      <span className="px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-300 font-semibold">Fresh Angle</span>
+                                    )}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      void copyToClipboard(msg.text);
+                                      setCopiedMsgId(msg.id);
+                                      setTimeout(() => setCopiedMsgId((prev) => (prev === msg.id ? null : prev)), 1500);
+                                    }}
+                                    className="text-[10px] text-white/50 hover:text-white flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-white/10 transition-colors"
+                                    title="Copy answer"
+                                  >
+                                    {copiedMsgId === msg.id ? (
+                                      <>
+                                        <Check size={10} className="text-emerald-400" />
+                                        <span className="text-emerald-400">Copied</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Copy size={10} />
+                                        <span>Copy</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
                               )}
                             </>
                           )}
                         </div>
                       </div>
                     ))
+                  )}
+                  {/* One-click contextual follow-up chips under the latest completed AI reply */}
+                  {!isQuerying && messages.length > 0 && (() => {
+                    const last = messages[messages.length - 1];
+                    if (last.sender !== "ai" || last.isError || last.isStreaming) return null;
+                    const chips = [
+                      { label: "Shorter", prompt: "Make that answer shorter and punchier (2 sentences max)." },
+                      { label: "Give Example", prompt: "Give me a concrete real-world example or metric to back that up." },
+                      { label: "Show Code", prompt: "Show a clean, concise code example for this." },
+                      { label: "Different Angle", prompt: "Give me a completely different angle on this." },
+                    ];
+                    return (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {chips.map((c) => (
+                          <button
+                            key={c.label}
+                            type="button"
+                            onClick={() => void handleAskAI(c.prompt, "auto")}
+                            className="px-2.5 py-1 rounded-full bg-white/5 hover:bg-voiceflow-orange/20 hover:text-orange-200 text-white/65 border border-white/10 hover:border-voiceflow-orange/40 text-[10px] font-semibold transition-all"
+                          >
+                            {c.label}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                  </div>
+                  {showJumpToLatest && (
+                    <button
+                      type="button"
+                      onClick={jumpChatToBottom}
+                      className="absolute bottom-2.5 right-3.5 px-2.5 py-1 rounded-full bg-voiceflow-orange/95 hover:bg-orange-600 text-white text-[11px] font-bold shadow-lg flex items-center gap-1 transition-all"
+                    >
+                      <ChevronDown size={12} />
+                      <span>Latest</span>
+                    </button>
                   )}
                 </div>
 
@@ -1420,15 +1624,19 @@ export default function MeetingWidget({
                     <Paperclip size={13} />
                   </button>
 
-                  <input
-                    type="text"
+                  <textarea
+                    rows={1}
                     value={query}
-                    onChange={(e) => setQuery(e.target.value)}
+                    onChange={(e) => {
+                      setQuery(e.target.value);
+                      e.target.style.height = "auto";
+                      e.target.style.height = `${Math.min(e.target.scrollHeight, 88)}px`;
+                    }}
                     onKeyDown={handleKeyDown}
                     onPaste={handlePaste}
                     disabled={isQuerying}
-                    placeholder="Ask co-pilot, follow up, or paste screenshot (Ctrl+V)..."
-                    className="flex-1 bg-transparent border-none outline-none text-white text-xs px-2.5 placeholder:text-white/40 disabled:opacity-50"
+                    placeholder="Ask co-pilot, paste code (Shift+Enter for newline), or Ctrl+V screenshot..."
+                    className="flex-1 bg-transparent border-none outline-none text-white text-xs px-2.5 py-1 placeholder:text-white/40 disabled:opacity-50 resize-none max-h-[88px] leading-relaxed"
                   />
 
                   {isQuerying ? (
@@ -1455,7 +1663,7 @@ export default function MeetingWidget({
 
             {/* TAB 2: LIVE TRANSCRIPT */}
             {activeTab === "transcript" && (
-              <div className="flex flex-col space-y-2.5 animate-in fade-in duration-200">
+              <div className={`flex flex-col space-y-2.5 animate-in fade-in duration-200 ${isTauri ? "flex-1 min-h-0" : ""}`}>
                 <div className="flex items-center justify-between text-xs text-white/80 px-1">
                   <div className="flex items-center gap-1.5 font-medium">
                     <span
@@ -1489,7 +1697,14 @@ export default function MeetingWidget({
 
                 <div
                   ref={transcriptContainerRef}
-                  className={`bg-black/40 border border-white/10 rounded-xl p-3.5 ${isExpanded ? "h-[340px]" : "h-64"} overflow-y-auto text-xs text-white/90 leading-relaxed select-text font-mono whitespace-pre-wrap scrollbar-thin scrollbar-thumb-white/20`}
+                  onScroll={handleTranscriptScroll}
+                  className={`bg-black/40 border border-white/10 rounded-xl p-3.5 ${
+                    isTauri
+                      ? "flex-1 min-h-0"
+                      : isExpanded
+                        ? "h-[60vh] min-h-[440px] max-h-[600px]"
+                        : "h-64"
+                  } overflow-y-auto text-xs text-white/90 leading-relaxed select-text font-mono whitespace-pre-wrap scrollbar-thin scrollbar-thumb-white/20`}
                 >
                   {liveTranscript.trim() ? (
                     liveTranscript
@@ -1516,7 +1731,7 @@ export default function MeetingWidget({
 
             {/* TAB 3: SAVED CHAT SESSIONS / HISTORY */}
             {activeTab === "history" && (
-              <div className="flex flex-col space-y-2.5 animate-in fade-in duration-200">
+              <div className={`flex flex-col space-y-2.5 animate-in fade-in duration-200 ${isTauri ? "flex-1 min-h-0" : ""}`}>
                 <div className="flex items-center justify-between text-xs text-white/80 px-1">
                   <span className="font-semibold">Archived Meeting Chats</span>
                   <button
@@ -1531,7 +1746,15 @@ export default function MeetingWidget({
                   </button>
                 </div>
 
-                <div className={`space-y-2 overflow-y-auto pr-1 ${isExpanded ? "h-[340px]" : "h-64"} scrollbar-thin scrollbar-thumb-white/20`}>
+                <div
+                  className={`space-y-2 overflow-y-auto pr-1 ${
+                    isTauri
+                      ? "flex-1 min-h-0"
+                      : isExpanded
+                        ? "h-[60vh] min-h-[440px] max-h-[600px]"
+                        : "h-64"
+                  } scrollbar-thin scrollbar-thumb-white/20`}
+                >
                   {savedSessions.length === 0 && messages.length === 0 ? (
                     <div className="text-white/40 text-xs italic py-8 text-center">
                       No archived chat sessions yet. When you clear a chat or start a new thread, it gets archived here so you never lose context.

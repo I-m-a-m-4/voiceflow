@@ -3,7 +3,8 @@
 import React, { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged, User } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
+import { auth, db } from '@/lib/firebase';
+import { handleGoogleSignupSuccess } from '@/firebase/users';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Loader2, CheckCircle2, ArrowRight, ShieldCheck, Monitor } from 'lucide-react';
@@ -37,12 +38,37 @@ function DesktopBridgeContent() {
       setIsLoading(true);
       setErrorMessage(null);
 
+      // Ensure Firestore user & workspace profile are provisioned while authenticated in the browser
+      // so desktop OAuth signups ALWAYS appear in the Admin panel even if WebView token hydration falls back.
+      await handleGoogleSignupSuccess(db, user).catch((syncErr) => {
+        console.warn('Desktop bridge user sync warning:', syncErr);
+      });
+
       // Fetch the Firebase ID Token
       const firebaseToken = await user.getIdToken();
 
+      // Exchange for a real Firebase custom token + guarantee server-side Firestore `users/{uid}` provisioning
+      let customToken = '';
+      try {
+        const res = await fetch('/api/auth/desktop-custom-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken: firebaseToken }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (typeof data?.customToken === 'string') {
+            customToken = data.customToken;
+          }
+        }
+      } catch (tokenErr) {
+        console.warn('Could not mint desktop custom token, falling back to Google credential:', tokenErr);
+      }
+
       // Build payload for desktop client
       const payload = {
-        // If we have direct Google IdP tokens from popup, pass them; otherwise pass firebaseToken
+        // customToken guarantees real Firebase Auth login in Tauri even when reusing an existing browser session
+        customToken,
         idToken: googleIdToken || '',
         accessToken: googleAccessToken || '',
         firebaseToken,

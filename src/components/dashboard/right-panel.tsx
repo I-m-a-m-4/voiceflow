@@ -36,6 +36,7 @@ export default function RightPanel() {
   const {
     startRecording,
     stopRecording,
+    flushPendingAudio,
     isRecording,
     isProcessing,
     transcript,
@@ -437,6 +438,7 @@ export default function RightPanel() {
       <MeetingWidget 
         isRecording={isRecording} 
         stopRecording={stopRecording} 
+        flushPendingAudio={flushPendingAudio}
         transcript={transcript}
         transcriptionHealth={transcriptionHealth}
         systemAudioActive={systemAudioActive}

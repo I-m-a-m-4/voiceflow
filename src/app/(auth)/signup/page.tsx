@@ -3,10 +3,10 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { createUserWithEmailAndPassword, signInWithPopup, signInWithRedirect, signInWithCredential, getRedirectResult, getAdditionalUserInfo, signOut, GoogleAuthProvider } from 'firebase/auth';
+import { createUserWithEmailAndPassword, signInWithPopup, signInWithRedirect, signInWithCredential, signInWithCustomToken, getRedirectResult, getAdditionalUserInfo, signOut, GoogleAuthProvider } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
-import { handleGoogleSignupSuccess } from '@/firebase/users';
+import { createUserProfileDocument, handleGoogleSignupSuccess } from '@/firebase/users';
 import { useAuth } from '@/context/auth-context';
 import AuthLayout from '@/components/auth-layout';
 import { Button } from '@/components/ui/button';
@@ -30,6 +30,7 @@ export default function SignupPage() {
   });
 
   const isNavigatingRef = React.useRef(false);
+  const isSubmittingEmailSignupRef = React.useRef(false);
 
   const goToDashboard = () => {
     if (isNavigatingRef.current) return;
@@ -79,6 +80,8 @@ export default function SignupPage() {
     // Listen directly to auth state to redirect the very millisecond a session is confirmed
     const unsubscribe = auth.onAuthStateChanged(async (firebaseUser) => {
       if (firebaseUser) {
+        // Let handleSubmit finish atomic profile + workspace provisioning for email/password signups
+        if (isSubmittingEmailSignupRef.current) return;
         const fallbackName = firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'User');
         const sessionData = {
           uid: firebaseUser.uid,
@@ -210,10 +213,19 @@ export default function SignupPage() {
           payload = JSON.parse(tokenString);
         }
 
-        if (payload?.uid || payload?.idToken || payload?.firebaseToken) {
+        if (payload?.customToken || payload?.uid || payload?.idToken || payload?.firebaseToken) {
           let user: any = null;
 
-          if (payload.idToken) {
+          if (payload.customToken) {
+            try {
+              const result = await signInWithCustomToken(auth, payload.customToken);
+              user = result.user;
+            } catch (ctErr: any) {
+              console.warn('signInWithCustomToken failed, falling back to Google credential:', ctErr);
+            }
+          }
+
+          if (!user && payload.idToken) {
             try {
               const credential = GoogleAuthProvider.credential(payload.idToken, payload.accessToken || undefined);
               const result = await signInWithCredential(auth, credential);
@@ -354,18 +366,14 @@ export default function SignupPage() {
     }
 
     setIsLoading(true);
+    isSubmittingEmailSignupRef.current = true;
 
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
       const user = userCredential.user;
 
-      const userDocRef = doc(db, 'users', user.uid);
-      await setDoc(userDocRef, {
-        name: formData.name.trim(),
-        email: user.email,
-        createdAt: new Date().toISOString(),
-        role: 'admin',
-      }, { merge: true });
+      // Atomically provision BOTH businessInstances/{id} and users/{uid} so Firestore security rules ALWAYS allow creation
+      await createUserProfileDocument(db, user, formData.name.trim());
 
       await syncDeviceTrial(db, user).catch(() => {});
 
@@ -403,6 +411,7 @@ export default function SignupPage() {
         description: message,
       });
     } finally {
+      isSubmittingEmailSignupRef.current = false;
       setIsLoading(false);
     }
   };

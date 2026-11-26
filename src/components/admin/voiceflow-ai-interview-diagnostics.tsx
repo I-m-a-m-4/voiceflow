@@ -135,9 +135,9 @@ export default function VoiceflowAiInterviewDiagnostics() {
       setTestResult({
         text: answerText,
         latencyMs: elapsed,
-        modelUsed: 'Groq (openai/gpt-oss-20b)',
+        modelUsed: data.model ? `${data.provider || 'groq'} (${data.model})` : 'Groq (qwen/qwen3.8-27b)',
         passScore: overallPassScore,
-        verdict,
+        verdict: data.responseMode ? `${verdict} • Mode: ${data.responseMode}` : verdict,
         breakdown: {
           conciseness: concisenessScore,
           depth: depthScore,
