@@ -27,30 +27,51 @@ async function main() {
 
     const filesToUpload = [];
 
-    // Windows Patterns: Tauri v2 produces signed NSIS .exe + .exe.sig and MSI .msi + .msi.sig
-    // Also support v1-compatible .nsis.zip / .zip if present.
-    const windowsPatterns = [
-      { bin: /-setup\.exe$/i, sig: /-setup\.exe\.sig$/i },
-      { bin: /\.exe$/i, sig: /\.exe\.sig$/i },
-      { bin: /\.msi$/i, sig: /\.msi\.sig$/i },
-      { bin: /\.nsis\.zip$/i, sig: /\.nsis\.zip\.sig$/i },
-      { bin: /\.zip$/i, sig: /\.zip\.sig$/i, exclude: /\.app\.tar\.gz$/i },
-    ];
+    // Windows Patterns: Tauri v2 produces signed NSIS (-setup.exe + .sig) AND MSI (.msi + .sig).
+    // Register bundle-specific keys (windows-x86_64-nsis, windows-x86_64-msi) plus generic windows-x86_64
+    // so both MSI-installed and NSIS-installed users update seamlessly with matching bundle types.
+    const nsisBin = findFile(bundleDir, /-setup\.exe$/i) || findFile(bundleDir, /\.exe$/i);
+    const nsisSig = nsisBin ? `${nsisBin}.sig` : null;
+    if (nsisBin && nsisSig && fs.existsSync(nsisSig)) {
+      console.log(`Found signed Windows NSIS updater artifact: ${nsisBin}`);
+      const fileName = path.basename(nsisBin);
+      const entry = {
+        signature: fs.readFileSync(nsisSig, 'utf8').trim(),
+        url: `https://github.com/I-m-a-m-4/voiceflow/releases/download/${tagName}/${encodeURIComponent(fileName)}`,
+      };
+      latestJson.platforms['windows-x86_64-nsis'] = entry;
+      latestJson.platforms['windows-x86_64'] = entry;
+      filesToUpload.push(nsisBin, nsisSig);
+    }
 
-    for (const pattern of windowsPatterns) {
-      const binPath = findFile(bundleDir, pattern.bin, pattern.exclude);
-      const sigPath = binPath ? `${binPath}.sig` : findFile(bundleDir, pattern.sig);
+    const msiBin = findFile(bundleDir, /\.msi$/i);
+    const msiSig = msiBin ? `${msiBin}.sig` : null;
+    if (msiBin && msiSig && fs.existsSync(msiSig)) {
+      console.log(`Found signed Windows MSI updater artifact: ${msiBin}`);
+      const fileName = path.basename(msiBin);
+      const entry = {
+        signature: fs.readFileSync(msiSig, 'utf8').trim(),
+        url: `https://github.com/I-m-a-m-4/voiceflow/releases/download/${tagName}/${encodeURIComponent(fileName)}`,
+      };
+      latestJson.platforms['windows-x86_64-msi'] = entry;
+      if (!latestJson.platforms['windows-x86_64']) {
+        latestJson.platforms['windows-x86_64'] = entry;
+      }
+      filesToUpload.push(msiBin, msiSig);
+    }
 
-      if (binPath && sigPath && fs.existsSync(sigPath)) {
-        console.log(`Found signed Windows updater artifact: ${binPath}`);
-        const fileName = path.basename(binPath);
-        const signature = fs.readFileSync(sigPath, 'utf8').trim();
+    // Legacy v1-compatible zip fallback if neither NSIS nor MSI signatures were found
+    if (!latestJson.platforms['windows-x86_64']) {
+      const zipBin = findFile(bundleDir, /\.nsis\.zip$/i) || findFile(bundleDir, /\.zip$/i, /\.app\.tar\.gz$/i);
+      const zipSig = zipBin ? `${zipBin}.sig` : null;
+      if (zipBin && zipSig && fs.existsSync(zipSig)) {
+        console.log(`Found signed Windows ZIP updater artifact: ${zipBin}`);
+        const fileName = path.basename(zipBin);
         latestJson.platforms['windows-x86_64'] = {
-          signature,
+          signature: fs.readFileSync(zipSig, 'utf8').trim(),
           url: `https://github.com/I-m-a-m-4/voiceflow/releases/download/${tagName}/${encodeURIComponent(fileName)}`,
         };
-        filesToUpload.push(binPath, sigPath);
-        break;
+        filesToUpload.push(zipBin, zipSig);
       }
     }
 
