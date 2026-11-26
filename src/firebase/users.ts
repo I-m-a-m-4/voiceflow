@@ -19,6 +19,7 @@ import {
 } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import type { UserProfile, UserRole, BusinessInstance } from '@/types';
+import { apiBase } from '@/lib/platform';
 
 
 /**
@@ -164,7 +165,7 @@ export const waitForUserProfile = (firestore: Firestore, userId: string, timeout
   });
 };/**
  * Automatically provisions the user profile and business workspace in a Firestore
- * batch transaction on first sign-in with Google.
+ * batch transaction on first sign-in (Google or Email).
  */
 export const handleGoogleSignupSuccess = async (firestore: Firestore, user: User, businessName = '') => {
   const userDocRef = doc(firestore, `users/${user.uid}`);
@@ -178,8 +179,16 @@ export const handleGoogleSignupSuccess = async (firestore: Firestore, user: User
       localTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Africa/Lagos';
     } catch (e) {}
 
+    const rawEmail = (user.email || '').trim();
+    const resolvedName =
+      businessName?.trim() ||
+      user.displayName?.trim() ||
+      (rawEmail ? rawEmail.split('@')[0] : 'User');
+    const providerId = user.providerData?.[0]?.providerId || 'password';
+    const authProvider = providerId === 'google.com' ? 'google' : 'email';
+
     batch.set(businessDocRef, {
-      name: businessName || user.displayName || 'My Workspace',
+      name: resolvedName || 'My Workspace',
       ownerId: user.uid,
       plan: 'starter',
       status: 'active',
@@ -188,17 +197,62 @@ export const handleGoogleSignupSuccess = async (firestore: Firestore, user: User
     });
 
     batch.set(userDocRef, {
-      email: user.email,
-      name: user.displayName || businessName || (user.email ? user.email.split('@')[0] : 'User'),
+      email: rawEmail,
+      emailLower: rawEmail.toLowerCase(),
+      name: resolvedName,
+      displayName: resolvedName,
+      photoURL: user.photoURL || '',
       businessName: businessName,
       businessId: businessId,
       role: 'admin',
-      authProvider: 'google',
+      authProvider,
       surveyCompleted: false,
       status: 'active',
-      createdAt: serverTimestamp()
+      createdAt: serverTimestamp(),
+      lastLoginAt: serverTimestamp(),
     });
 
     await batch.commit();
   }
+};
+
+/**
+ * Guarantees a Firestore `users/{uid}` profile and `businessInstances/{id}` workspace exist
+ * for the signed-in user. Prefers the authoritative Admin SDK endpoint (`/api/auth/ensure-profile`),
+ * and falls back to the atomic client-side Firestore batch write if offline or unreachable.
+ */
+export const ensureUserProfile = async (
+  firestore: Firestore,
+  user: User,
+  options?: { displayName?: string; phone?: string }
+): Promise<void> => {
+  if (!user?.uid) return;
+
+  const displayName = options?.displayName?.trim() || user.displayName?.trim() || '';
+  const phone = options?.phone?.trim() || '';
+
+  // 1. Authoritative server-side provisioning (bypasses client rule races & claims pending dashes)
+  if (typeof user.getIdToken === 'function') {
+    try {
+      const token = await user.getIdToken();
+      const base = apiBase();
+      const endpoint = base ? `${base}/api/auth/ensure-profile` : '/api/auth/ensure-profile';
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ displayName, phone }),
+      });
+      if (res.ok) {
+        return;
+      }
+    } catch (err) {
+      console.warn('Server ensure-profile unavailable, falling back to client batch write:', err);
+    }
+  }
+
+  // 2. Client-side atomic batch fallback (creates businessInstances + users in the same writeBatch)
+  await handleGoogleSignupSuccess(firestore, user, displayName);
 };

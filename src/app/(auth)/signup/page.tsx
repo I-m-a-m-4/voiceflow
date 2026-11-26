@@ -3,10 +3,10 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { createUserWithEmailAndPassword, signInWithPopup, signInWithRedirect, signInWithCredential, signInWithCustomToken, getRedirectResult, getAdditionalUserInfo, signOut, GoogleAuthProvider } from 'firebase/auth';
+import { createUserWithEmailAndPassword, updateProfile, signInWithPopup, signInWithRedirect, signInWithCredential, signInWithCustomToken, getRedirectResult, getAdditionalUserInfo, signOut, GoogleAuthProvider } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
-import { createUserProfileDocument, handleGoogleSignupSuccess } from '@/firebase/users';
+import { ensureUserProfile, handleGoogleSignupSuccess } from '@/firebase/users';
 import { useAuth } from '@/context/auth-context';
 import AuthLayout from '@/components/auth-layout';
 import { Button } from '@/components/ui/button';
@@ -31,6 +31,7 @@ export default function SignupPage() {
 
   const isNavigatingRef = React.useRef(false);
   const isSubmittingEmailSignupRef = React.useRef(false);
+  const isProvisioningAuthRef = React.useRef(false);
 
   const goToDashboard = () => {
     if (isNavigatingRef.current) return;
@@ -63,6 +64,12 @@ export default function SignupPage() {
   };
 
   useEffect(() => {
+    // Never interrupt an in-progress signup handler — FirebaseProvider updates `user` and
+    // `localStorage` as soon as Auth succeeds, before Firestore profile provisioning finishes.
+    if (isSubmittingEmailSignupRef.current || isProvisioningAuthRef.current) {
+      return;
+    }
+
     let hasCachedSession = false;
     if (typeof window !== 'undefined') {
       try {
@@ -77,11 +84,11 @@ export default function SignupPage() {
 
     if (!auth) return;
 
-    // Listen directly to auth state to redirect the very millisecond a session is confirmed
+    // Listen directly to auth state to redirect once a pre-existing session is confirmed
     const unsubscribe = auth.onAuthStateChanged(async (firebaseUser) => {
       if (firebaseUser) {
-        // Let handleSubmit finish atomic profile + workspace provisioning for email/password signups
-        if (isSubmittingEmailSignupRef.current) return;
+        // Let handleSubmit / handleGoogleSignup finish atomic profile + workspace provisioning
+        if (isSubmittingEmailSignupRef.current || isProvisioningAuthRef.current) return;
         const fallbackName = firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'User');
         const sessionData = {
           uid: firebaseUser.uid,
@@ -98,7 +105,7 @@ export default function SignupPage() {
           localStorage.setItem('userName', fallbackName);
         } catch {}
         try {
-          await handleGoogleSignupSuccess(db, firebaseUser);
+          await ensureUserProfile(db, firebaseUser);
           await syncDeviceTrial(db, firebaseUser).catch(() => {});
         } catch {}
         goToDashboard();
@@ -109,9 +116,18 @@ export default function SignupPage() {
     getRedirectResult(auth)
       .then(async (result) => {
         if (!result?.user || !isMounted) return;
+        isProvisioningAuthRef.current = true;
         setIsGoogleLoading(true);
         const redirectUser = result.user;
         const fallbackName = redirectUser.displayName || (redirectUser.email ? redirectUser.email.split('@')[0] : 'User');
+
+        // Ensure user profile is provisioned BEFORE caching session / navigating
+        try {
+          await ensureUserProfile(db, redirectUser);
+          await syncDeviceTrial(db, redirectUser).catch(() => {});
+        } catch (e) {
+          console.error('User sync error:', e);
+        }
 
         const sessionData = {
           uid: redirectUser.uid,
@@ -133,14 +149,6 @@ export default function SignupPage() {
           description: 'Successfully signed up with Google.',
         });
 
-        // Ensure user profile is provisioned before navigating
-        try {
-          await handleGoogleSignupSuccess(db, redirectUser);
-          await syncDeviceTrial(db, redirectUser).catch(() => {});
-        } catch (e) {
-          console.error('User sync error:', e);
-        }
-
         goToDashboard();
       })
       .catch((error: any) => {
@@ -158,6 +166,7 @@ export default function SignupPage() {
         }
       })
       .finally(() => {
+        isProvisioningAuthRef.current = false;
         if (isMounted) setIsGoogleLoading(false);
       });
 
@@ -169,6 +178,7 @@ export default function SignupPage() {
 
   const handleGoogleSignup = async () => {
     if (!auth) return;
+    isProvisioningAuthRef.current = true;
     setIsGoogleLoading(true);
 
     // 1. If running inside Tauri Desktop shell, use the system browser OAuth loopback flow
@@ -259,7 +269,7 @@ export default function SignupPage() {
 
           try {
             if (user) {
-              await handleGoogleSignupSuccess(db, user);
+              await ensureUserProfile(db, user);
               await syncDeviceTrial(db, user).catch(() => {});
             } else if (payload.uid) {
               await handleGoogleSignupSuccess(db, {
@@ -267,6 +277,7 @@ export default function SignupPage() {
                 email: payload.email,
                 displayName: fallbackName,
                 photoURL: payload.photoURL,
+                providerData: [{ providerId: 'google.com' }],
               } as any);
             }
           } catch (e) {
@@ -283,6 +294,7 @@ export default function SignupPage() {
           description: err.message || "Could not complete desktop Google sign-up.",
         });
       } finally {
+        isProvisioningAuthRef.current = false;
         setIsGoogleLoading(false);
       }
       return;
@@ -296,6 +308,14 @@ export default function SignupPage() {
       const userCredential = await signInWithPopup(auth, provider);
       const user = userCredential.user;
       const fallbackName = user.displayName || (user.email ? user.email.split('@')[0] : 'User');
+
+      // Ensure user profile is provisioned BEFORE navigating
+      try {
+        await ensureUserProfile(db, user);
+        await syncDeviceTrial(db, user).catch(() => {});
+      } catch (e) {
+        console.error('User sync error:', e);
+      }
 
       const sessionData = {
         uid: user.uid,
@@ -317,14 +337,6 @@ export default function SignupPage() {
         description: 'Successfully signed up with Google.',
       });
 
-      // Ensure user profile is provisioned before navigating
-      try {
-        await handleGoogleSignupSuccess(db, user);
-        await syncDeviceTrial(db, user).catch(() => {});
-      } catch (e) {
-        console.error('User sync error:', e);
-      }
-
       goToDashboard();
     } catch (popupError: any) {
       const isCancellation =
@@ -341,6 +353,7 @@ export default function SignupPage() {
         });
       }
     } finally {
+      isProvisioningAuthRef.current = false;
       setIsGoogleLoading(false);
     }
   };
@@ -367,20 +380,26 @@ export default function SignupPage() {
 
     setIsLoading(true);
     isSubmittingEmailSignupRef.current = true;
+    isProvisioningAuthRef.current = true;
 
     try {
+      const trimmedName = formData.name.trim();
       const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
       const user = userCredential.user;
 
-      // Atomically provision BOTH businessInstances/{id} and users/{uid} so Firestore security rules ALWAYS allow creation
-      await createUserProfileDocument(db, user, formData.name.trim());
+      // Save full name on the Firebase Auth record too so Auth & Firestore stay aligned
+      await updateProfile(user, { displayName: trimmedName }).catch(() => {});
+
+      // Authoritative server-side provisioning (with atomic client batch fallback)
+      // completes BEFORE redirecting so the user ALWAYS appears in Firestore & Admin.
+      await ensureUserProfile(db, user, { displayName: trimmedName });
 
       await syncDeviceTrial(db, user).catch(() => {});
 
       const sessionData = {
         uid: user.uid,
         email: user.email,
-        displayName: formData.name.trim(),
+        displayName: trimmedName,
         photoURL: user.photoURL,
         isAnonymous: user.isAnonymous,
         emailVerified: user.emailVerified,
@@ -389,7 +408,7 @@ export default function SignupPage() {
       try {
         localStorage.setItem('voiceflow_auth_session', JSON.stringify(sessionData));
         localStorage.setItem('userEmail', formData.email.toLowerCase());
-        localStorage.setItem('userName', formData.name.trim());
+        localStorage.setItem('userName', trimmedName);
       } catch {}
 
       toast({
@@ -412,6 +431,7 @@ export default function SignupPage() {
       });
     } finally {
       isSubmittingEmailSignupRef.current = false;
+      isProvisioningAuthRef.current = false;
       setIsLoading(false);
     }
   };

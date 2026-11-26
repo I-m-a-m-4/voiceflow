@@ -100,7 +100,18 @@ export async function POST(req: NextRequest) {
     const missing = authUsers.filter((u) => !existingIds.has(u.uid));
     const newlySyncedEmails: string[] = [];
 
-    const chunkSize = 200;
+    // Preload any pending admin credit dashes so backfilled users receive pre-granted Pro/minutes automatically
+    const pendingDashMap = new Map<string, any>();
+    if (missing.length > 0) {
+      const pendingSnap = await adminFirestore.collection("pending_credit_dashes").get().catch(() => null);
+      if (pendingSnap) {
+        pendingSnap.docs.forEach((d: any) => {
+          pendingDashMap.set(d.id.toLowerCase(), d.data());
+        });
+      }
+    }
+
+    const chunkSize = 150;
     for (let i = 0; i < missing.length; i += chunkSize) {
       const slice = missing.slice(i, i + chunkSize);
       const batch = adminFirestore.batch();
@@ -109,19 +120,25 @@ export async function POST(req: NextRequest) {
         const bizRef = adminFirestore.collection("businessInstances").doc();
         const userRef = adminFirestore.collection("users").doc(u.uid);
         const createdDate = new Date(u.createdAt);
+        const cleanEmail = (u.email || "").trim().toLowerCase();
+        const pendingDash = cleanEmail ? pendingDashMap.get(cleanEmail) : null;
+        const isProPending = pendingDash?.isPro === true;
+        const bonusMinsPending =
+          typeof pendingDash?.bonusMinutesGranted === "number" ? pendingDash.bonusMinutesGranted : 0;
 
         batch.set(bizRef, {
           name: u.displayName || "My Workspace",
           ownerId: u.uid,
-          plan: "starter",
+          plan: isProPending ? "pro" : "starter",
           status: "active",
           createdAt: createdDate,
           settings: { currency: "USD", timezone: "UTC", defaultTaxRate: 0 },
           syncedFromAuth: true,
         });
 
-        batch.set(userRef, {
+        const userDoc: Record<string, any> = {
           email: u.email,
+          emailLower: cleanEmail,
           name: u.displayName,
           displayName: u.displayName,
           photoURL: u.photoURL || "",
@@ -133,7 +150,26 @@ export async function POST(req: NextRequest) {
           createdAt: createdDate,
           lastLoginAt: u.lastSignInTime ? new Date(u.lastSignInTime) : createdDate,
           syncedFromAuth: true,
-        });
+        };
+
+        if (isProPending) {
+          userDoc.isPro = true;
+          userDoc.planTier = "pro";
+          userDoc.subscriptionPlan = pendingDash.subscriptionPlan || "Voiceflow Pro (Gifted by Admin)";
+          userDoc.dashedBy = pendingDash.dashedBy || "admin";
+          userDoc.dashedAt = new Date();
+        }
+        if (bonusMinsPending > 0) {
+          userDoc.bonusMinutesGranted = bonusMinsPending;
+          userDoc.dashedBy = pendingDash.dashedBy || "admin";
+          userDoc.dashedAt = new Date();
+        }
+
+        batch.set(userRef, userDoc);
+
+        if (pendingDash && cleanEmail) {
+          batch.delete(adminFirestore.collection("pending_credit_dashes").doc(cleanEmail));
+        }
 
         if (u.email) newlySyncedEmails.push(u.email);
       }

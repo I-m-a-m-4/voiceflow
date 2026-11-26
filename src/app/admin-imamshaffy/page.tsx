@@ -123,7 +123,8 @@ import {
     getCountFromServer,
 } from 'firebase/firestore';
 import { format, formatDistanceToNow, subDays, differenceInDays, startOfDay, endOfDay } from 'date-fns';
-import { useFirestore, useCollection, useMemoFirebase } from '@/firebase';
+import { useAuth, useUser, useFirestore, useCollection, useMemoFirebase } from '@/firebase';
+import { apiBase } from '@/lib/platform';
 import { withFirestoreRetry } from '@/firebase/retry';
 import { logAuditEvent } from '@/lib/audit';
 import { 
@@ -6124,7 +6125,37 @@ const reviveTimestamps = (obj: any): any => {
 const ADMIN_LOG_LIMIT = 250;
 
 export default function AdminDashboardPage() {
+    const auth = useAuth();
+    const { user: currentUser, isUserLoading } = useUser();
     const firestore = useFirestore();
+    const hasSyncedAuthRef = useRef(false);
+
+    // Reconcile any Firebase Auth signups missing Firestore `users/{uid}` docs once per dashboard load.
+    // Because `usersQuery` below is a real-time listener, newly backfilled accounts stream in automatically.
+    useEffect(() => {
+        if (isUserLoading || hasSyncedAuthRef.current) return;
+        const liveUser =
+            auth?.currentUser ||
+            (currentUser && typeof (currentUser as any).getIdToken === 'function' ? currentUser : null);
+        if (!liveUser) return;
+
+        hasSyncedAuthRef.current = true;
+        liveUser.getIdToken()
+            .then((token) => {
+                const base = apiBase();
+                const endpoint = base ? `${base}/api/admin/sync-users` : '/api/admin/sync-users';
+                return fetch(endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}`,
+                    },
+                });
+            })
+            .catch((err) => {
+                console.warn('Admin dashboard Auth sync warning:', err);
+            });
+    }, [auth, currentUser, isUserLoading]);
 
     const usersQuery = useMemoFirebase(() => query(collection(firestore, 'users')), [firestore]);
     const businessesQuery = useMemoFirebase(() => query(collection(firestore, 'businessInstances')), [firestore]);

@@ -1,7 +1,8 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { useAuth } from '@/firebase';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { useAuth, useUser } from '@/firebase';
+import { ensureUserProfile } from '@/firebase/users';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '@/firebase';
 import type { UserProfile, BusinessInstance } from '@/types';
@@ -73,39 +74,65 @@ const AppContext = createContext<AppContextType>({
 
 export function POSProvider({ children }: { children: React.ReactNode }) {
   const auth = useAuth();
+  const { user: authUser, isUserLoading } = useUser();
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [businessData, setBusinessData] = useState<BusinessInstance | null>(null);
   const [loading, setLoading] = useState(true);
   const [isConfettiActive, setIsConfettiActive] = useState(false);
+  const healedUidsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!auth?.currentUser) {
+    if (isUserLoading) return;
+
+    const liveUser = auth?.currentUser;
+    if (!liveUser || !authUser) {
       setUserProfile(null);
       setBusinessData(null);
       setLoading(false);
       return;
     }
 
-    const userRef = doc(db, 'users', auth.currentUser.uid);
-    const unsubUser = onSnapshot(userRef, (snap) => {
-      if (snap.exists()) {
-        const uData = { id: snap.id, ...snap.data() } as UserProfile;
-        setUserProfile(uData);
+    let unsubBiz: (() => void) | null = null;
+    const userRef = doc(db, 'users', liveUser.uid);
+    const unsubUser = onSnapshot(
+      userRef,
+      (snap) => {
+        if (snap.exists()) {
+          const uData = { id: snap.id, ...snap.data() } as UserProfile;
+          setUserProfile(uData);
 
-        if (uData.businessId) {
-          const bizRef = doc(db, 'businesses', uData.businessId);
-          onSnapshot(bizRef, (bSnap) => {
-            if (bSnap.exists()) {
-              setBusinessData({ id: bSnap.id, ...bSnap.data() } as BusinessInstance);
-            }
+          if (uData.businessId) {
+            if (unsubBiz) unsubBiz();
+            const bizRef = doc(db, 'businessInstances', uData.businessId);
+            unsubBiz = onSnapshot(
+              bizRef,
+              (bSnap) => {
+                if (bSnap.exists()) {
+                  setBusinessData({ id: bSnap.id, ...bSnap.data() } as BusinessInstance);
+                }
+              },
+              () => {}
+            );
+          }
+        } else if (!healedUidsRef.current.has(liveUser.uid)) {
+          // Self-heal any signed-in user whose Firestore profile was never created during signup
+          healedUidsRef.current.add(liveUser.uid);
+          void ensureUserProfile(db, liveUser).catch((err) => {
+            console.warn('POSProvider profile self-heal failed:', err);
           });
         }
+        setLoading(false);
+      },
+      () => {
+        setLoading(false);
       }
-      setLoading(false);
-    });
+    );
 
-    return () => unsubUser();
-  }, [auth]);
+    return () => {
+      unsubUser();
+      if (unsubBiz) unsubBiz();
+    };
+  }, [auth, authUser, isUserLoading]);
 
   const refreshData = async () => {};
 

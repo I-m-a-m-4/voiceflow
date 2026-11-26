@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useFirestore, useUser } from '@/firebase';
+import { useAuth, useFirestore, useUser } from '@/firebase';
 import { collection, getDocs } from 'firebase/firestore';
 import {
   Gift,
@@ -45,8 +45,9 @@ function formatJoined(val: any): string {
 }
 
 export default function AdminUsersPage() {
+  const auth = useAuth();
   const firestore = useFirestore();
-  const { user: currentUser } = useUser();
+  const { user: currentUser, isUserLoading } = useUser();
   const { toast } = useToast();
 
   const [users, setUsers] = useState<any[]>([]);
@@ -93,10 +94,22 @@ export default function AdminUsersPage() {
   };
 
   const handleSyncAuthUsers = async (silent = false) => {
-    if (!currentUser || isSyncingAuth) return;
+    const liveUser =
+      auth?.currentUser ||
+      (currentUser && typeof (currentUser as any).getIdToken === 'function' ? currentUser : null);
+    if (!liveUser || isSyncingAuth) {
+      if (!silent && !liveUser) {
+        toast({
+          variant: 'destructive',
+          title: 'Still Signing In',
+          description: 'Please wait a moment for Firebase Auth to finish loading, then try again.',
+        });
+      }
+      return;
+    }
     try {
       setIsSyncingAuth(true);
-      const token = await currentUser.getIdToken();
+      const token = await liveUser.getIdToken();
       const base = apiBase();
       const endpoint = base ? `${base}/api/admin/sync-users` : '/api/admin/sync-users';
       const res = await fetch(endpoint, {
@@ -127,6 +140,7 @@ export default function AdminUsersPage() {
         await loadData();
       }
     } catch (err: any) {
+      console.warn('Admin Firebase Auth sync failed:', err);
       if (!silent) {
         toast({
           variant: 'destructive',
@@ -143,13 +157,18 @@ export default function AdminUsersPage() {
     loadData();
   }, [firestore]);
 
-  // Automatically reconcile any Firebase Auth users missing Firestore profiles once on page open
+  // Automatically reconcile any Firebase Auth users missing Firestore profiles once the REAL
+  // Firebase Auth user (not the cached localStorage placeholder) has finished loading.
   useEffect(() => {
-    if (firestore && currentUser && !hasAutoSyncedRef.current) {
+    if (isUserLoading) return;
+    const liveUser =
+      auth?.currentUser ||
+      (currentUser && typeof (currentUser as any).getIdToken === 'function' ? currentUser : null);
+    if (firestore && liveUser && !hasAutoSyncedRef.current) {
       hasAutoSyncedRef.current = true;
       void handleSyncAuthUsers(true);
     }
-  }, [firestore, currentUser]);
+  }, [firestore, auth, currentUser, isUserLoading]);
 
   const filteredUsers = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
