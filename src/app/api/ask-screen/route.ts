@@ -39,6 +39,7 @@ export async function POST(req: NextRequest) {
       stream: wantStream = false,
       lastTranscriptLength,
       lastTranscriptTail,
+      lastAnsweredQuestion,
       forceFreshAngle,
     } = body;
 
@@ -60,12 +61,17 @@ export async function POST(req: NextRequest) {
         ? lastTranscriptLength
         : undefined;
     const prevTranscriptTail = typeof lastTranscriptTail === "string" ? lastTranscriptTail : undefined;
+    const prevAnsweredQuestion =
+      typeof lastAnsweredQuestion === "string" && lastAnsweredQuestion.trim()
+        ? lastAnsweredQuestion.trim()
+        : undefined;
 
     const promptCtx = buildEnhancedInterviewPrompt(prompt, rawTranscript, {
       history: cleanHistory,
       hasImage,
       previousTranscriptLength: prevTranscriptLen,
       previousTranscriptTail: prevTranscriptTail,
+      previousAnsweredQuestion: prevAnsweredQuestion,
       customContext: cleanCustomContext,
       forceFreshAngle: Boolean(forceFreshAngle),
     });
@@ -159,7 +165,8 @@ export async function POST(req: NextRequest) {
             }
             const orData = await orRes.json();
             const rawMsg = orData.choices?.[0]?.message;
-            const text = ((rawMsg?.content && rawMsg.content.trim()) || (rawMsg?.reasoning && rawMsg.reasoning.trim()) || "").trim();
+            // Never dump internal `reasoning` chain-of-thought as the user's answer
+            const text = stripThinkTags(rawMsg?.content || "").trim();
             if (text && !text.includes("User Safety: safe")) {
               const drift = evaluateContextDrift(text, prevAssistantReply, Date.now() - requestStartedAt, promptCtx.isRepeatAsk);
               after(() => {
@@ -210,10 +217,18 @@ export async function POST(req: NextRequest) {
           hasImage: false,
           previousTranscriptLength: prevTranscriptLen,
           previousTranscriptTail: prevTranscriptTail,
+          previousAnsweredQuestion: prevAnsweredQuestion,
           customContext: cleanCustomContext,
           forceFreshAngle: Boolean(forceFreshAngle),
         })
       : promptCtx;
+
+    // Keep live spoken teleprompter answers fast & punchy (~55–95 words) while leaving full budget for code/analysis
+    const textMaxTokens =
+      !textCtx.isCodeRelated &&
+      (textCtx.responseMode === "spoken_teleprompter" || textCtx.responseMode === "fresh_alternative")
+        ? 500
+        : 1800;
 
     const textMeta = {
       intent: textCtx.intent,
@@ -255,7 +270,7 @@ export async function POST(req: NextRequest) {
               model,
               messages: textMessages,
               temperature: textCtx.recommendedTemperature,
-              max_tokens: 1800,
+              max_tokens: textMaxTokens,
               stream: Boolean(wantStream),
             }),
             signal: controller.signal,
@@ -276,7 +291,7 @@ export async function POST(req: NextRequest) {
               );
             }
             const data = await groqRes.json();
-            const textOutput = (data?.choices?.[0]?.message?.content || "").trim();
+            const textOutput = stripThinkTags(data?.choices?.[0]?.message?.content || "").trim();
             if (textOutput) {
               const drift = evaluateContextDrift(textOutput, prevAssistantReply, Date.now() - requestStartedAt, textCtx.isRepeatAsk);
               after(() => {
@@ -331,7 +346,7 @@ export async function POST(req: NextRequest) {
               model,
               messages: textMessages,
               temperature: textCtx.recommendedTemperature,
-              max_tokens: 1800,
+              max_tokens: textMaxTokens,
               stream: Boolean(wantStream),
             }),
             signal: controller.signal,
@@ -352,7 +367,7 @@ export async function POST(req: NextRequest) {
               );
             }
             const orData = await orRes.json();
-            const answer = (orData.choices?.[0]?.message?.content || "").trim();
+            const answer = stripThinkTags(orData.choices?.[0]?.message?.content || "").trim();
             if (answer && !answer.includes("User Safety: safe")) {
               const drift = evaluateContextDrift(answer, prevAssistantReply, Date.now() - requestStartedAt, textCtx.isRepeatAsk);
               after(() => {
@@ -433,6 +448,18 @@ function evaluateContextDrift(
   return { overlapWithPrev, driftStatus: "healthy" };
 }
 
+function stripThinkTags(text: string): string {
+  return (text || "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<\/?think>/gi, "")
+    .trim();
+}
+
+/**
+ * Proxies an OpenAI-compatible SSE stream (Groq / OpenRouter) into a clean, normalized SSE stream
+ * emitting `{ delta }`, `{ done: true, provider, model }`, or `{ error }`.
+ * Strips any `<think>...</think>` blocks on the fly and NEVER leaks raw `delta.reasoning`.
+ */
 function createSSEResponseFromUpstream(
   upstreamRes: Response,
   provider: string,
@@ -457,7 +484,55 @@ function createSSEResponseFromUpstream(
       let buffer = "";
       let emittedAny = false;
       let accumulatedText = "";
-      let reasoningFallback = "";
+      let inThinkBlock = false;
+      let thinkPending = "";
+
+      const emitFilteredText = (chunk: string) => {
+        if (!chunk) return;
+        thinkPending += chunk;
+
+        while (thinkPending.length > 0) {
+          if (inThinkBlock) {
+            const closeIdx = thinkPending.toLowerCase().indexOf("</think>");
+            if (closeIdx === -1) {
+              // Retain trailing 7 chars in case "</think>" spans chunks
+              if (thinkPending.length > 7) {
+                thinkPending = thinkPending.slice(-7);
+              }
+              return;
+            }
+            thinkPending = thinkPending.slice(closeIdx + 8);
+            inThinkBlock = false;
+          } else {
+            const openIdx = thinkPending.toLowerCase().indexOf("<think>");
+            if (openIdx === -1) {
+              // Hold back up to 6 trailing chars only if they could start "<think>"
+              const lastLt = thinkPending.lastIndexOf("<");
+              let safeEmit = thinkPending;
+              if (lastLt !== -1 && thinkPending.length - lastLt < 7) {
+                safeEmit = thinkPending.slice(0, lastLt);
+                thinkPending = thinkPending.slice(lastLt);
+              } else {
+                thinkPending = "";
+              }
+              if (safeEmit) {
+                emittedAny = true;
+                accumulatedText += safeEmit;
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ delta: safeEmit })}\n\n`));
+              }
+              return;
+            }
+            const before = thinkPending.slice(0, openIdx);
+            if (before) {
+              emittedAny = true;
+              accumulatedText += before;
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ delta: before })}\n\n`));
+            }
+            thinkPending = thinkPending.slice(openIdx + 7);
+            inThinkBlock = true;
+          }
+        }
+      };
 
       try {
         while (true) {
@@ -479,11 +554,7 @@ function createSSEResponseFromUpstream(
               const deltaObj = parsed.choices?.[0]?.delta;
               const chunkText = deltaObj?.content || "";
               if (chunkText) {
-                emittedAny = true;
-                accumulatedText += chunkText;
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ delta: chunkText })}\n\n`));
-              } else if (deltaObj?.reasoning) {
-                reasoningFallback += deltaObj.reasoning;
+                emitFilteredText(chunkText);
               }
             } catch {
               // ignore malformed keepalive SSE comments/fragments
@@ -491,10 +562,15 @@ function createSSEResponseFromUpstream(
           }
         }
 
-        if (!emittedAny && reasoningFallback.trim()) {
-          emittedAny = true;
-          accumulatedText = reasoningFallback.trim();
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ delta: accumulatedText })}\n\n`));
+        // Flush any remaining buffered non-think text at stream end
+        if (!inThinkBlock && thinkPending) {
+          const cleanTail = stripThinkTags(thinkPending);
+          if (cleanTail) {
+            emittedAny = true;
+            accumulatedText += cleanTail;
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ delta: cleanTail })}\n\n`));
+          }
+          thinkPending = "";
         }
 
         if (!emittedAny) {

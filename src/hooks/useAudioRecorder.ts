@@ -5,8 +5,23 @@ import { apiBase, isNativeApp } from "@/lib/platform";
 import { recordDeviceSession } from "@/lib/device-fingerprint";
 import { copyToClipboard } from "@/lib/clipboard";
 
-const SPEECH_ENERGY_THRESHOLD = 3.5; // Avg frequency magnitude (0-255) tuned to catch softer mics & laptop speakers
-const SEGMENT_DURATION_MS = 5000; // Rotate self-contained ~40KB WebM segments every 5 seconds for low-latency live transcript
+const SPEECH_ENERGY_THRESHOLD = 6.0; // Avg frequency magnitude (0-255) filters room fan/noise floor while catching clear voice
+const SEGMENT_DURATION_MS = 10000; // Rotate self-contained ~80KB WebM segments every 10s (<=12 RPM max across dual channels; well below Groq 20 RPM)
+
+function sanitizeWhisperPromptTail(committed: string): string {
+  const raw = committed.replace(/\[\d+:\d+\]\s*(?:\[(?:THEM|YOU)\]\s*)?/g, "").slice(-120).trim();
+  if (!raw) return "";
+  const words = raw
+    .toLowerCase()
+    .replace(/[^a-z0-9'\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 2);
+  if (words.length < 4) return "";
+  const unique = new Set(words);
+  // Prevent recycling repetitive Whisper hallucination loops back into the prompt
+  if (unique.size < 4 || unique.size / words.length < 0.45) return "";
+  return raw;
+}
 
 export type TranscriptionHealth = "idle" | "listening" | "syncing" | "degraded";
 
@@ -52,6 +67,9 @@ export function useAudioRecorder() {
   const segmentHadSpeechRef = useRef<boolean>(false);
   const interimTextRef = useRef<string>("");
   const consecutiveFailuresRef = useRef<number>(0);
+  const rateLimitUntilMsRef = useRef<number>(0);
+  const lastRateLimitAtMsRef = useRef<number>(0);
+  const forceNextMicUploadRef = useRef<boolean>(false);
   const nativeLoopbackActiveRef = useRef<boolean>(false);
   const lastLoopbackDrainMsRef = useRef<number>(0);
   const lastTranscriptTailRef = useRef<string>("");
@@ -64,7 +82,9 @@ export function useAudioRecorder() {
 
     const committed = entries.join("\n\n");
     if (committed) {
-      lastTranscriptTailRef.current = committed.replace(/\[\d+:\d+\]\s*(?:\[(?:THEM|YOU)\]\s*)?/g, "").slice(-200).trim();
+      lastTranscriptTailRef.current = sanitizeWhisperPromptTail(committed);
+    } else {
+      lastTranscriptTailRef.current = "";
     }
     const interim = interimTextRef.current.trim();
 
@@ -111,11 +131,20 @@ export function useAudioRecorder() {
       offsetSeconds: number,
       hadSpeech: boolean,
       speaker?: "THEM" | "YOU",
-      filename?: string
+      filename?: string,
+      forceFlush = false
     ) => {
       // Skip tiny/empty blobs or purely silent windows to avoid Whisper hallucinations and save quota
       if (blob.size < 1200) return Promise.resolve();
       if (!hadSpeech && segIdx > 0) return Promise.resolve();
+
+      // Respect Groq 429 Retry-After backoff on background cadence uploads so we don't hammer rate limits
+      const nowMs = Date.now();
+      if (nowMs < rateLimitUntilMsRef.current) {
+        if (!forceFlush || nowMs - lastRateLimitAtMsRef.current < 3000) {
+          return Promise.resolve();
+        }
+      }
 
       const orderKey = Math.max(0, Math.round(offsetSeconds * 1000)) + (speaker === "THEM" ? 0 : 1);
 
@@ -142,12 +171,29 @@ export function useAudioRecorder() {
           });
 
           if (!res.ok) {
+            if (res.status === 429) {
+              const headerSecs = Number(res.headers.get("retry-after"));
+              const errBody = await res.json().catch(() => null);
+              const bodySecs = Number(errBody?.retryAfterSeconds);
+              const rawSecs =
+                Number.isFinite(headerSecs) && headerSecs > 0
+                  ? headerSecs
+                  : Number.isFinite(bodySecs) && bodySecs > 0
+                    ? bodySecs
+                    : 8;
+              const backoffMs = Math.min(20000, Math.max(5000, Math.round(rawSecs * 1000)));
+              const rlNow = Date.now();
+              lastRateLimitAtMsRef.current = rlNow;
+              rateLimitUntilMsRef.current = rlNow + backoffMs;
+              setTranscriptionHealth("degraded");
+            }
             throw new Error(`HTTP ${res.status}`);
           }
 
           const data = await res.json();
           const segmentText = (data.formattedTranscript || data.text || "").trim();
           consecutiveFailuresRef.current = 0;
+          rateLimitUntilMsRef.current = 0;
           setTranscriptionHealth("listening");
 
           if (segmentText) {
@@ -173,8 +219,11 @@ export function useAudioRecorder() {
   );
 
   // Drains Windows native WASAPI system audio loopback buffer ([THEM] — interviewer / call audio on headphones!)
-  const drainNativeSystemAudio = useCallback(async () => {
+  const drainNativeSystemAudio = useCallback(async (forceFlush = false) => {
     if (!nativeLoopbackActiveRef.current) return;
+    // While backed off from a 429, keep accumulating audio inside WASAPI's 30s ring buffer so zero speech is dropped!
+    const nowCheck = Date.now();
+    if (!forceFlush && nowCheck < rateLimitUntilMsRef.current) return;
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       const nowMs = Date.now();
@@ -200,7 +249,7 @@ export function useAudioRecorder() {
       const wavBlob = new Blob([bytes], { type: "audio/wav" });
       const segIdx = segmentIndexRef.current++;
       const offsetSeconds = Math.max(0, (chunkStartMs - sessionStartMsRef.current) / 1000);
-      await uploadSegmentToWhisper(wavBlob, segIdx, offsetSeconds, true, "THEM", `system-${segIdx}.wav`);
+      await uploadSegmentToWhisper(wavBlob, segIdx, offsetSeconds, true, "THEM", `system-${segIdx}.wav`, forceFlush);
     } catch (err) {
       console.warn("Native WASAPI loopback drain warning:", err);
     }
@@ -242,10 +291,20 @@ export function useAudioRecorder() {
         if (segmentHadSpeechRef.current) {
           localHadSpeech = true;
         }
+        const forceFlush = forceNextMicUploadRef.current;
+        forceNextMicUploadRef.current = false;
         if (localChunks.length > 0) {
           const segmentBlob = new Blob(localChunks, { type: mimeType || "audio/webm" });
           const speaker = nativeLoopbackActiveRef.current ? "YOU" : undefined;
-          void uploadSegmentToWhisper(segmentBlob, segIdx, offsetSeconds, localHadSpeech || segIdx === 0, speaker);
+          void uploadSegmentToWhisper(
+            segmentBlob,
+            segIdx,
+            offsetSeconds,
+            localHadSpeech || segIdx === 0,
+            speaker,
+            undefined,
+            forceFlush
+          );
         }
       };
 
@@ -560,6 +619,9 @@ export function useAudioRecorder() {
         segmentHadSpeechRef.current = false;
         interimTextRef.current = "";
         consecutiveFailuresRef.current = 0;
+        rateLimitUntilMsRef.current = 0;
+        lastRateLimitAtMsRef.current = 0;
+        forceNextMicUploadRef.current = false;
         setTranscriptionHealth("listening");
         broadcastTranscript("", true);
 
@@ -878,9 +940,8 @@ export function useAudioRecorder() {
 
   /**
    * Immediately flushes the in-progress audio window to Whisper and awaits any in-flight
-   * transcription (capped at 4.2s) so "Suggest Answer" / "Recap" ALWAYS sees speech spoken
-   * right up to the moment the user clicked the button — even inside WebView2 where browser
-   * SpeechRecognition is unavailable.
+   * transcription (single bounded 3.5s race) so "Suggest Answer" / "Recap" sees speech spoken
+   * right up to the moment the user clicked the button without stalling for 8+ seconds.
    */
   const flushPendingAudio = useCallback(async (): Promise<string> => {
     try {
@@ -888,14 +949,15 @@ export function useAudioRecorder() {
 
       // 1. Immediately drain Windows native WASAPI system audio ([THEM] — interviewer's latest words!)
       if (isRecordingRef.current && nativeLoopbackActiveRef.current) {
-        flushPromises.push(drainNativeSystemAudio());
+        flushPromises.push(drainNativeSystemAudio(true));
       }
 
-      // 2. Immediately rotate & flush the user's microphone segment ([YOU])
+      // 2. Immediately rotate & flush the user's microphone segment ([YOU]) in parallel
       if (isRecordingRef.current && finalStreamRef.current) {
         const previousRecorder = activeRecorderRef.current;
         if (previousRecorder && previousRecorder.state === "recording") {
           segmentHadSpeechRef.current = true;
+          forceNextMicUploadRef.current = true;
           try {
             spawnSegmentRecorder(finalStreamRef.current, activeMimeTypeRef.current);
           } catch {
@@ -906,22 +968,17 @@ export function useAudioRecorder() {
           } catch {
             // ignore
           }
-          // Let recorder.onstop fire and enqueue the Whisper upload into pendingUploadsRef
-          await new Promise((r) => setTimeout(r, 180));
+          // Brief tick for recorder.onstop to fire and register its upload in pendingUploadsRef
+          await new Promise((r) => setTimeout(r, 150));
         }
       }
 
-      if (flushPromises.length > 0) {
+      // Single bounded wait across both WASAPI drain + mic upload (cuts worst-case stall from 8.6s -> 3.5s)
+      const allInFlight: Promise<any>[] = [...flushPromises, ...Array.from(pendingUploadsRef.current)];
+      if (allInFlight.length > 0) {
         await Promise.race([
-          Promise.allSettled(flushPromises),
-          new Promise((r) => setTimeout(r, 4200)),
-        ]);
-      }
-
-      if (pendingUploadsRef.current.size > 0) {
-        await Promise.race([
-          Promise.allSettled(Array.from(pendingUploadsRef.current)),
-          new Promise((r) => setTimeout(r, 4200)),
+          Promise.allSettled(allInFlight),
+          new Promise((r) => setTimeout(r, 3500)),
         ]);
       }
     } catch {

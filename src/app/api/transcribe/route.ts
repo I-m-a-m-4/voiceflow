@@ -4,21 +4,88 @@ export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-// Common Whisper hallucinations emitted during low-volume silence or static
-const WHISPER_HALLUCINATION_PATTERNS = [
-  /^(thank you(\s+for\s+watching)?|thanks\s+for\s+watching|you|bye|goodbye|okay|so|um+|uh+|hmm+|\.+|,+|subtitle[s]?\s+by.*|transcribed\s+by.*|amara\.org.*)\.?$/i,
+// Always-drop Whisper boilerplate hallucinations (YouTube / caption artifacts)
+const ALWAYS_HALLUCINATION_PATTERNS = [
+  /^(thank\s+you(\s+(very|so)\s+much)?\s+for\s+(watching|listening)|thanks(\s+(so\s+much|a\s+lot))?\s+for\s+(watching|listening)|please\s+(subscribe|like)|like\s+and\s+subscribe|subscribe\s+to\s+(my|the)\s+channel|subtitle[s]?\s+by.*|transcribed\s+by.*|captions\s+by.*|amara\.org.*|mbc\s+news.*|copyright.*|www\..*|https?:\/\/.*)\.?$/i,
 ];
 
-function isLikelyHallucination(text: string, noSpeechProb?: number): boolean {
-  const clean = text.trim();
-  if (!clean) return true;
-  if (typeof noSpeechProb === "number" && noSpeechProb > 0.75) return true;
-  if (clean.length <= 2) return true;
-  if (typeof noSpeechProb === "number" && noSpeechProb > 0.45 && WHISPER_HALLUCINATION_PATTERNS.some((p) => p.test(clean))) {
-    return true;
+// Short filler/silence hallucinations dropped when no_speech_prob is elevated or standalone
+const SILENCE_HALLUCINATION_PATTERNS = [
+  /^(thank\s+you(\s+(very|so)\s+much)?|thanks|you|bye|goodbye|see\s+you(\s+(next\s+time|later|soon))?|okay|ok|so|um+|uh+|hmm+|oh|ah|huh|\.+|,+)\.?$/i,
+];
+
+function hasRepetitiveLoop(text: string): boolean {
+  const words = text
+    .toLowerCase()
+    .replace(/[^a-z0-9'\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+  if (words.length < 4) return false;
+
+  const unique = new Set(words);
+  // e.g. "new new new new" or "the the the the"
+  if (unique.size <= 1) return true;
+  // e.g. "thank you thank you thank you"
+  if (words.length >= 6 && unique.size <= 2 && words.length / unique.size >= 3) return true;
+
+  // Same word repeated 4+ times consecutively anywhere in the segment
+  let run = 1;
+  for (let i = 1; i < words.length; i++) {
+    if (words[i] === words[i - 1]) {
+      run += 1;
+      if (run >= 4) return true;
+    } else {
+      run = 1;
+    }
   }
   return false;
 }
+
+function sanitizeWhisperPrompt(raw: string): string {
+  const trimmed = raw.trim().slice(-180);
+  if (!trimmed || hasRepetitiveLoop(trimmed)) return "";
+  const words = trimmed
+    .toLowerCase()
+    .replace(/[^a-z0-9'\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 2);
+  if (words.length < 4) return "";
+  const unique = new Set(words);
+  if (unique.size < 4 || unique.size / words.length < 0.45) return "";
+  return trimmed;
+}
+
+interface WhisperSegmentMetrics {
+  no_speech_prob?: number;
+  compression_ratio?: number;
+  avg_logprob?: number;
+}
+
+function isLikelyHallucination(text: string, metrics?: WhisperSegmentMetrics | number): boolean {
+  const clean = text.trim();
+  if (!clean) return true;
+  if (clean.length <= 2) return true;
+  if (hasRepetitiveLoop(clean)) return true;
+  if (ALWAYS_HALLUCINATION_PATTERNS.some((p) => p.test(clean))) return true;
+
+  const noSpeechProb = typeof metrics === "number" ? metrics : metrics?.no_speech_prob;
+  const compressionRatio = typeof metrics === "number" ? undefined : metrics?.compression_ratio;
+  const avgLogprob = typeof metrics === "number" ? undefined : metrics?.avg_logprob;
+
+  if (typeof noSpeechProb === "number" && noSpeechProb > 0.72) return true;
+  if (typeof compressionRatio === "number" && compressionRatio > 2.4) return true;
+  if (typeof avgLogprob === "number" && avgLogprob < -1.15 && (noSpeechProb ?? 0) > 0.4) return true;
+
+  if (SILENCE_HALLUCINATION_PATTERNS.some((p) => p.test(clean))) {
+    if (typeof noSpeechProb !== "number" || noSpeechProb > 0.35) return true;
+  }
+  return false;
+}
+
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Expose-Headers": "Retry-After",
+};
 
 export async function OPTIONS() {
   return new NextResponse(null, {
@@ -27,6 +94,7 @@ export async function OPTIONS() {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Expose-Headers": "Retry-After",
     },
   });
 }
@@ -53,12 +121,14 @@ export async function POST(req: NextRequest) {
     const offsetSeconds = Math.max(0, Number(rawOffset) || 0);
     const rawSpeaker = String(formData.get("speaker") || "").trim().toUpperCase();
     const speakerTag = rawSpeaker === "THEM" || rawSpeaker === "YOU" ? `[${rawSpeaker}] ` : "";
-    const whisperPrompt = String(formData.get("prompt") || "").trim().slice(-220);
+    const whisperPrompt = sanitizeWhisperPrompt(String(formData.get("prompt") || ""));
+    const rawLanguage = String(formData.get("language") || "").trim().toLowerCase();
+    const requestedLanguage = /^[a-z]{2,3}$/.test(rawLanguage) ? rawLanguage : "";
 
     if (!file || file.size === 0) {
       return NextResponse.json(
         { error: "No audio file provided or audio file is empty" },
-        { status: 400, headers: { "Access-Control-Allow-Origin": "*" } }
+        { status: 400, headers: CORS_HEADERS }
       );
     }
 
@@ -70,6 +140,7 @@ export async function POST(req: NextRequest) {
     let succeeded = false;
     let lastErrorMsg = "Transcription failed across all models";
     let lastStatus = 502;
+    let retryAfterSeconds: number | null = null;
 
     const formatTimestamp = (secs: number) => {
       const total = Math.max(0, Math.floor(secs));
@@ -86,7 +157,10 @@ export async function POST(req: NextRequest) {
         groqFormData.append("file", file, file.name || "audio.webm");
         groqFormData.append("model", model);
         groqFormData.append("response_format", "verbose_json");
-        groqFormData.append("language", "en");
+        // Only pass explicit language when caller requests one; otherwise allow Whisper auto-detection
+        if (requestedLanguage) {
+          groqFormData.append("language", requestedLanguage);
+        }
         groqFormData.append("temperature", "0.0");
         if (whisperPrompt) {
           groqFormData.append("prompt", whisperPrompt);
@@ -106,9 +180,9 @@ export async function POST(req: NextRequest) {
           durationSeconds = typeof transcription.duration === "number" ? transcription.duration : 0;
           const rawSegments = Array.isArray(transcription.segments) ? transcription.segments : [];
 
-          // Filter out silent / hallucinated segments and shift timestamps by offsetSeconds
+          // Filter out silent / hallucinated / repetitive-loop segments and shift timestamps by offsetSeconds
           segments = rawSegments
-            .filter((seg: any) => !isLikelyHallucination(seg.text || "", seg.no_speech_prob))
+            .filter((seg: any) => !isLikelyHallucination(seg.text || "", seg))
             .map((seg: any) => ({
               ...seg,
               start: (seg.start || 0) + offsetSeconds,
@@ -129,6 +203,13 @@ export async function POST(req: NextRequest) {
           const errData: any = await groqRes.json().catch(() => ({}));
           lastErrorMsg = errData?.error?.message || `HTTP ${groqRes.status}`;
           lastStatus = groqRes.status;
+          if (groqRes.status === 429) {
+            const raRaw = groqRes.headers.get("retry-after");
+            const parsedRa = raRaw ? Number(raRaw) : NaN;
+            retryAfterSeconds = Number.isFinite(parsedRa) && parsedRa > 0
+              ? Math.min(30, Math.max(5, Math.ceil(parsedRa)))
+              : (retryAfterSeconds ?? 8);
+          }
           after(() => logAIError("groq-whisper", model, lastErrorMsg, groqRes.status));
         }
       } catch (err: any) {
@@ -139,13 +220,18 @@ export async function POST(req: NextRequest) {
     }
 
     if (!succeeded) {
-      return NextResponse.json(
-        { error: lastErrorMsg },
-        {
-          status: lastStatus >= 400 && lastStatus < 600 ? lastStatus : 502,
-          headers: { "Access-Control-Allow-Origin": "*" },
-        }
-      );
+      const responseStatus = lastStatus >= 400 && lastStatus < 600 ? lastStatus : 502;
+      const errHeaders: Record<string, string> = { ...CORS_HEADERS };
+      const errBody: Record<string, unknown> = { error: lastErrorMsg };
+      if (responseStatus === 429) {
+        const ra = retryAfterSeconds ?? 8;
+        errHeaders["Retry-After"] = String(ra);
+        errBody.retryAfterSeconds = ra;
+      }
+      return NextResponse.json(errBody, {
+        status: responseStatus,
+        headers: errHeaders,
+      });
     }
 
     if (segments.length > 0) {

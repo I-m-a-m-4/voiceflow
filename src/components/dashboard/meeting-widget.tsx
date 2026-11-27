@@ -159,6 +159,7 @@ export default function MeetingWidget({
   const lastImageBase64Ref = useRef<string | null>(null);
   const lastAskedTranscriptLenRef = useRef<number>(0);
   const lastAskedTranscriptTailRef = useRef<string>("");
+  const lastAnsweredQuestionRef = useRef<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const hasPositionedRef = useRef(false);
@@ -211,6 +212,7 @@ export default function MeetingWidget({
       lastImageBase64Ref.current = null;
       lastAskedTranscriptLenRef.current = 0;
       lastAskedTranscriptTailRef.current = "";
+      lastAnsweredQuestionRef.current = "";
       setHasAttachedImage(false);
 
       if (typeof window !== "undefined") {
@@ -451,6 +453,7 @@ export default function MeetingWidget({
     lastImageBase64Ref.current = null;
     lastAskedTranscriptLenRef.current = 0;
     lastAskedTranscriptTailRef.current = "";
+    lastAnsweredQuestionRef.current = "";
     setHasAttachedImage(false);
     setQuery("");
     if (typeof window !== "undefined") {
@@ -465,6 +468,7 @@ export default function MeetingWidget({
     lastImageBase64Ref.current = null;
     lastAskedTranscriptLenRef.current = 0;
     lastAskedTranscriptTailRef.current = "";
+    lastAnsweredQuestionRef.current = "";
     setHasAttachedImage(false);
     setActiveTab("chat");
   };
@@ -741,13 +745,51 @@ export default function MeetingWidget({
           transcript ||
           (typeof window !== "undefined" ? localStorage.getItem("voiceflow_live_transcript") || "" : "");
 
+        // If Suggest Answer is clicked with ZERO captured speech yet, give an honest actionable
+        // status bubble instead of wasting an LLM call on generic filler!
+        const strippedSpeech = activeTranscript
+          .replace(/\[\d{1,2}:\d{2}(?::\d{2})?\]\s*/g, "")
+          .replace(/\[(THEM|YOU)\]\s*/gi, "")
+          .replace(/\.\.\./g, "")
+          .trim();
+
+        if (mode === "text-only" && isGenericAskPrompt(promptToUse) && strippedSpeech.length < 8) {
+          const noAudioMsg =
+            transcriptionHealth === "degraded"
+              ? "Live transcription is briefly catching up after high demand. Wait a few seconds and tap Retry — or type the question directly below."
+              : systemAudioActive
+                ? "No spoken question has been captured yet. Once the other speaker talks, tap Retry (or type their question below)."
+                : "No speech has been captured yet. Check that your microphone isn't muted (and if you're on headphones in a browser, turn on '+ Tab Audio' before starting), then tap Retry.";
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === aiMsgId
+                ? {
+                    ...m,
+                    text: noAudioMsg,
+                    isStreaming: false,
+                    isError: true,
+                    retryPrompt: promptToUse,
+                    retryMode: mode,
+                  }
+                : m
+            )
+          );
+          return;
+        }
+
         const prevTranscriptLength = lastAskedTranscriptLenRef.current;
         const prevTranscriptTail = lastAskedTranscriptTailRef.current;
+        const prevAnsweredQuestion = lastAnsweredQuestionRef.current;
 
-        const commitTranscriptCursor = () => {
+        const commitTranscriptCursor = (answeredQ?: string) => {
           const cleanActive = activeTranscript.trim();
-          lastAskedTranscriptLenRef.current = cleanActive.length;
-          lastAskedTranscriptTailRef.current = cleanActive.slice(-120);
+          if (cleanActive) {
+            lastAskedTranscriptLenRef.current = cleanActive.length;
+            lastAskedTranscriptTailRef.current = cleanActive.slice(-120);
+          }
+          if (answeredQ && answeredQ.trim()) {
+            lastAnsweredQuestionRef.current = answeredQ.trim();
+          }
         };
 
         const base = apiBase();
@@ -772,6 +814,7 @@ export default function MeetingWidget({
               history: historyPayload,
               lastTranscriptLength: prevTranscriptLength,
               lastTranscriptTail: prevTranscriptTail,
+              lastAnsweredQuestion: prevAnsweredQuestion,
               stream: true,
             }),
           });
@@ -846,7 +889,7 @@ export default function MeetingWidget({
           if (controller.signal.aborted) return;
 
           if (accumulated.trim()) {
-            commitTranscriptCursor();
+            commitTranscriptCursor(extractedQ);
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === aiMsgId
@@ -886,7 +929,7 @@ export default function MeetingWidget({
         if (contentType.includes("application/json")) {
           const data = await res.json();
           if (res.ok && data.text && typeof data.text === "string" && data.text.trim()) {
-            commitTranscriptCursor();
+            commitTranscriptCursor(typeof data.extractedQuestion === "string" ? data.extractedQuestion : undefined);
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === aiMsgId
@@ -984,7 +1027,7 @@ export default function MeetingWidget({
         setIsQuerying(false);
       }
     },
-    [flushPendingAudio, isHidden, isQuerying, isRecording, query, recordScreenCapture, transcript]
+    [flushPendingAudio, isHidden, isQuerying, isRecording, query, recordScreenCapture, systemAudioActive, transcript, transcriptionHealth]
   );
 
   // Keep shortcut refs pointing to the latest closures every render

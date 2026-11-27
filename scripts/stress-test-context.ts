@@ -607,6 +607,142 @@ function runDeterministicSuite() {
     );
   }
 
+  // --------------------------------------------------------------------------
+  // 8. Production Suggest-Answer Regression Guards (Widget history, [YOU] delta,
+  //    natural spoken prompts without '?', self-reply guard, Whisper loops)
+  // --------------------------------------------------------------------------
+  {
+    // 8.1 Widget rewrites prior prompt to "[Asked for live answer to]: ..."
+    const tx1 =
+      "[0:12] [THEM] Tell me about a time you handled a major production outage under pressure?";
+    const res1 = buildEnhancedInterviewPrompt(
+      "Give me a smart real-time answer suggestion for the current meeting point.",
+      tx1,
+      {
+        history: [
+          {
+            role: "user",
+            content: `[Asked for live answer to]: "${tx1.replace("[0:12] [THEM] ", "")}"`,
+          },
+          {
+            role: "assistant",
+            content:
+              "**When our checkout queue backed up during Black Friday, I stabilized latency in 15 minutes.**\n- Isolated the locking query and rolled back the batch job.",
+          },
+        ],
+        previousTranscriptLength: tx1.length,
+        previousTranscriptTail: tx1.slice(-120),
+        previousAnsweredQuestion:
+          "Tell me about a time you handled a major production outage under pressure?",
+      }
+    );
+    check(
+      "8.1 Widget rewritten history '[Asked for live answer to]:' triggers repeat-ask",
+      res1.isRepeatAsk === true && res1.responseMode === "fresh_alternative",
+      { isRepeatAsk: res1.isRepeatAsk, mode: res1.responseMode }
+    );
+
+    // 8.2 Dual-channel [YOU]-only speech after Q1 must NOT count as new interviewer delta
+    const tx2Base =
+      "[0:10] [THEM] Why do you want to join our infrastructure team at Acme?";
+    const tx2After =
+      tx2Base +
+      "\n\n[0:22] [YOU] Yeah so I have been following Acme's distributed storage work and uh wait how should I frame the impact?";
+    const res2 = buildEnhancedInterviewPrompt(
+      "Give me a smart real-time answer suggestion for the current meeting point.",
+      tx2After,
+      {
+        history: [
+          {
+            role: "user",
+            content:
+              '[Asked for live answer to]: "Why do you want to join our infrastructure team at Acme?"',
+          },
+          {
+            role: "assistant",
+            content:
+              "**I'm drawn to Acme because of your high-throughput storage architecture.**\n- My background scaling Kafka pipelines maps directly to your roadmap.",
+          },
+        ],
+        previousTranscriptLength: tx2Base.length,
+        previousTranscriptTail: tx2Base.slice(-120),
+        previousAnsweredQuestion:
+          "Why do you want to join our infrastructure team at Acme?",
+      }
+    );
+    check(
+      "8.2 [YOU]-only delta after Q1 triggers fresh_alternative (does not echo [YOU] as interviewer Q)",
+      res2.isRepeatAsk === true &&
+        res2.responseMode === "fresh_alternative" &&
+        !res2.extractedQuestion?.toLowerCase().includes("how should i frame"),
+      { isRepeatAsk: res2.isRepeatAsk, mode: res2.responseMode, q: res2.extractedQuestion }
+    );
+
+    // 8.3 Clause-prefixed spoken question without '?'
+    const tx3 =
+      "[1:05] [THEM] Okay cool, so before we dive into coding how would you handle zero-downtime schema migrations on a 500GB Postgres table";
+    const q3 = extractLastQuestion(tx3);
+    check(
+      "8.3 Clause-prefixed spoken question without '?' extracts cleanly",
+      Boolean(q3 && /zero-downtime|schema migrations/i.test(q3)),
+      q3
+    );
+
+    // 8.4 Natural non-'?' imperative spoken prompt ("I'd love to understand...")
+    const tx4 =
+      "[2:10] [THEM] Yeah, I'd love to understand your experience with distributed caching and how you prevent cache stampedes";
+    const q4 = extractLastQuestion(tx4);
+    check(
+      "8.4 Natural spoken prompt ('I'd love to understand...') without '?' extracts cleanly",
+      Boolean(q4 && /distributed caching|cache stampedes/i.test(q4)),
+      q4
+    );
+
+    // 8.5 Single-channel user self-reply delta does NOT resurrect Q1 as a brand new question
+    const tx5Base =
+      "[0:10] What is your biggest strength as an engineering manager?";
+    const tx5After =
+      tx5Base +
+      "\n\n[0:24] I think my biggest strength is hiring and coaching senior engineers through ambiguity.";
+    const res5 = buildEnhancedInterviewPrompt(
+      "Give me a smart real-time answer suggestion for the current meeting point.",
+      tx5After,
+      {
+        history: [
+          {
+            role: "user",
+            content:
+              '[Asked for live answer to]: "What is your biggest strength as an engineering manager?"',
+          },
+          {
+            role: "assistant",
+            content:
+              "**My biggest strength is building high-ownership teams that ship reliably under ambiguity.**",
+          },
+        ],
+        previousTranscriptLength: tx5Base.length,
+        previousTranscriptTail: tx5Base.slice(-120),
+        previousAnsweredQuestion:
+          "What is your biggest strength as an engineering manager?",
+      }
+    );
+    check(
+      "8.5 Single-channel user first-person self-reply does NOT resurrect Q1 as non-repeat",
+      res5.isRepeatAsk === true && res5.responseMode === "fresh_alternative",
+      { isRepeatAsk: res5.isRepeatAsk, mode: res5.responseMode, q: res5.extractedQuestion }
+    );
+
+    // 8.6 Whisper repetition loop noise does NOT clobber real interviewer question
+    const tx6 =
+      "[0:10] [THEM] How do you measure success during your first 90 days in a new role?\n\n[0:18] [THEM] new\n\n[0:23] [THEM] new\n\n[0:28] [THEM] new\n\n[0:33] [THEM] Thank you.";
+    const q6 = extractLastQuestion(tx6);
+    check(
+      "8.6 Whisper repetition loop noise is ignored so real interviewer question survives",
+      Boolean(q6 && /first 90 days/i.test(q6)),
+      q6
+    );
+  }
+
   const elapsed = (performance.now() - start).toFixed(1);
   console.log(`Part A completed in ${elapsed}ms (${passed} checks passed so far).`);
 }
