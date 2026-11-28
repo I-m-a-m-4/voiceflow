@@ -38,7 +38,12 @@ import remarkGfm from "remark-gfm";
 import { usePlanUsage } from "@/hooks/use-plan-usage";
 import { apiBase } from "@/lib/platform";
 import { copyToClipboard } from "@/lib/clipboard";
-import { isGenericAskPrompt, isScreenFocusedPrompt } from "@/lib/transcript-context";
+import {
+  getLatestHeardPreview,
+  getSelectableTranscriptTurns,
+  isGenericAskPrompt,
+  isScreenFocusedPrompt,
+} from "@/lib/transcript-context";
 import type { TranscriptionHealth } from "@/hooks/useAudioRecorder";
 
 interface MeetingWidgetProps {
@@ -68,6 +73,7 @@ interface ChatMessage {
   retryPrompt?: string;
   retryMode?: AskMode;
   retryImageBase64?: string;
+  retrySelectedTranscriptText?: string;
 }
 
 interface SavedSession {
@@ -151,6 +157,9 @@ export default function MeetingWidget({
   const [hasAttachedImage, setHasAttachedImage] = useState<boolean>(false);
   const [showJumpToLatest, setShowJumpToLatest] = useState<boolean>(false);
   const [isSyncingAudio, setIsSyncingAudio] = useState<boolean>(false);
+  const [showTranscriptPicker, setShowTranscriptPicker] = useState<boolean>(false);
+  const [selectedTurnIds, setSelectedTurnIds] = useState<string[]>([]);
+  const [highlightedTranscriptText, setHighlightedTranscriptText] = useState<string>("");
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const transcriptContainerRef = useRef<HTMLDivElement>(null);
@@ -166,7 +175,9 @@ export default function MeetingWidget({
   const prevIsRecordingRef = useRef(false);
 
   // Refs for fresh closures inside global/keyboard shortcuts (eliminates stale closure bug!)
-  const latestAskRef = useRef<(customPrompt?: string, mode?: AskMode, retryImg?: string) => Promise<void>>(async () => {});
+  const latestAskRef = useRef<
+    (customPrompt?: string, mode?: AskMode, retryImg?: string, selectedTranscriptText?: string) => Promise<void>
+  >(async () => {});
   const latestStartOverRef = useRef<() => void>(() => {});
   const latestStopRef = useRef<() => Promise<void>>(async () => {});
   const messagesRef = useRef<ChatMessage[]>(messages);
@@ -455,6 +466,9 @@ export default function MeetingWidget({
     lastAskedTranscriptTailRef.current = "";
     lastAnsweredQuestionRef.current = "";
     setHasAttachedImage(false);
+    setShowTranscriptPicker(false);
+    setSelectedTurnIds([]);
+    setHighlightedTranscriptText("");
     setQuery("");
     if (typeof window !== "undefined") {
       localStorage.removeItem("voiceflow_widget_messages");
@@ -586,10 +600,19 @@ export default function MeetingWidget({
   };
 
   const handleAskAI = useCallback(
-    async (customPrompt?: string, mode: AskMode = "auto", retryImageBase64?: string) => {
+    async (
+      customPrompt?: string,
+      mode: AskMode = "auto",
+      retryImageBase64?: string,
+      selectedTranscriptText?: string
+    ) => {
+      const cleanSelectedText = (selectedTranscriptText || "").trim();
       const promptToUse = (customPrompt || query || "What should I say right now?").trim();
       if (!promptToUse || isQuerying) return;
 
+      setShowTranscriptPicker(false);
+      setSelectedTurnIds([]);
+      setHighlightedTranscriptText("");
       setActiveTab("chat");
       if (isHidden) setIsHidden(false);
       // Clear input whenever the typed query was consumed (including when clicking Screen with typed text!)
@@ -676,10 +699,13 @@ export default function MeetingWidget({
         if (controller.signal.aborted) return;
 
         // Optimistic UI: render user message + streaming AI bubble IMMEDIATELY!
+        const displayUserText = cleanSelectedText
+          ? `Answer from transcript: "${cleanSelectedText.slice(0, 150)}${cleanSelectedText.length > 150 ? "..." : ""}"`
+          : promptToUse;
         const userMsg: ChatMessage = {
           id: userMsgId,
           sender: "user",
-          text: promptToUse,
+          text: displayUserText,
           timestamp: nowStamp,
           imageBase64: effectiveImage || undefined,
           hadImage: Boolean(effectiveImage),
@@ -720,8 +746,9 @@ export default function MeetingWidget({
 
         // For Suggest Answer / Recap (text-only), flush any buffered live audio segment to Whisper
         // BEFORE querying AI so speech from the last 1-5 seconds is guaranteed to be included!
+        // Skip flushing when the user explicitly selected an already-transcribed excerpt (answers immediately!).
         let flushedTranscript = "";
-        if (mode === "text-only" && isRecording && flushPendingAudio) {
+        if (mode === "text-only" && !cleanSelectedText && isRecording && flushPendingAudio) {
           setIsSyncingAudio(true);
           try {
             flushedTranscript = (await flushPendingAudio()) || "";
@@ -753,7 +780,7 @@ export default function MeetingWidget({
           .replace(/\.\.\./g, "")
           .trim();
 
-        if (mode === "text-only" && isGenericAskPrompt(promptToUse) && strippedSpeech.length < 8) {
+        if (mode === "text-only" && !cleanSelectedText && isGenericAskPrompt(promptToUse) && strippedSpeech.length < 8) {
           const noAudioMsg =
             transcriptionHealth === "degraded"
               ? "Live transcription is briefly catching up after high demand. Wait a few seconds and tap Retry — or type the question directly below."
@@ -815,6 +842,7 @@ export default function MeetingWidget({
               lastTranscriptLength: prevTranscriptLength,
               lastTranscriptTail: prevTranscriptTail,
               lastAnsweredQuestion: prevAnsweredQuestion,
+              selectedTranscriptText: cleanSelectedText || undefined,
               stream: true,
             }),
           });
@@ -917,6 +945,7 @@ export default function MeetingWidget({
                       retryPrompt: promptToUse,
                       retryMode: mode,
                       retryImageBase64: effectiveImage || undefined,
+                      retrySelectedTranscriptText: cleanSelectedText || undefined,
                     }
                   : m
               )
@@ -960,6 +989,7 @@ export default function MeetingWidget({
                     retryPrompt: promptToUse,
                     retryMode: mode,
                     retryImageBase64: effectiveImage || undefined,
+                    retrySelectedTranscriptText: cleanSelectedText || undefined,
                   }
                 : m
             )
@@ -979,6 +1009,7 @@ export default function MeetingWidget({
                   retryPrompt: promptToUse,
                   retryMode: mode,
                   retryImageBase64: effectiveImage || undefined,
+                  retrySelectedTranscriptText: cleanSelectedText || undefined,
                 }
               : m
           )
@@ -1003,6 +1034,7 @@ export default function MeetingWidget({
                     retryPrompt: promptToUse,
                     retryMode: mode,
                     retryImageBase64: retryImageBase64,
+                    retrySelectedTranscriptText: cleanSelectedText || undefined,
                   }
                 : m
             );
@@ -1018,6 +1050,7 @@ export default function MeetingWidget({
               retryPrompt: promptToUse,
               retryMode: mode,
               retryImageBase64: retryImageBase64,
+              retrySelectedTranscriptText: cleanSelectedText || undefined,
             },
           ];
         });
@@ -1044,7 +1077,12 @@ export default function MeetingWidget({
       const removeStart = idx > 0 && prev[idx - 1].sender === "user" ? idx - 1 : idx;
       return [...prev.slice(0, removeStart), ...prev.slice(idx + 1)];
     });
-    void handleAskAI(msg.retryPrompt, msg.retryMode || "auto", msg.retryImageBase64);
+    void handleAskAI(
+      msg.retryPrompt,
+      msg.retryMode || "auto",
+      msg.retryImageBase64,
+      msg.retrySelectedTranscriptText
+    );
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1103,6 +1141,42 @@ export default function MeetingWidget({
         : systemAudioActive
           ? "Call Audio (Them) + Mic (You)"
           : "Listening (Microphone)";
+
+  const latestHeardPreview = getLatestHeardPreview(liveTranscript);
+  const selectableTurns = getSelectableTranscriptTurns(liveTranscript, 30);
+  const recentPickerTurns = [...selectableTurns].reverse().slice(0, 10);
+
+  const toggleSelectTurnId = (id: string) => {
+    setSelectedTurnIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
+  };
+
+  const handleAnswerTranscriptExcerpt = (excerpt: string) => {
+    const clean = excerpt.trim();
+    if (!clean || isQuerying) return;
+    void handleAskAI(
+      "Give me a smart real-time answer suggestion for the current meeting point.",
+      "text-only",
+      undefined,
+      clean
+    );
+  };
+
+  const handleAnswerCheckedTurns = () => {
+    const picked = selectableTurns.filter((t) => selectedTurnIds.includes(t.id));
+    if (picked.length === 0) return;
+    const combined = picked.map((t) => t.text).join(" ");
+    handleAnswerTranscriptExcerpt(combined);
+  };
+
+  const handleTranscriptMouseUp = () => {
+    if (typeof window === "undefined") return;
+    const sel = window.getSelection()?.toString().trim() || "";
+    if (sel.length >= 6) {
+      setHighlightedTranscriptText(sel.slice(0, 800));
+    } else {
+      setHighlightedTranscriptText("");
+    }
+  };
 
   return createPortal(
     <>
@@ -1408,14 +1482,31 @@ export default function MeetingWidget({
                                 <span>{msg.text}</span>
                               </div>
                               {msg.retryPrompt && (
-                                <button
-                                  onClick={() => handleRetryMessage(msg)}
-                                  disabled={isQuerying}
-                                  className="self-start flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-100 border border-red-500/30 text-[11px] font-semibold transition-all disabled:opacity-40"
-                                >
-                                  <RefreshCw size={11} />
-                                  <span>Retry</span>
-                                </button>
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <button
+                                    onClick={() => handleRetryMessage(msg)}
+                                    disabled={isQuerying}
+                                    className="self-start flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-100 border border-red-500/30 text-[11px] font-semibold transition-all disabled:opacity-40"
+                                  >
+                                    <RefreshCw size={11} />
+                                    <span>Retry</span>
+                                  </button>
+                                  {msg.retryMode === "text-only" && (
+                                    <button
+                                      onClick={() =>
+                                        void handleAskAI(
+                                          "Analyze what is on my screen right now and give me the exact answer, solution, or speaking points.",
+                                          "capture-screen"
+                                        )
+                                      }
+                                      disabled={isQuerying}
+                                      className="self-start flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-100 border border-blue-500/30 text-[11px] font-semibold transition-all disabled:opacity-40"
+                                    >
+                                      <Camera size={11} />
+                                      <span>Analyze Screen Instead</span>
+                                    </button>
+                                  )}
+                                </div>
                               )}
                             </div>
                           ) : msg.isStreaming && !msg.text ? (
@@ -1570,8 +1661,215 @@ export default function MeetingWidget({
                   )}
                 </div>
 
+                {/* Inline Transcript Question Picker Popover (1-click pick ANY line to answer without leaving Chat!) */}
+                {showTranscriptPicker && (
+                  <div className="mb-2 rounded-xl bg-[#141417] border border-voiceflow-orange/35 shadow-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-150">
+                    <div className="flex items-center justify-between px-2.5 py-1.5 bg-white/5 border-b border-white/10">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-orange-300 flex items-center gap-1.5">
+                        <Sparkles size={10} />
+                        <span>Pick from transcript to answer</span>
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowTranscriptPicker(false);
+                            setActiveTab("transcript");
+                          }}
+                          className="text-[10px] font-semibold text-white/60 hover:text-white transition-colors"
+                        >
+                          Full transcript →
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowTranscriptPicker(false)}
+                          className="p-0.5 rounded text-white/50 hover:text-white hover:bg-white/10 transition-colors"
+                          title="Close picker"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="max-h-48 overflow-y-auto divide-y divide-white/5 scrollbar-thin scrollbar-thumb-white/20">
+                      {recentPickerTurns.length === 0 ? (
+                        <div className="px-3 py-4 text-center text-[11px] text-white/45 italic">
+                          No spoken transcript lines captured yet. Speak or wait for the other caller, then try again.
+                        </div>
+                      ) : (
+                        recentPickerTurns.map((turn, idx) => {
+                          const isChecked = selectedTurnIds.includes(turn.id);
+                          return (
+                            <div
+                              key={turn.id}
+                              className={`flex items-start gap-2 px-2.5 py-2 transition-colors ${
+                                isChecked ? "bg-voiceflow-orange/15" : "hover:bg-white/5"
+                              }`}
+                            >
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleSelectTurnId(turn.id);
+                                }}
+                                className={`mt-0.5 w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                                  isChecked
+                                    ? "bg-voiceflow-orange border-voiceflow-orange text-white"
+                                    : "border-white/25 hover:border-white/50 bg-black/30"
+                                }`}
+                                title="Select multiple lines to combine"
+                              >
+                                {isChecked && <Check size={9} strokeWidth={3} />}
+                              </button>
+
+                              <button
+                                type="button"
+                                disabled={isQuerying}
+                                onClick={() => handleAnswerTranscriptExcerpt(turn.text)}
+                                className="flex-1 min-w-0 text-left group disabled:opacity-50"
+                                title="Click to answer this exact transcript line immediately"
+                              >
+                                <div className="flex items-center gap-1.5 mb-0.5">
+                                  <span
+                                    className={`text-[9px] font-bold px-1.5 py-0.2 rounded uppercase ${
+                                      turn.speaker === "them"
+                                        ? "bg-emerald-500/20 text-emerald-300"
+                                        : turn.speaker === "you"
+                                          ? "bg-white/10 text-white/60"
+                                          : "bg-blue-500/20 text-blue-300"
+                                    }`}
+                                  >
+                                    {turn.speaker === "them" ? "THEM" : turn.speaker === "you" ? "YOU" : "AUDIO"}
+                                  </span>
+                                  {turn.timestamp && (
+                                    <span className="text-[9px] font-mono text-white/40">{turn.timestamp}</span>
+                                  )}
+                                  {idx === 0 && (
+                                    <span className="text-[9px] font-semibold text-orange-300 bg-orange-500/15 px-1.5 rounded">
+                                      Latest
+                                    </span>
+                                  )}
+                                  {turn.isQuestion && (
+                                    <span className="text-[9px] font-semibold text-amber-300/90">?</span>
+                                  )}
+                                  <span className="ml-auto text-[10px] font-semibold text-voiceflow-orange opacity-75 group-hover:opacity-100">
+                                    Answer →
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-white/85 group-hover:text-white line-clamp-2 leading-snug">
+                                  {turn.text}
+                                </p>
+                              </button>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    {selectedTurnIds.length > 0 && (
+                      <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-voiceflow-orange/15 border-t border-voiceflow-orange/30">
+                        <span className="text-[10px] font-semibold text-orange-200">
+                          {selectedTurnIds.length} {selectedTurnIds.length === 1 ? "line" : "lines"} selected
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedTurnIds([])}
+                            className="text-[10px] text-white/60 hover:text-white px-2 py-0.5 rounded"
+                          >
+                            Clear
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isQuerying}
+                            onClick={handleAnswerCheckedTurns}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-voiceflow-orange hover:bg-orange-600 text-white text-[10px] font-bold transition-colors disabled:opacity-50"
+                          >
+                            <Sparkles size={10} />
+                            <span>Answer Selected</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Live Heard Strip + Quick Picker Trigger */}
+                <div className="w-full mb-2 rounded-lg bg-black/35 border border-white/10 flex items-center overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (selectableTurns.length > 0) {
+                        setShowTranscriptPicker((prev) => !prev);
+                      } else {
+                        setActiveTab("transcript");
+                      }
+                    }}
+                    className="flex-1 min-w-0 px-2.5 py-1.5 hover:bg-black/45 flex items-center gap-2 text-left transition-colors"
+                    title={
+                      selectableTurns.length > 0
+                        ? "Click to pick a specific line from the transcript to answer"
+                        : "Click to inspect full live transcript"
+                    }
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                        transcriptionHealth === "degraded"
+                          ? "bg-amber-400 animate-pulse"
+                          : latestHeardPreview
+                            ? "bg-emerald-400"
+                            : "bg-white/30 animate-pulse"
+                      }`}
+                    />
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-white/45 shrink-0">
+                      {isSyncingAudio ? "Syncing" : latestHeardPreview ? "Heard" : "Audio"}
+                    </span>
+                    <span className="text-[11px] text-white/80 truncate flex-1">
+                      {latestHeardPreview
+                        ? `"${latestHeardPreview}"`
+                        : transcriptionHealth === "degraded"
+                          ? "Transcription switching providers — click Suggest Answer or Screen"
+                          : "Listening for live speech..."}
+                    </span>
+                  </button>
+
+                  {selectableTurns.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowTranscriptPicker((prev) => !prev)}
+                      className={`px-2.5 py-1.5 border-l border-white/10 text-[10px] font-bold flex items-center gap-1 shrink-0 transition-colors ${
+                        showTranscriptPicker
+                          ? "bg-voiceflow-orange text-white"
+                          : "bg-white/5 hover:bg-voiceflow-orange/25 text-orange-300 hover:text-white"
+                      }`}
+                      title="Choose which transcript question Suggest Answer should answer"
+                    >
+                      <span>Pick ({selectableTurns.length})</span>
+                      <ChevronDown
+                        size={11}
+                        className={showTranscriptPicker ? "rotate-180 transition-transform" : "transition-transform"}
+                      />
+                    </button>
+                  )}
+                </div>
+
                 {/* Quick-Action Triggers */}
                 <div className="grid grid-cols-3 gap-2 mb-2.5 text-xs font-semibold">
+                  <button
+                    onClick={() =>
+                      void handleAskAI(
+                        "Give me a smart real-time answer suggestion for the current meeting point.",
+                        "text-only"
+                      )
+                    }
+                    disabled={isQuerying}
+                    className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl bg-gradient-to-r from-orange-500/25 to-amber-500/20 hover:from-orange-500/35 hover:to-amber-500/30 text-orange-100 hover:text-white border border-voiceflow-orange/45 transition-all active:scale-[0.98] disabled:opacity-50 text-[11px] font-semibold shadow-sm"
+                    title="Suggest speaking answer from live transcript (Ctrl+Shift+Enter)"
+                  >
+                    <Sparkles size={13} className="text-amber-400 shrink-0" />
+                    <span className="truncate">Suggest Answer</span>
+                  </button>
+
                   <button
                     onClick={() => {
                       void handleAskAI(
@@ -1589,21 +1887,6 @@ export default function MeetingWidget({
                     <span className="truncate">
                       {isPro || isAdmin ? "Analyze Screen" : `Screen (${Math.max(0, 3 - screenCaptureCount)} left)`}
                     </span>
-                  </button>
-
-                  <button
-                    onClick={() =>
-                      void handleAskAI(
-                        "Give me a smart real-time answer suggestion for the current meeting point.",
-                        "text-only"
-                      )
-                    }
-                    disabled={isQuerying}
-                    className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-white/90 border border-white/10 transition-all active:scale-[0.98] disabled:opacity-50 text-[11px] font-medium shadow-sm"
-                    title="Suggest speaking answer from live transcript"
-                  >
-                    <Sparkles size={13} className="text-amber-400 shrink-0" />
-                    <span className="truncate">Suggest Answer</span>
                   </button>
 
                   <button
@@ -1741,16 +2024,82 @@ export default function MeetingWidget({
                 <div
                   ref={transcriptContainerRef}
                   onScroll={handleTranscriptScroll}
-                  className={`bg-black/40 border border-white/10 rounded-xl p-3.5 ${
+                  onMouseUp={handleTranscriptMouseUp}
+                  className={`bg-black/40 border border-white/10 rounded-xl p-2.5 ${
                     isTauri
                       ? "flex-1 min-h-0"
                       : isExpanded
                         ? "h-[60vh] min-h-[440px] max-h-[600px]"
                         : "h-64"
-                  } overflow-y-auto text-xs text-white/90 leading-relaxed select-text font-mono whitespace-pre-wrap scrollbar-thin scrollbar-thumb-white/20`}
+                  } overflow-y-auto text-xs text-white/90 leading-relaxed select-text scrollbar-thin scrollbar-thumb-white/20 space-y-2`}
                 >
-                  {liveTranscript.trim() ? (
-                    liveTranscript
+                  {selectableTurns.length > 0 ? (
+                    <>
+                      <div className="text-[10px] text-white/45 px-1 pb-1 border-b border-white/5 flex items-center justify-between">
+                        <span>Click &ldquo;Answer&rdquo; on any line, tick multiple lines, or highlight any phrase.</span>
+                        <span className="font-mono text-white/35">{selectableTurns.length} turns</span>
+                      </div>
+                      {selectableTurns.map((turn) => {
+                        const isChecked = selectedTurnIds.includes(turn.id);
+                        return (
+                          <div
+                            key={turn.id}
+                            className={`group rounded-lg border p-2 transition-colors ${
+                              isChecked
+                                ? "bg-voiceflow-orange/15 border-voiceflow-orange/45"
+                                : "bg-white/[0.03] hover:bg-white/[0.06] border-white/10"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleSelectTurnId(turn.id)}
+                                  className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                                    isChecked
+                                      ? "bg-voiceflow-orange border-voiceflow-orange text-white"
+                                      : "border-white/25 hover:border-white/50 bg-black/30"
+                                  }`}
+                                  title="Select this turn to combine with others"
+                                >
+                                  {isChecked && <Check size={9} strokeWidth={3} />}
+                                </button>
+                                <span
+                                  className={`text-[9px] font-bold px-1.5 py-0.2 rounded uppercase ${
+                                    turn.speaker === "them"
+                                      ? "bg-emerald-500/20 text-emerald-300"
+                                      : turn.speaker === "you"
+                                        ? "bg-white/10 text-white/60"
+                                        : "bg-blue-500/20 text-blue-300"
+                                  }`}
+                                >
+                                  {turn.speaker === "them" ? "THEM" : turn.speaker === "you" ? "YOU" : "AUDIO"}
+                                </span>
+                                {turn.timestamp && (
+                                  <span className="text-[10px] font-mono text-white/40">{turn.timestamp}</span>
+                                )}
+                              </div>
+
+                              <button
+                                type="button"
+                                disabled={isQuerying}
+                                onClick={() => handleAnswerTranscriptExcerpt(turn.text)}
+                                className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-voiceflow-orange/20 hover:bg-voiceflow-orange text-orange-200 hover:text-white border border-voiceflow-orange/35 text-[10px] font-semibold transition-all disabled:opacity-40"
+                                title="Suggest an answer specifically for this line"
+                              >
+                                <Sparkles size={10} />
+                                <span>Answer</span>
+                              </button>
+                            </div>
+                            <p className="text-xs text-white/90 leading-relaxed whitespace-pre-wrap select-text pl-5">
+                              {turn.text}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </>
+                  ) : liveTranscript.trim() ? (
+                    <div className="font-mono whitespace-pre-wrap p-1">{liveTranscript}</div>
                   ) : (
                     <div className="text-white/40 italic py-6 text-center font-sans">
                       {systemAudioActive
@@ -1759,6 +2108,44 @@ export default function MeetingWidget({
                     </div>
                   )}
                 </div>
+
+                {/* Action bar when user highlights custom text OR checks multiple transcript turns */}
+                {(highlightedTranscriptText || selectedTurnIds.length > 0) && (
+                  <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl bg-voiceflow-orange/15 border border-voiceflow-orange/35">
+                    <span className="text-[11px] text-orange-100 truncate">
+                      {highlightedTranscriptText
+                        ? `Highlighted: "${highlightedTranscriptText.slice(0, 60)}${highlightedTranscriptText.length > 60 ? "..." : ""}"`
+                        : `${selectedTurnIds.length} transcript ${selectedTurnIds.length === 1 ? "line" : "lines"} selected`}
+                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedTurnIds([]);
+                          setHighlightedTranscriptText("");
+                        }}
+                        className="text-[10px] text-white/60 hover:text-white px-2 py-1 rounded"
+                      >
+                        Clear
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isQuerying}
+                        onClick={() => {
+                          if (highlightedTranscriptText) {
+                            handleAnswerTranscriptExcerpt(highlightedTranscriptText);
+                          } else {
+                            handleAnswerCheckedTurns();
+                          }
+                        }}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-voiceflow-orange hover:bg-orange-600 text-white text-[11px] font-bold transition-colors disabled:opacity-50"
+                      >
+                        <Sparkles size={11} />
+                        <span>{highlightedTranscriptText ? "Answer Highlighted" : "Answer Selected"}</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <div className="flex items-center justify-between text-[11px] text-white/50 px-1">
                   <span>{healthLabel}</span>

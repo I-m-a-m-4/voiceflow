@@ -1,6 +1,6 @@
 {
   "name": "voiceflow",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "private": true,
   "scripts": {
     "predev": "node scripts/clean-sw.mjs",
@@ -17,6 +17,7 @@
     "pack:msix": "powershell -ExecutionPolicy Bypass -File scripts/pack-msix.ps1",
     "test:zen-cost": "tsx scripts/check-zen-cost.ts",
     "test:context-stress": "tsx scripts/stress-test-context.ts",
+    "test:production-replay": "tsx scripts/test-production-replay.ts",
     "announce-release": "node scripts/announce-release.mjs",
     "record": "node scripts/record/record.mjs",
     "record:audio": "node scripts/record/add-audio.mjs",

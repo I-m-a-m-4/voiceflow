@@ -4,9 +4,39 @@ import { saveMeeting } from "@/firebase/meetings";
 import { apiBase, isNativeApp } from "@/lib/platform";
 import { recordDeviceSession } from "@/lib/device-fingerprint";
 import { copyToClipboard } from "@/lib/clipboard";
+import { evaluateVoiceActivity, isDuplicateSpeakerBleed } from "@/lib/audio-vad";
 
-const SPEECH_ENERGY_THRESHOLD = 6.0; // Avg frequency magnitude (0-255) filters room fan/noise floor while catching clear voice
-const SEGMENT_DURATION_MS = 10000; // Rotate self-contained ~80KB WebM segments every 10s (<=12 RPM max across dual channels; well below Groq 20 RPM)
+const SEGMENT_DURATION_MS = 12000; // Rotate self-contained ~95KB WebM segments every 12s (keeps full sentences intact & cuts Groq RPD burn ~60%; Suggest Answer flushes immediately on-demand!)
+
+interface QueuedFailedSegment {
+  blob: Blob;
+  segIdx: number;
+  offsetSeconds: number;
+  speaker?: "THEM" | "YOU";
+  filename?: string;
+  failedAt: number;
+}
+
+function getConfiguredLanguage(): string {
+  if (typeof window === "undefined") return "en";
+  const saved = (localStorage.getItem("voiceflow_language") || "en").trim().toLowerCase();
+  if (saved === "auto" || /^[a-z]{2,3}$/.test(saved)) return saved;
+  return "en";
+}
+
+function toSpeechRecognitionLocale(lang: string): string {
+  const map: Record<string, string> = {
+    en: "en-US",
+    fr: "fr-FR",
+    es: "es-ES",
+    de: "de-DE",
+    pt: "pt-BR",
+    ja: "ja-JP",
+  };
+  if (map[lang]) return map[lang];
+  if (typeof navigator !== "undefined" && navigator.language) return navigator.language;
+  return "en-US";
+}
 
 function sanitizeWhisperPromptTail(committed: string): string {
   const raw = committed.replace(/\[\d+:\d+\]\s*(?:\[(?:THEM|YOU)\]\s*)?/g, "").slice(-120).trim();
@@ -64,20 +94,31 @@ export function useAudioRecorder() {
   const segmentIndexRef = useRef<number>(0);
   const committedSegmentsRef = useRef<Map<number, { orderKey: number; text: string }>>(new Map());
   const pendingUploadsRef = useRef<Set<Promise<void>>>(new Set());
-  const segmentHadSpeechRef = useRef<boolean>(false);
+  const pendingLoopbackDrainsRef = useRef<Set<Promise<void>>>(new Set());
+  const activeSegmentStateRef = useRef<{ hadSpeech: boolean; forceFlush: boolean }>({
+    hadSpeech: false,
+    forceFlush: false,
+  });
   const interimTextRef = useRef<string>("");
   const consecutiveFailuresRef = useRef<number>(0);
   const rateLimitUntilMsRef = useRef<number>(0);
   const lastRateLimitAtMsRef = useRef<number>(0);
-  const forceNextMicUploadRef = useRef<boolean>(false);
+  const failedSegmentsRef = useRef<QueuedFailedSegment[]>([]);
   const nativeLoopbackActiveRef = useRef<boolean>(false);
   const lastLoopbackDrainMsRef = useRef<number>(0);
   const lastTranscriptTailRef = useRef<string>("");
 
   const buildCombinedLiveTranscript = useCallback(() => {
-    const entries = Array.from(committedSegmentsRef.current.entries())
-      .sort((a, b) => a[1].orderKey - b[1].orderKey || a[0] - b[0])
-      .map(([, item]) => item.text.trim())
+    const sorted = Array.from(committedSegmentsRef.current.entries()).sort(
+      (a, b) => a[1].orderKey - b[1].orderKey || a[0] - b[0]
+    );
+    const allItems = sorted.map(([, item]) => item);
+
+    // Filter out redundant [YOU] laptop-speaker echoes that duplicate an adjacent [THEM] turn
+    const entries = sorted
+      .map(([, item]) => item)
+      .filter((item) => !isDuplicateSpeakerBleed(item.text, item.orderKey, allItems))
+      .map((item) => item.text.trim())
       .filter(Boolean);
 
     const committed = entries.join("\n\n");
@@ -138,10 +179,19 @@ export function useAudioRecorder() {
       if (blob.size < 1200) return Promise.resolve();
       if (!hadSpeech && segIdx > 0) return Promise.resolve();
 
-      // Respect Groq 429 Retry-After backoff on background cadence uploads so we don't hammer rate limits
+      // Respect 429 Retry-After backoff on background cadence uploads so we don't hammer rate limits;
+      // stash failed/skipped speech blobs (especially [THEM]) so nothing spoken is lost!
       const nowMs = Date.now();
       if (nowMs < rateLimitUntilMsRef.current) {
-        if (!forceFlush || nowMs - lastRateLimitAtMsRef.current < 3000) {
+        if (!forceFlush || nowMs - lastRateLimitAtMsRef.current < 2500) {
+          if (hadSpeech) {
+            failedSegmentsRef.current = [
+              ...failedSegmentsRef.current.filter((item) => nowMs - item.failedAt < 28000),
+              { blob, segIdx, offsetSeconds, speaker, filename, failedAt: nowMs },
+            ]
+              .sort((a, b) => (a.speaker === "THEM" ? -1 : 1) - (b.speaker === "THEM" ? -1 : 1) || b.failedAt - a.failedAt)
+              .slice(0, 2);
+          }
           return Promise.resolve();
         }
       }
@@ -156,6 +206,7 @@ export function useAudioRecorder() {
         const formData = new FormData();
         formData.append("file", blob, filename || `segment-${segIdx}.webm`);
         formData.append("offsetSeconds", String(Math.max(0, Math.round(offsetSeconds))));
+        formData.append("language", getConfiguredLanguage());
         if (speaker) {
           formData.append("speaker", speaker);
         }
@@ -167,7 +218,7 @@ export function useAudioRecorder() {
           const res = await fetch(transcribeUrl, {
             method: "POST",
             body: formData,
-            signal: AbortSignal.timeout(25000),
+            signal: AbortSignal.timeout(20000),
           });
 
           if (!res.ok) {
@@ -205,6 +256,16 @@ export function useAudioRecorder() {
         } catch (err) {
           consecutiveFailuresRef.current += 1;
           console.warn(`Live transcription segment #${segIdx} (${speaker || "MIC"}) failed:`, err);
+          // Preserve this spoken audio chunk for automatic retry so 429/transient drops never destroy a question!
+          if (hadSpeech) {
+            const failNow = Date.now();
+            failedSegmentsRef.current = [
+              ...failedSegmentsRef.current.filter((item) => item.segIdx !== segIdx && failNow - item.failedAt < 28000),
+              { blob, segIdx, offsetSeconds, speaker, filename, failedAt: failNow },
+            ]
+              .sort((a, b) => (a.speaker === "THEM" ? -1 : 1) - (b.speaker === "THEM" ? -1 : 1) || b.failedAt - a.failedAt)
+              .slice(0, 2);
+          }
           if (consecutiveFailuresRef.current >= 2) {
             setTranscriptionHealth("degraded");
           }
@@ -218,54 +279,82 @@ export function useAudioRecorder() {
     [broadcastTranscript, buildCombinedLiveTranscript]
   );
 
+  const retryQueuedSegments = useCallback(
+    (forceFlush = false): Promise<void>[] => {
+      const now = Date.now();
+      if (!forceFlush && now < rateLimitUntilMsRef.current) return [];
+      const fresh = failedSegmentsRef.current.filter((item) => now - item.failedAt < 28000);
+      failedSegmentsRef.current = [];
+      return fresh.map((item) =>
+        uploadSegmentToWhisper(
+          item.blob,
+          item.segIdx,
+          item.offsetSeconds,
+          true,
+          item.speaker,
+          item.filename,
+          forceFlush
+        )
+      );
+    },
+    [uploadSegmentToWhisper]
+  );
+
   // Drains Windows native WASAPI system audio loopback buffer ([THEM] — interviewer / call audio on headphones!)
   const drainNativeSystemAudio = useCallback(async (forceFlush = false) => {
     if (!nativeLoopbackActiveRef.current) return;
     // While backed off from a 429, keep accumulating audio inside WASAPI's 30s ring buffer so zero speech is dropped!
     const nowCheck = Date.now();
     if (!forceFlush && nowCheck < rateLimitUntilMsRef.current) return;
-    try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      const nowMs = Date.now();
-      const chunkStartMs = lastLoopbackDrainMsRef.current || sessionStartMsRef.current || nowMs;
-      lastLoopbackDrainMsRef.current = nowMs;
 
-      const chunk = await invoke<{
-        supported: boolean;
-        active: boolean;
-        wav_base64: string;
-        duration_ms: number;
-        rms: number;
-        has_speech: boolean;
-      }>("drain_system_audio_wav");
+    const drainTask = (async () => {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const nowMs = Date.now();
+        const chunkStartMs = lastLoopbackDrainMsRef.current || sessionStartMsRef.current || nowMs;
+        lastLoopbackDrainMsRef.current = nowMs;
 
-      if (!chunk?.has_speech || !chunk.wav_base64) return;
+        const chunk = await invoke<{
+          supported: boolean;
+          active: boolean;
+          wav_base64: string;
+          duration_ms: number;
+          rms: number;
+          has_speech: boolean;
+        }>("drain_system_audio_wav");
 
-      const binary = atob(chunk.wav_base64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
+        if (!chunk?.has_speech || !chunk.wav_base64) return;
+
+        const binary = atob(chunk.wav_base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        const wavBlob = new Blob([bytes], { type: "audio/wav" });
+        const segIdx = segmentIndexRef.current++;
+        const offsetSeconds = Math.max(0, (chunkStartMs - sessionStartMsRef.current) / 1000);
+        await uploadSegmentToWhisper(wavBlob, segIdx, offsetSeconds, true, "THEM", `system-${segIdx}.wav`, forceFlush);
+      } catch (err) {
+        console.warn("Native WASAPI loopback drain warning:", err);
       }
-      const wavBlob = new Blob([bytes], { type: "audio/wav" });
-      const segIdx = segmentIndexRef.current++;
-      const offsetSeconds = Math.max(0, (chunkStartMs - sessionStartMsRef.current) / 1000);
-      await uploadSegmentToWhisper(wavBlob, segIdx, offsetSeconds, true, "THEM", `system-${segIdx}.wav`, forceFlush);
-    } catch (err) {
-      console.warn("Native WASAPI loopback drain warning:", err);
-    }
+    })();
+
+    pendingLoopbackDrainsRef.current.add(drainTask);
+    drainTask.finally(() => pendingLoopbackDrainsRef.current.delete(drainTask));
+    return drainTask;
   }, [uploadSegmentToWhisper]);
 
-  // Starts a self-contained MediaRecorder for one rolling window (~8s = ~64KB valid WebM with EBML header)
+  // Starts a self-contained MediaRecorder for one rolling window (~12s = ~95KB valid WebM with EBML header)
   const spawnSegmentRecorder = useCallback(
     (stream: MediaStream, mimeType: string) => {
       const segIdx = segmentIndexRef.current++;
       const segStartMs = Date.now();
       const offsetSeconds = Math.max(0, (segStartMs - sessionStartMsRef.current) / 1000);
       const localChunks: BlobPart[] = [];
-      let localHadSpeech = false;
-
-      // Capture speech flag for this window right before rotation
-      segmentHadSpeechRef.current = false;
+      // Dedicated per-recorder state object so spawning the next recorder BEFORE stopping the previous
+      // recorder can NEVER wipe the previous recorder's hadSpeech or forceFlush flags!
+      const segmentState = { hadSpeech: false, forceFlush: false };
+      activeSegmentStateRef.current = segmentState;
 
       const options: MediaRecorderOptions = { audioBitsPerSecond: 64000 };
       if (mimeType) options.mimeType = mimeType;
@@ -282,17 +371,11 @@ export function useAudioRecorder() {
         if (e.data && e.data.size > 0) {
           localChunks.push(e.data);
         }
-        if (segmentHadSpeechRef.current) {
-          localHadSpeech = true;
-        }
       };
 
       recorder.onstop = () => {
-        if (segmentHadSpeechRef.current) {
-          localHadSpeech = true;
-        }
-        const forceFlush = forceNextMicUploadRef.current;
-        forceNextMicUploadRef.current = false;
+        const forceFlush = segmentState.forceFlush;
+        const shouldUploadAsSpeech = segmentState.hadSpeech || forceFlush || segIdx === 0;
         if (localChunks.length > 0) {
           const segmentBlob = new Blob(localChunks, { type: mimeType || "audio/webm" });
           const speaker = nativeLoopbackActiveRef.current ? "YOU" : undefined;
@@ -300,7 +383,7 @@ export function useAudioRecorder() {
             segmentBlob,
             segIdx,
             offsetSeconds,
-            localHadSpeech || segIdx === 0,
+            shouldUploadAsSpeech,
             speaker,
             undefined,
             forceFlush
@@ -616,12 +699,13 @@ export function useAudioRecorder() {
         segmentIndexRef.current = 0;
         committedSegmentsRef.current = new Map();
         pendingUploadsRef.current = new Set();
-        segmentHadSpeechRef.current = false;
+        pendingLoopbackDrainsRef.current = new Set();
+        activeSegmentStateRef.current = { hadSpeech: false, forceFlush: false };
         interimTextRef.current = "";
         consecutiveFailuresRef.current = 0;
         rateLimitUntilMsRef.current = 0;
         lastRateLimitAtMsRef.current = 0;
-        forceNextMicUploadRef.current = false;
+        failedSegmentsRef.current = [];
         setTranscriptionHealth("listening");
         broadcastTranscript("", true);
 
@@ -737,10 +821,11 @@ export function useAudioRecorder() {
           }
         }
 
-        // Rotate recorder cleanly every 5 seconds: start next BEFORE stopping previous so 0ms audio is lost!
-        // Also drain native Windows WASAPI system audio ([THEM]) on the same cadence!
+        // Rotate recorder cleanly every 8 seconds: start next BEFORE stopping previous so 0ms audio is lost!
+        // Also retry any temporarily failed segment and drain native Windows WASAPI system audio ([THEM])!
         rotateTimerRef.current = setInterval(() => {
           if (!isRecordingRef.current || !finalStreamRef.current) return;
+          void retryQueuedSegments(false);
           if (nativeLoopbackActiveRef.current) {
             void drainNativeSystemAudio();
           }
@@ -755,25 +840,29 @@ export function useAudioRecorder() {
           }
         }, SEGMENT_DURATION_MS);
 
-        // 4. Lightweight 10Hz Speech Activity Detector (no 60fps React re-renders!)
+        // 4. Lightweight 10Hz Voice-Band (300–3,400 Hz) + Time-Domain RMS Speech Activity Detector
+        // Never averages dead high-frequency bins (4–24 kHz) so softer normal voices are never silenced!
         try {
           const vadCtx = new AudioContext();
           vadAudioCtxRef.current = vadCtx;
+          if (vadCtx.state === "suspended") {
+            void vadCtx.resume().catch(() => {});
+          }
           const analyser = vadCtx.createAnalyser();
           analyser.fftSize = 256;
           vadCtx.createMediaStreamSource(finalStream).connect(analyser);
           const freqData = new Uint8Array(analyser.frequencyBinCount);
+          const timeData = new Float32Array(analyser.fftSize);
           let silentTicks = 0;
 
           vadTimerRef.current = setInterval(() => {
             if (!isRecordingRef.current) return;
             analyser.getByteFrequencyData(freqData);
-            let sum = 0;
-            for (let i = 0; i < freqData.length; i++) sum += freqData[i];
-            const avg = sum / freqData.length;
+            analyser.getFloatTimeDomainData(timeData);
+            const { hasSpeech } = evaluateVoiceActivity(freqData, timeData, vadCtx.sampleRate, analyser.fftSize);
 
-            if (avg >= SPEECH_ENERGY_THRESHOLD) {
-              segmentHadSpeechRef.current = true;
+            if (hasSpeech) {
+              activeSegmentStateRef.current.hadSpeech = true;
               silentTicks = 0;
               setIsPausedBySilence((prev) => (prev ? false : prev));
             } else {
@@ -785,7 +874,7 @@ export function useAudioRecorder() {
           }, 100);
         } catch (vadErr) {
           // If AudioContext fails, default hadSpeech to true so segments always upload
-          segmentHadSpeechRef.current = true;
+          activeSegmentStateRef.current.hadSpeech = true;
           console.warn("VAD init skipped:", vadErr);
         }
 
@@ -799,7 +888,7 @@ export function useAudioRecorder() {
             const recognition = new SpeechRecognitionAPI();
             recognition.continuous = true;
             recognition.interimResults = true;
-            recognition.lang = "en-US";
+            recognition.lang = toSpeechRecognitionLocale(getConfiguredLanguage());
 
             recognition.onresult = (event: any) => {
               if (!isRecordingRef.current) return;
@@ -809,7 +898,7 @@ export function useAudioRecorder() {
               }
               const cleaned = latest.trim();
               if (cleaned) {
-                segmentHadSpeechRef.current = true;
+                activeSegmentStateRef.current.hadSpeech = true;
                 interimTextRef.current = cleaned;
                 broadcastTranscript(buildCombinedLiveTranscript());
               }
@@ -860,7 +949,7 @@ export function useAudioRecorder() {
         isStartingRef.current = false;
       }
     },
-    [broadcastTranscript, buildCombinedLiveTranscript, drainNativeSystemAudio, releaseAllMediaResources, spawnSegmentRecorder]
+    [broadcastTranscript, buildCombinedLiveTranscript, drainNativeSystemAudio, releaseAllMediaResources, retryQueuedSegments, spawnSegmentRecorder]
   );
 
   const stopRecording = useCallback(() => {
@@ -882,11 +971,12 @@ export function useAudioRecorder() {
 
     // Flush the final in-progress segment
     const finalRecorder = activeRecorderRef.current;
+    const finalSegmentState = activeSegmentStateRef.current;
     activeRecorderRef.current = null;
     if (finalRecorder && finalRecorder.state !== "inactive") {
       try {
         // Ensure final short segment gets transcribed even if user spoke briefly
-        segmentHadSpeechRef.current = true;
+        finalSegmentState.hadSpeech = true;
         finalRecorder.stop();
       } catch {
         // ignore
@@ -939,13 +1029,16 @@ export function useAudioRecorder() {
   }, [releaseAllMediaResources]);
 
   /**
-   * Immediately flushes the in-progress audio window to Whisper and awaits any in-flight
-   * transcription (single bounded 3.5s race) so "Suggest Answer" / "Recap" sees speech spoken
-   * right up to the moment the user clicked the button without stalling for 8+ seconds.
+   * Immediately flushes the in-progress audio window to transcription (plus retries any buffered
+   * failed segment so a transient 429 never loses the latest question) and awaits in-flight uploads
+   * (returns as soon as ready, capped at 6.5s to cover fallback providers cleanly).
    */
   const flushPendingAudio = useCallback(async (): Promise<string> => {
     try {
       const flushPromises: Promise<any>[] = [];
+
+      // 0. Retry any recently buffered audio chunk that hit a transient 429/network error
+      flushPromises.push(...retryQueuedSegments(true));
 
       // 1. Immediately drain Windows native WASAPI system audio ([THEM] — interviewer's latest words!)
       if (isRecordingRef.current && nativeLoopbackActiveRef.current) {
@@ -955,9 +1048,12 @@ export function useAudioRecorder() {
       // 2. Immediately rotate & flush the user's microphone segment ([YOU]) in parallel
       if (isRecordingRef.current && finalStreamRef.current) {
         const previousRecorder = activeRecorderRef.current;
+        const previousSegmentState = activeSegmentStateRef.current;
         if (previousRecorder && previousRecorder.state === "recording") {
-          segmentHadSpeechRef.current = true;
-          forceNextMicUploadRef.current = true;
+          // Mark the PREVIOUS recorder's dedicated state object BEFORE spawning the next recorder
+          // so spawnSegmentRecorder's brand-new state object NEVER clobbers this flush!
+          previousSegmentState.hadSpeech = true;
+          previousSegmentState.forceFlush = true;
           try {
             spawnSegmentRecorder(finalStreamRef.current, activeMimeTypeRef.current);
           } catch {
@@ -973,19 +1069,24 @@ export function useAudioRecorder() {
         }
       }
 
-      // Single bounded wait across both WASAPI drain + mic upload (cuts worst-case stall from 8.6s -> 3.5s)
-      const allInFlight: Promise<any>[] = [...flushPromises, ...Array.from(pendingUploadsRef.current)];
+      // Wait across any already-running WASAPI drains, newly triggered drains, retried chunks, and mic uploads —
+      // resolves immediately when done (~0.8-1.5s), capped at 6.5s so fallback transcription finishes BEFORE Suggest Answer queries the LLM!
+      const allInFlight: Promise<any>[] = [
+        ...flushPromises,
+        ...Array.from(pendingLoopbackDrainsRef.current),
+        ...Array.from(pendingUploadsRef.current),
+      ];
       if (allInFlight.length > 0) {
         await Promise.race([
           Promise.allSettled(allInFlight),
-          new Promise((r) => setTimeout(r, 3500)),
+          new Promise((r) => setTimeout(r, 6500)),
         ]);
       }
     } catch {
       // Non-fatal: fall through to whatever transcript is already captured
     }
     return buildCombinedLiveTranscript();
-  }, [buildCombinedLiveTranscript, drainNativeSystemAudio, spawnSegmentRecorder]);
+  }, [buildCombinedLiveTranscript, drainNativeSystemAudio, retryQueuedSegments, spawnSegmentRecorder]);
 
   return {
     startRecording,

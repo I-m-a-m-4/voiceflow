@@ -27,6 +27,7 @@ import { doc, updateDoc, getFirestore } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { PricingPlansView } from './billing-modal';
 import { SupportChatWidget } from './support-chat-widget';
+import { AppConfig } from '@/lib/config';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -45,6 +46,7 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
   const [detectable, setDetectable] = useState(true);
   const [ambientChat, setAmbientChat] = useState(false);
   const [mfaEnabled, setMfaEnabled] = useState(false);
+  const [transcriptionLanguage, setTranscriptionLanguage] = useState<string>('en');
 
   // Profile states
   const [displayName, setDisplayName] = useState(auth?.currentUser?.displayName || '');
@@ -379,6 +381,11 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
     const savedMfa = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_2fa_enabled') : null;
     if (savedMfa !== null) {
       setMfaEnabled(savedMfa === 'true');
+    }
+
+    const savedLang = typeof window !== 'undefined' ? localStorage.getItem('voiceflow_language') : null;
+    if (savedLang) {
+      setTranscriptionLanguage(savedLang);
     }
   }, []);
 
@@ -754,7 +761,7 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
                     <div className="flex items-center gap-4">
                       <div className="bg-gray-100 dark:bg-[#2A2A2A] p-2 rounded-lg"><Download size={20} className="text-gray-700 dark:text-gray-300" /></div>
                       <div>
-                        <div className="text-sm font-bold text-gray-900 dark:text-white">VoiceFlow v0.1.0</div>
+                        <div className="text-sm font-bold text-gray-900 dark:text-white">VoiceFlow v{AppConfig.version}</div>
                         <div className="text-xs text-gray-500 dark:text-gray-400">Latest production release (Tauri & Web)</div>
                       </div>
                     </div>
@@ -1342,9 +1349,27 @@ export function SettingsModal({ isOpen, onClose, onOpenBilling, initialTab }: Se
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Set your preferred language for transcripts and AI prompts.</p>
                 
                 <div className="p-4 bg-gray-50 dark:bg-[#1A1A1A] rounded-xl border border-gray-200 dark:border-gray-800">
-                  <label className="text-sm font-bold text-gray-700 dark:text-gray-300 block mb-3">App Language</label>
-                  <select className="w-full bg-white dark:bg-[#111111] border border-gray-300 dark:border-gray-700 text-sm rounded-lg px-4 py-2.5 text-gray-900 dark:text-white outline-none focus:border-voiceflow-orange shadow-sm">
-                    <option value="en">English (US)</option>
+                  <label className="text-sm font-bold text-gray-700 dark:text-gray-300 block mb-3">Transcription Language</label>
+                  <select
+                    value={transcriptionLanguage}
+                    onChange={(e) => {
+                      const nextLang = e.target.value;
+                      setTranscriptionLanguage(nextLang);
+                      if (typeof window !== 'undefined') {
+                        localStorage.setItem('voiceflow_language', nextLang);
+                      }
+                      toast({
+                        title: 'Transcription Language Updated',
+                        description:
+                          nextLang === 'auto'
+                            ? 'Live transcription will auto-detect spoken languages.'
+                            : `Live transcription is now locked to "${nextLang.toUpperCase()}" to prevent foreign-language hallucinations.`,
+                      });
+                    }}
+                    className="w-full bg-white dark:bg-[#111111] border border-gray-300 dark:border-gray-700 text-sm rounded-lg px-4 py-2.5 text-gray-900 dark:text-white outline-none focus:border-voiceflow-orange shadow-sm"
+                  >
+                    <option value="en">English (Recommended — prevents random language drift)</option>
+                    <option value="auto">Auto-Detect (Multilingual Calls)</option>
                     <option value="fr">Français (French)</option>
                     <option value="es">Español (Spanish)</option>
                     <option value="de">Deutsch (German)</option>

@@ -47,9 +47,10 @@ mod win_impl {
 
     const TARGET_SAMPLE_RATE: u32 = 16_000;
     const MAX_BUFFER_SAMPLES: usize = (TARGET_SAMPLE_RATE as usize) * 30; // cap at 30s of mono 16kHz PCM
-    const MIN_DRAIN_SAMPLES: usize = (TARGET_SAMPLE_RATE as usize) / 5; // require at least 200ms (3200 samples)
-    const SPEECH_RMS_THRESHOLD: f32 = 0.0045;
-    const SPEECH_PEAK_THRESHOLD: i32 = 420;
+    const MIN_DRAIN_SAMPLES: usize = (TARGET_SAMPLE_RATE as usize) * 3 / 20; // require at least 150ms (2400 samples)
+    // Sensitive gate tuned so softer call voices on low-volume headphones/speakers are never silently dropped
+    const SPEECH_RMS_THRESHOLD: f32 = 0.0022;
+    const SPEECH_PEAK_THRESHOLD: i32 = 240;
     const WAVE_FORMAT_PCM_TAG: u16 = 1;
 
     struct LoopbackController {

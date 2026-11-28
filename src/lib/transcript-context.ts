@@ -33,6 +33,7 @@ export interface ContextAnalysisOptions {
   previousTranscriptLength?: number;
   previousTranscriptTail?: string;
   previousAnsweredQuestion?: string;
+  selectedTranscriptText?: string;
   customContext?: string;
   forceFreshAngle?: boolean;
 }
@@ -72,10 +73,18 @@ const IMPERATIVE_PROMPT_REGEX =
 const PURE_BACKCHANNEL_REGEX =
   /^(?:yeah|yes|yep|yup|no|nope|okay|ok|alright|right|sure|got it|makes sense|uh[- ]?huh|mm[- ]?hmm|hmm+|um+|uh+|cool|great|awesome|nice|thanks|thank you|thank you for watching|thanks for watching|good question|great question|that's a good question|interesting|let me think|give me a second|one second|hold on|go ahead|please go ahead|sounds good|i see|totally|exactly|definitely|yes ma'am|yes sir|i'm coming)[.!?,;\s]*$/i;
 
+const INTERVIEWER_STALL_FILLER_REGEX =
+  /^(?:(?:yeah|yes|sure|okay|ok|no worries|of course|absolutely)[,.\s]+)*(?:take your time|no rush(?: at all)?|take a (?:second|moment|minute)|feel free to (?:think|take a (?:second|moment)|share your screen)|whenever you(?:'re| are) ready|think out loud|no pressure)[.!?,;\s]*(?:no rush(?: at all)?|take your time|whenever you(?:'re| are) ready)?[.!?,;\s]*$/i;
+
+const WHISPER_SPECIAL_TOKEN_REGEX = /<\|[^|]{1,32}\|>/g;
 const WHISPER_REPEATED_TOKEN_REGEX = /^(\b[a-z0-9']+\b)(?:[\s,.!?]+\1){2,}[\s,.!?]*$/i;
 
 const CLAUSE_COMMA_SPLIT_REGEX = /^([^,]{4,120}),\s+(.+)$/;
 const SUBORDINATING_END_REGEX = /\b(?:because|since|although|though|whether|that|while|whereas)\s*$/i;
+const HANGING_CLAUSE_END_REGEX =
+  /\b(?:of|to|for|with|about|in|on|at|from|your|our|their|the|a|an|and|or|that|which|how|what|why|when|where)\s*$/i;
+const USER_META_SELF_QUESTION_REGEX =
+  /\b(?:how should i|what should i|should i say|how do i frame|how do i answer|frame the impact)\b/i;
 
 const FIRST_PERSON_SELF_REPLY_REGEX =
   /^(?:(?:yeah|yes|no|nope|sure|well|actually|so|honestly|basically|right|alright|okay|ok)[,.\s]+)*(?:i'm|i am|i've|i have|i was|i did|i do|i don't|i didn't|i haven't|i think|i believe|i feel|i usually|i typically|i prefer|i tend|i would|i'd|i can|i could|i use|i used|i built|i led|i worked|i specialize|i focus|in my\b|for me\b|my\b)/i;
@@ -98,7 +107,11 @@ export interface SpeakerTurn {
 export function parseConversationTurns(transcript: string): SpeakerTurn[] {
   if (!transcript || !transcript.trim()) return [];
 
-  const rawLines = transcript
+  // Bound parsing to the newest 8,000 chars (~10–15 min of live speech) so 100KB+ marathon
+  // transcripts execute in < 5ms instead of re-tokenizing hour-old history on every click.
+  const boundedTranscript = transcript.length > 8000 ? transcript.slice(-8000) : transcript;
+
+  const rawLines = boundedTranscript
     .split(/\n+/)
     .map((l) => l.trim())
     .filter(Boolean);
@@ -106,7 +119,11 @@ export function parseConversationTurns(transcript: string): SpeakerTurn[] {
   const turns: SpeakerTurn[] = [];
 
   for (const raw of rawLines) {
-    let line = raw.replace(/^\.\.\.\s*/, "").trim();
+    let line = raw
+      .replace(WHISPER_SPECIAL_TOKEN_REGEX, " ")
+      .replace(/^\.\.\.\s*/, "")
+      .replace(/\s+/g, " ")
+      .trim();
     if (!line) continue;
 
     let timestamp = "";
@@ -168,21 +185,100 @@ export function parseConversationTurns(transcript: string): SpeakerTurn[] {
     }
   }
 
-  return turns;
+  // Pass 1: Stitch interviewer questions split mid-sentence across [THEM] -> [YOU]
+  // (e.g., "[2:41] [THEM] Could you share a brief overview of your" + "[2:51] [YOU] background and what led you...")
+  const stitched: SpeakerTurn[] = [];
+  for (let i = 0; i < turns.length; i++) {
+    const cur = turns[i];
+    const prev = stitched[stitched.length - 1];
+    if (
+      prev &&
+      prev.speaker === "them" &&
+      cur.speaker === "you" &&
+      (!/[.?!]["']?$/.test(prev.text) || HANGING_CLAUSE_END_REGEX.test(prev.text)) &&
+      !FIRST_PERSON_SELF_REPLY_REGEX.test(cur.text)
+    ) {
+      const prevTokens = tokenizeContent(prev.text);
+      const curTokens = tokenizeContent(cur.text);
+      const overlap = jaccardSimilarity(prevTokens, curTokens);
+      if (overlap < 0.6) {
+        prev.text = `${prev.text} ${cur.text}`.replace(/\s+/g, " ").trim();
+        continue;
+      }
+    }
+    stitched.push({ ...cur });
+  }
+
+  // Pass 2: Drop redundant [YOU] speaker-bleed echoes that duplicate an adjacent [THEM] turn
+  const deduped: SpeakerTurn[] = [];
+  for (let i = 0; i < stitched.length; i++) {
+    const cur = stitched[i];
+    if (cur.speaker === "you") {
+      const curTokens = tokenizeContent(cur.text);
+      if (curTokens.size >= 2) {
+        let isSpeakerBleedEcho = false;
+        for (let j = Math.max(0, i - 2); j <= Math.min(stitched.length - 1, i + 2); j++) {
+          if (j === i || stitched[j].speaker !== "them") continue;
+          const themTokens = tokenizeContent(stitched[j].text);
+          if (themTokens.size < 2) continue;
+          let shared = 0;
+          for (const t of curTokens) if (themTokens.has(t)) shared++;
+          const containment = shared / curTokens.size;
+          const jac = jaccardSimilarity(curTokens, themTokens);
+          if (containment >= 0.75 || jac >= 0.65) {
+            isSpeakerBleedEcho = true;
+            break;
+          }
+        }
+        if (isSpeakerBleedEcho) continue;
+      }
+    }
+    deduped.push(cur);
+  }
+
+  return deduped;
 }
 
 export function isWhisperHallucinationNoise(text: string): boolean {
-  const cleaned = (text || "").replace(/^["']|["']$/g, "").trim();
+  const cleaned = (text || "")
+    .replace(WHISPER_SPECIAL_TOKEN_REGEX, " ")
+    .replace(/^["']|["']$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
   if (!cleaned) return true;
   if (/^[.\s,!?-]+$/.test(cleaned)) return true;
   if (WHISPER_REPEATED_TOKEN_REGEX.test(cleaned)) return true;
-  if (/^(?:thank you(?:\s+for\s+watching|\s+for\s+listening)?|thanks\s+for\s+watching|please\s+subscribe|subtitles?\s+by.*|transcribed\s+by.*|amara\.org.*)$/i.test(cleaned.replace(/[.!?]+$/, "").trim())) {
+  // Detect Whisper garble bursts like "THO T ROOOOLNNNNNNNNNNNNN AAJKJUJD"
+  if (/(.)\1{6,}/.test(cleaned)) return true;
+  const upperNoVowelTokens = cleaned
+    .split(/\s+/)
+    .filter((tok) => tok.length >= 8 && /^[A-Z]{8,}$/.test(tok) && !/[AEIOU]/.test(tok));
+  if (upperNoVowelTokens.length >= 2) return true;
+
+  if (
+    /^(?:thank you(?:\s+for\s+watching|\s+for\s+listening)?|thanks\s+for\s+watching|please\s+subscribe|subtitles?\s+by.*|transcribed\s+by.*|amara\.org.*|gracias|¿?qu[eé]\s+pasa|merci|danke)$/i.test(
+      cleaned.replace(/[.!?]+$/, "").trim()
+    )
+  ) {
     return true;
   }
-  const words = cleaned.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(Boolean);
+  const words = cleaned.toLowerCase().replace(/[^a-z0-9'\s]/g, " ").split(/\s+/).filter(Boolean);
   if (words.length >= 4) {
     const unique = new Set(words);
     if (unique.size === 1) return true;
+    // Detect 2-4 word n-gram repetition loops ("come la parola come la parola come la parola")
+    for (const n of [2, 3, 4]) {
+      if (words.length < n * 3) continue;
+      let phraseRun = 1;
+      for (let i = n; i <= words.length - n; i += n) {
+        if (words.slice(i - n, i).join(" ") === words.slice(i, i + n).join(" ")) {
+          phraseRun += 1;
+          if (phraseRun >= 3) return true;
+        } else {
+          phraseRun = 1;
+        }
+      }
+    }
   }
   return false;
 }
@@ -193,7 +289,12 @@ export function isPureBackchannel(text: string): boolean {
   if (isWhisperHallucinationNoise(cleaned)) return true;
   if (PURE_BACKCHANNEL_REGEX.test(cleaned)) return true;
   const meaningful = stripFillersForDeltaCheck(cleaned);
-  return meaningful.length < 10 || meaningful.split(/\s+/).length < 2;
+  const words = meaningful ? meaningful.split(/\s+/).filter(Boolean) : [];
+  // Never discard genuine short follow-up questions ("Why Rust?", "Why Go?", "What's Big-O?") as backchannel!
+  if (/\?$/.test(cleaned) && meaningful.length >= 4 && words.length >= 2) {
+    return false;
+  }
+  return meaningful.length < 10 || words.length < 2;
 }
 
 const PRIOR_SUGGEST_HISTORY_PREFIX_REGEX = /^\[asked\s+for\s+live\s+answer\s+to\]:\s*/i;
@@ -491,6 +592,7 @@ export function sanitizeConversationHistory(
 
 function cleanSentence(text: string): string {
   return text
+    .replace(WHISPER_SPECIAL_TOKEN_REGEX, " ")
     .replace(/^(\[\d{1,2}:\d{2}(:\d{2})?\]|\d{1,2}:\d{2})\s*/, "")
     .replace(/^\[(THEM|YOU)\]\s*/i, "")
     .replace(/^(speaker\s*\d*|interviewer|host|client|recruiter|hiring manager|participant|guest|person|them|candidate|you|me):\s*/i, "")
@@ -502,11 +604,22 @@ function cleanSentence(text: string): string {
 function stripFillersForDeltaCheck(text: string): string {
   return text
     .replace(/\[\d{1,2}:\d{2}(:\d{2})?\]/g, " ")
+    .replace(/\[(THEM|YOU)\]/gi, " ")
     .replace(/\.\.\./g, " ")
     .replace(/\b(um+|uh+|hmm+|okay|ok|yeah|yes|right|sure|thanks|thank you|got it)\b/gi, " ")
     .replace(/[^a-zA-Z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function isShortExplicitQuestionDelta(rawDelta: string, meaningfulNew: string): boolean {
+  const words = meaningfulNew ? meaningfulNew.split(/\s+/).filter(Boolean) : [];
+  if (words.length < 2 || meaningfulNew.length < 6) return false;
+  const cleaned = cleanSentence(rawDelta);
+  if (!cleaned || cleaned.length < 6) return false;
+  if (/\?/.test(rawDelta)) return true;
+  const stripped = cleaned.replace(LEAD_IN_PREFIX_REGEX, "").trim();
+  return QUESTION_STARTERS_REGEX.test(stripped);
 }
 
 /**
@@ -538,7 +651,8 @@ export function splitTranscriptDelta(
     return {
       earlierTranscript: "",
       newTranscript: full.slice(-3000),
-      hasMeaningfulDelta: meaningful.length >= 16 && words >= 3,
+      hasMeaningfulDelta:
+        (meaningful.length >= 16 && words >= 3) || isShortExplicitQuestionDelta(full, meaningful),
       fullLength: full.length,
     };
   }
@@ -584,7 +698,8 @@ export function splitTranscriptDelta(
 
   const meaningfulNew = stripFillersForDeltaCheck(newRaw);
   const newWords = meaningfulNew ? meaningfulNew.split(/\s+/).length : 0;
-  const hasMeaningfulDelta = meaningfulNew.length >= 16 && newWords >= 3;
+  const hasMeaningfulDelta =
+    (meaningfulNew.length >= 16 && newWords >= 3) || isShortExplicitQuestionDelta(newRaw, meaningfulNew);
 
   return {
     earlierTranscript: earlierRaw.slice(-2200),
@@ -689,6 +804,7 @@ export function extractLastQuestion(
           if (
             prevSent &&
             !isPureBackchannel(prevSent) &&
+            !INTERVIEWER_STALL_FILLER_REGEX.test(prevSent) &&
             !prevSent.endsWith("?") &&
             prevSent.length >= 16 &&
             prevSent.length <= 220
@@ -717,25 +833,79 @@ export function extractLastQuestion(
   };
 
   // PRIORITY 1: If dual-channel `[THEM]` turns exist (WASAPI loopback or labeled Interviewer),
-  // lock onto the most recent substantive `[THEM]` turn so `[YOU]` talking NEVER hijacks Suggest Answer!
+  // lock onto the most recent substantive `[THEM]` turn — UNLESS a newer `[YOU]` turn after it
+  // contains an explicit interviewer-style question (speaker bleed caught by mic when WASAPI missed a chunk).
   const themTurns = turns.filter((t) => t.speaker === "them" && !isPureBackchannel(t.text));
   if (themTurns.length > 0) {
-    const latestThem = themTurns[themTurns.length - 1];
-    const themSentences = latestThem.text
-      .split(/(?<=[.?!])\s+/)
-      .map((s) => cleanSentence(s))
-      .filter((s) => s.length > 6);
-    const fromThem = extractFromSentences(themSentences, true);
-    if (fromThem) return fromThem;
+    const lastThemIndex = turns.lastIndexOf(themTurns[themTurns.length - 1]);
+    const trailingYouTurns = turns
+      .slice(lastThemIndex + 1)
+      .filter((t) => t.speaker === "you" && !isPureBackchannel(t.text) && !USER_META_SELF_QUESTION_REGEX.test(t.text));
+    if (trailingYouTurns.length > 0) {
+      const trailingYouSentences = trailingYouTurns
+        .map((t) => t.text)
+        .join(" ")
+        .split(/(?<=[.?!])\s+/)
+        .map((s) => cleanSentence(s))
+        .filter((s) => s.length > 6 && !FIRST_PERSON_SELF_REPLY_REGEX.test(s));
+      const explicitQuestionInTrailingYou = extractFromSentences(trailingYouSentences, false);
+      if (explicitQuestionInTrailingYou) return explicitQuestionInTrailingYou;
+    }
+
+    // Scan up to the last 3 substantive [THEM] turns from newest -> oldest for an explicit question/prompt FIRST.
+    // This prevents a brief trailing interviewer stall ("Take your time, no rush.") after a [YOU] interjection
+    // from masking the actual question asked 1 turn earlier, AND stitches [THEM] questions interrupted mid-sentence by [YOU].
+    const recentThemTurns = themTurns.slice(-3);
+    for (let tIdx = recentThemTurns.length - 1; tIdx >= 0; tIdx--) {
+      let turnText = recentThemTurns[tIdx].text;
+      if (
+        tIdx > 0 &&
+        (!/[.?!]["']?$/.test(recentThemTurns[tIdx - 1].text) ||
+          HANGING_CLAUSE_END_REGEX.test(recentThemTurns[tIdx - 1].text) ||
+          /^[a-z]/.test(turnText))
+      ) {
+        turnText = `${recentThemTurns[tIdx - 1].text} ${turnText}`.replace(/\s+/g, " ").trim();
+      }
+      const themSentences = turnText
+        .split(/(?<=[.?!])\s+/)
+        .map((s) => cleanSentence(s))
+        .filter((s) => s.length > 6);
+      const explicitFromThem = extractFromSentences(themSentences, false);
+      if (explicitFromThem) return explicitFromThem;
+
+      const substantiveNonStall = themSentences.filter(
+        (s) =>
+          !isPureBackchannel(s) &&
+          !INTERVIEWER_STALL_FILLER_REGEX.test(s) &&
+          stripFillersForDeltaCheck(s).length >= 25
+      );
+      if (substantiveNonStall.length >= 2) break;
+    }
+
+    // Statement fallback: use newest substantive non-stalling [THEM] turn
+    for (let tIdx = recentThemTurns.length - 1; tIdx >= 0; tIdx--) {
+      const themSentences = recentThemTurns[tIdx].text
+        .split(/(?<=[.?!])\s+/)
+        .map((s) => cleanSentence(s))
+        .filter((s) => s.length > 6 && !INTERVIEWER_STALL_FILLER_REGEX.test(s));
+      const fromThem = extractFromSentences(themSentences, true);
+      if (fromThem) return fromThem;
+    }
     return null;
   }
 
-  // If EVERY turn in this slice is explicitly tagged `[YOU]`, never treat the user's own monologue as a question to answer
+  // PRIORITY 2: Unlabeled OR `[YOU]`-only single-channel transcript.
+  // CRITICAL: When WASAPI captured 0 `[THEM]` turns (e.g., laptop speakers / routing mismatch),
+  // ALL speech (including the interviewer) is tagged `[YOU]`. Never throw away `[YOU]` when
+  // there are ZERO `[THEM]` turns — treat it as single-channel mixed audio!
   const nonYouTurns = turns.filter((t) => t.speaker !== "you" && !isPureBackchannel(t.text));
-  if (nonYouTurns.length === 0) return null;
+  const activeTurns =
+    nonYouTurns.length > 0
+      ? nonYouTurns
+      : turns.filter((t) => !isPureBackchannel(t.text) && !USER_META_SELF_QUESTION_REGEX.test(t.text));
+  if (activeTurns.length === 0) return null;
 
-  // PRIORITY 2: Unlabeled / single-channel transcript (stitched across chunks, skipping `[YOU]` & trailing backchannels)
-  const stitchedText = nonYouTurns.map((t) => t.text).join(" ");
+  const stitchedText = activeTurns.map((t) => t.text).join(" ");
 
   const rawSegments = stitchedText
     .split(/(?<=[.?!])\s+/)
@@ -751,15 +921,14 @@ export function extractRecentTopic(transcript: string): string | null {
 
   const turns = parseConversationTurns(transcript);
   const nonYouTurns = turns.filter((t) => t.speaker !== "you" && !isPureBackchannel(t.text));
-  if (nonYouTurns.length === 0) {
-    // If transcript explicitly only had `[YOU]` turns, return null rather than echoing `[YOU]`'s monologue
-    if (turns.some((t) => t.speaker === "you")) return null;
-  }
+  const substantiveTurns = turns.filter((t) => !isPureBackchannel(t.text));
 
-  const sourceText =
-    nonYouTurns.length > 0
-      ? nonYouTurns.slice(-2).map((t) => t.text).join(" ")
-      : transcript;
+  // Prefer non-`[YOU]` turns when dual-channel `[THEM]` exists; fall back to all substantive turns
+  // when `[THEM]` is absent (so single-channel desktop calls tagged `[YOU]` are never blinded!).
+  const selectedTurns = nonYouTurns.length > 0 ? nonYouTurns : substantiveTurns;
+  if (selectedTurns.length === 0) return null;
+
+  const sourceText = selectedTurns.slice(-2).map((t) => t.text).join(" ");
 
   const lines = sourceText
     .split(/(?<=[.?!])(?:\s+|\n+)|\n+/)
@@ -768,6 +937,88 @@ export function extractRecentTopic(transcript: string): string | null {
 
   if (lines.length === 0) return null;
   return lines.slice(-2).join(" ").trim();
+}
+
+/**
+ * Returns a clean 1-line preview of the latest real heard question or discussion point
+ * for the floating HUD status strip (filters out hallucinations, backchannels, and special tokens).
+ */
+export function getLatestHeardPreview(transcript: string): string | null {
+  if (!transcript || !transcript.trim()) return null;
+  const q = extractLastQuestion(transcript);
+  if (q && q.length >= 8) return q;
+  const topic = extractRecentTopic(transcript);
+  if (topic && topic.length >= 8) return topic;
+  return null;
+}
+
+export interface SelectableTranscriptTurn {
+  id: string;
+  speaker: "them" | "you" | "unknown";
+  timestamp: string;
+  text: string;
+  isQuestion: boolean;
+}
+
+/**
+ * Returns clean, hallucination-filtered, speaker-bleed-deduplicated items from the live
+ * transcript so the user can 1-click pick ANY specific turn or question for Suggest Answer.
+ * Splits multi-question speaker blocks into individual clickable questions while filtering
+ * out pure backchannels and stalling remarks ("Take your time, no rush").
+ */
+export function getSelectableTranscriptTurns(transcript: string, maxTurns = 30): SelectableTranscriptTurn[] {
+  if (!transcript || !transcript.trim()) return [];
+  const turns = parseConversationTurns(transcript);
+  const items: SelectableTranscriptTurn[] = [];
+
+  for (const turn of turns) {
+    const sentences = turn.text
+      .split(/(?<=[.?!])\s+/)
+      .map((s) => cleanSentence(s))
+      .filter((s) => s.length >= 6 && !isPureBackchannel(s) && !INTERVIEWER_STALL_FILLER_REGEX.test(s));
+
+    for (let i = 0; i < sentences.length; i++) {
+      let text = sentences[i];
+      const stripped = text.replace(LEAD_IN_PREFIX_REGEX, "").trim();
+      const isQ =
+        text.includes("?") ||
+        QUESTION_STARTERS_REGEX.test(stripped) ||
+        IMPERATIVE_PROMPT_REGEX.test(stripped);
+
+      // If this sentence is a brief setup statement immediately followed by a short pronoun-dependent question
+      // ("We use Redis Pub/Sub." + "How do you make that resilient?"), keep them together as one coherent card.
+      if (!isQ && i + 1 < sentences.length) {
+        const next = sentences[i + 1];
+        const nextStripped = next.replace(LEAD_IN_PREFIX_REGEX, "").trim();
+        const nextIsQ =
+          next.includes("?") ||
+          QUESTION_STARTERS_REGEX.test(nextStripped) ||
+          IMPERATIVE_PROMPT_REGEX.test(nextStripped);
+        if (nextIsQ && (next.length < 75 || PRONOUN_CONTEXT_NEED_REGEX.test(next)) && text.length <= 180) {
+          text = `${text} ${next}`.trim();
+          i++;
+          items.push({
+            id: `turn-${items.length}-${turn.timestamp || "na"}-${text.length}`,
+            speaker: turn.speaker,
+            timestamp: turn.timestamp,
+            text,
+            isQuestion: true,
+          });
+          continue;
+        }
+      }
+
+      items.push({
+        id: `turn-${items.length}-${turn.timestamp || "na"}-${text.length}`,
+        speaker: turn.speaker,
+        timestamp: turn.timestamp,
+        text,
+        isQuestion: isQ,
+      });
+    }
+  }
+
+  return items.slice(-maxTurns);
 }
 
 export function detectRepeatAsk(
@@ -882,7 +1133,8 @@ Adaptive Visual Delivery:
 - Inspect everything visible in the attached screenshot carefully and adapt your format to what is actually on screen:
   1. **Code / IDE / Terminal / Error / Coding Problem**: State the bug, output, or optimal approach FIRST in **bold**, provide the clean corrected/solution code in a fenced code block, and add 1-2 crisp notes on complexity or edge cases.
   2. **Question / Multiple Choice / Assessment / Form**: State the exact direct answer FIRST in **bold**, followed by a brief 1-2 sentence justification.
-  3. **Slide / Dashboard / Chart / Document / Live Meeting**: State the core takeaway FIRST in **bold**, followed by 2-3 sharp talking points ready to use aloud.
+  3. **Slide / Dashboard / Chart / Document / Live Meeting**: State the core takeaway FIRST in **bold**, followed by 2-3 sharp talking points ready to speak aloud.
+- NEVER output square-bracket placeholders or fill-in-the-blank templates like [your background/education], [Insert University], or [Your Company]. Every word must be immediately speakable aloud as-is.
 - If this is a follow-up or second screen capture, examine what is visibly on screen NOW: if the screen changed, answer the NEW content completely; if it shows the same content, give a clearer, deeper, or different angle rather than repeating your previous answer.
 ${universalProgressionRule}${profileSection}`;
 
@@ -950,6 +1202,7 @@ export function buildEnhancedInterviewPrompt(
   const turnNumber = cleanHistory.filter((h) => h.role === "assistant").length + 1;
   const trimmed = (rawPrompt || "").trim();
   const cleanTranscript = (transcript || "").trim();
+  const selectedTranscriptText = cleanSentence((options.selectedTranscriptText || "").trim());
 
   const delta = splitTranscriptDelta(
     cleanTranscript,
@@ -970,16 +1223,66 @@ export function buildEnhancedInterviewPrompt(
 
   // Detect whether the NEW transcript delta actually contains NEW speech from the OTHER party ([THEM]),
   // rather than ONLY `[YOU]` speaking your own answer aloud or a single-channel first-person reply!
+  // IMPORTANT: Only treat `[YOU]`-only deltas as user monologue when `[THEM]` is actually active in this
+  // session AND the `[YOU]` delta does NOT contain an explicit interviewer question (speaker-bleed rescue!).
+  const allTranscriptTurns = parseConversationTurns(cleanTranscript);
+  const hasAnyThemInTranscript = allTranscriptTurns.some(
+    (t) => t.speaker === "them" && !isPureBackchannel(t.text)
+  );
   const newDeltaTurns = delta.hasMeaningfulDelta ? parseConversationTurns(delta.newTranscript) : [];
+  let rawDeltaQuestion = delta.hasMeaningfulDelta
+    ? extractLastQuestion(delta.newTranscript, priorAnsweredQuestion)
+    : null;
+  // If delta split a question mid-sentence (e.g. fragment starts lowercase or is very short without context),
+  // recover the complete stitched question from cleanTranscript while still excluding priorAnsweredQuestion.
+  if (
+    rawDeltaQuestion &&
+    (/^[a-z]/.test(rawDeltaQuestion) || rawDeltaQuestion.split(/\s+/).length <= 4)
+  ) {
+    const stitchedFullQ = extractLastQuestion(cleanTranscript, priorAnsweredQuestion, lastAssistantText);
+    if (
+      stitchedFullQ &&
+      stitchedFullQ.length > rawDeltaQuestion.length + 6 &&
+      (stitchedFullQ.toLowerCase().includes(rawDeltaQuestion.replace(/[?.!]+$/, "").toLowerCase()) ||
+        jaccardSimilarity(tokenizeContent(stitchedFullQ), tokenizeContent(rawDeltaQuestion)) >= 0.35)
+    ) {
+      rawDeltaQuestion = stitchedFullQ;
+    }
+  }
+  // Cursor-shift rescue: if speaker-bleed deduplication slightly shrunk transcript length right as a new
+  // question arrived after priorAnsweredQuestion, detect that genuinely newer question so it's never treated as a repeat!
+  let rescuedNewQuestionAfterShift: string | null = null;
+  if (!delta.hasMeaningfulDelta && isGeneric && priorAnsweredQuestion && cleanTranscript.length > 0) {
+    const candidateQ = extractLastQuestion(cleanTranscript, priorAnsweredQuestion, lastAssistantText);
+    if (candidateQ) {
+      const simToPrior = jaccardSimilarity(tokenizeContent(candidateQ), tokenizeContent(priorAnsweredQuestion));
+      if (simToPrior < 0.4) {
+        const lowerFull = cleanTranscript.toLowerCase();
+        const priorCore = priorAnsweredQuestion.replace(/[?.!]+$/, "").toLowerCase().slice(-28);
+        const candCore = candidateQ.replace(/[?.!]+$/, "").toLowerCase().slice(-24);
+        const priorPos = priorCore.length >= 8 ? lowerFull.lastIndexOf(priorCore) : -1;
+        const candPos = candCore.length >= 6 ? lowerFull.lastIndexOf(candCore) : -1;
+        if (candPos > priorPos) {
+          rescuedNewQuestionAfterShift = candidateQ;
+        }
+      }
+    }
+  }
+  const deltaHasExplicitInterviewerQuestion = Boolean(
+    rawDeltaQuestion &&
+      !USER_META_SELF_QUESTION_REGEX.test(rawDeltaQuestion) &&
+      !FIRST_PERSON_SELF_REPLY_REGEX.test(rawDeltaQuestion)
+  );
   const deltaIsOnlyYouSpeaking =
     delta.hasMeaningfulDelta &&
+    hasAnyThemInTranscript &&
     newDeltaTurns.length > 0 &&
-    newDeltaTurns.every((t) => t.speaker === "you");
+    newDeltaTurns.every((t) => t.speaker === "you") &&
+    !deltaHasExplicitInterviewerQuestion;
 
   const newQuestion =
-    delta.hasMeaningfulDelta && !deltaIsOnlyYouSpeaking
-      ? extractLastQuestion(delta.newTranscript, priorAnsweredQuestion)
-      : null;
+    (delta.hasMeaningfulDelta && !deltaIsOnlyYouSpeaking ? rawDeltaQuestion : null) ||
+    rescuedNewQuestionAfterShift;
 
   // Single-channel self-reply guard: if Turn 1 already answered a question and the new delta has
   // NO question/prompt AND is a short first-person reply ("I'm actually not licensed, no.")
@@ -1001,7 +1304,8 @@ export function buildEnhancedInterviewPrompt(
   })();
 
   const hasActionableNewDelta =
-    delta.hasMeaningfulDelta && !deltaIsOnlyYouSpeaking && !deltaLooksLikeUserSelfReply;
+    (delta.hasMeaningfulDelta && !deltaIsOnlyYouSpeaking && !deltaLooksLikeUserSelfReply) ||
+    Boolean(rescuedNewQuestionAfterShift);
 
   const effectiveDeltaForRepeat = isGeneric ? hasActionableNewDelta : delta.hasMeaningfulDelta;
 
@@ -1092,7 +1396,7 @@ export function buildEnhancedInterviewPrompt(
     intent = "screen";
     responseMode = isCode ? "code_technical" : "screen_adaptive";
     isTranscriptRelevant = Boolean(cleanTranscript && cleanTranscript.length > 20);
-    recommendedTemperature = isRepeatAsk ? 0.55 : isCode ? 0.2 : 0.3;
+    recommendedTemperature = isCode ? 0.2 : isRepeatAsk ? 0.35 : 0.3;
     extractedQuestion = "Screen Visual Analysis";
 
     const repeatScreenGuidance = isRepeatAsk
@@ -1107,7 +1411,7 @@ export function buildEnhancedInterviewPrompt(
     targetPrompt = `[Screen Visual Analysis Task]: Inspect what is actively displayed in the attached screenshot right now.${customFocus}
 - Dynamically adapt your answer to what is visible:
   * If code, an IDE, terminal error, or coding problem is shown: diagnose or solve it directly with a clean fenced code block and concise explanation.
-  * If a question, quiz, or prompt is shown: state the exact answer FIRST in **bold** with brief reasoning.
+  * If a question, quiz, or prompt is shown: state the exact answer FIRST in **bold** with brief reasoning (NEVER emit [your background] or [Insert ...] bracket placeholders).
   * If slides, charts, docs, or meeting notes are shown: state the key takeaway FIRST in **bold** followed by 2-3 sharp talking points.${repeatScreenGuidance}`;
 
     userMessageContent = `${targetPrompt}${
@@ -1149,11 +1453,45 @@ export function buildEnhancedInterviewPrompt(
   }
   // ------------------------------------------------------------------
   // 4. Generic Live Assist ("Suggest Answer" / "What should I say?")
+  //    (Also handles explicit user-selected transcript turn/excerpt!)
   // ------------------------------------------------------------------
-  else if (isGeneric) {
+  else if (isGeneric || Boolean(selectedTranscriptText)) {
     intent = "suggest";
     isTranscriptRelevant = true;
 
+    if (selectedTranscriptText) {
+      // User EXPLICITLY selected a specific turn or excerpt from the transcript to answer!
+      // Lock 100% onto their selection — never override with auto-extraction or repeat-ask drift.
+      const isSelectedCode =
+        isCodeOrTechnicalPrompt(selectedTranscriptText, cleanHistory) ||
+        TRANSCRIPT_CODE_HINT_REGEX.test(selectedTranscriptText);
+      const asksForSelectedCodeImpl = /\b(write|implement|code|fix|debug|refactor|convert|sql query|function|algorithm)\b/i.test(
+        selectedTranscriptText
+      );
+      extractedQuestion = selectedTranscriptText;
+      responseMode = options.forceFreshAngle
+        ? "fresh_alternative"
+        : isSelectedCode
+          ? "code_technical"
+          : "spoken_teleprompter";
+      recommendedTemperature = options.forceFreshAngle ? 0.65 : isSelectedCode ? 0.25 : 0.35;
+
+      const selectedFormatRule = isSelectedCode
+        ? asksForSelectedCodeImpl
+          ? "This selected prompt asks for code: lead with a crisp 1-2 sentence spoken intuition in **bold** FIRST, followed by clean fenced code and Big-O complexity."
+          : "This is a technical/code question: state the direct answer FIRST in **bold**, followed by 2 concise spoken bullets (and clean code only if helpful)."
+        : "State your direct spoken answer FIRST in **bold** (1 crisp sentence), followed by ONLY 2 concise first-person speaking bullets (STRICT 50–85 words total).";
+
+      targetPrompt = `[User-Selected Transcript Prompt]: The user explicitly selected the exact transcript excerpt below to answer right now.
+- Answer ONLY this exact selected question/point directly in first person ("I...", "My approach...", "We...") so they can speak it immediately.
+- Use the surrounding meeting transcript below ONLY as background context — do NOT drift to an earlier or later question.
+- NEVER use square-bracket placeholders like [Insert X] or [Your Company].
+- ${selectedFormatRule}`;
+
+      userMessageContent = `${targetPrompt}${
+        cleanTranscript ? buildTranscriptBlock(false, true) : ""
+      }\n\n<<< USER-SELECTED TRANSCRIPT QUESTION TO ANSWER RIGHT NOW >>>\n"${selectedTranscriptText}"`;
+    } else {
     const activeSegmentText = hasActionableNewDelta ? delta.newTranscript : cleanTranscript;
     const isLiveCodingPrompt = TRANSCRIPT_CODE_HINT_REGEX.test(activeSegmentText.slice(-1200));
     const asksForNewCodeImplementation = /\b(write|implement|code|fix|debug|refactor|convert|sql query|function|algorithm)\b/i.test(
@@ -1246,6 +1584,7 @@ export function buildEnhancedInterviewPrompt(
 
       userMessageContent = targetPrompt;
     }
+    }
   }
   // ------------------------------------------------------------------
   // 5. Conversational Follow-Up / Refinement / Pivot on Prior Turn
@@ -1313,11 +1652,15 @@ ${hasImage ? "[Attached Screenshot]: An active screenshot is attached — inspec
     systemPrompt,
     userMessageContent,
     extractedQuestion,
-    isRepeatAsk,
+    isRepeatAsk: selectedTranscriptText ? Boolean(options.forceFreshAngle) : isRepeatAsk,
     isFollowUp,
     isCodeRelated: isCode || responseMode === "code_technical",
     isTranscriptRelevant,
-    hasTranscriptDelta: isGeneric ? hasActionableNewDelta : delta.hasMeaningfulDelta,
+    hasTranscriptDelta: selectedTranscriptText
+      ? true
+      : isGeneric
+        ? hasActionableNewDelta
+        : delta.hasMeaningfulDelta,
     recommendedTemperature,
     turnNumber,
   };

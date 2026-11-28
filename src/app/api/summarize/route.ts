@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import Groq from "groq-sdk";
+import {
+  clearOpenRouterKeyCooldown,
+  getOrderedOpenRouterKeys,
+  recordOpenRouterKeyFailure,
+} from "@/lib/openrouter-keys";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -121,47 +126,69 @@ Do NOT include any conversational preamble or markdown code fence blocks. Use cl
     }
 
     if (!completion?.choices?.[0]?.message?.content) {
-      // Try OpenRouter fallback
-      const openRouterKey = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENROUTER_API_KEY;
+      // Try OpenRouter fallback with multi-key rotation
+      const openRouterKeys = getOrderedOpenRouterKeys();
       const openRouterBaseUrl = (process.env.OPENAI_BASE_URL || 'https://openrouter.ai/api/v1').replace(/\/+$/, '');
 
-      if (openRouterKey) {
+      if (openRouterKeys.length > 0) {
         const orModels = [
           "openrouter/free",
           "liquid/lfm-2.5-2.6b:free",
           "nvidia/nemotron-3.5-super-vl:free"
         ];
-        for (const orModel of orModels) {
-          try {
-            const orRes = await fetch(`${openRouterBaseUrl}/chat/completions`, {
-              method: "POST",
-              headers: {
-                "Authorization": `Bearer ${openRouterKey}`,
-                "HTTP-Referer": "https://voiceflow-azure.vercel.app",
-                "X-Title": "Voiceflow Summarizer",
-                "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
-                model: orModel,
-                messages: [
-                  { role: "system", content: systemPrompt },
-                  { role: "user", content: boundedText }
-                ],
-                temperature: 0.2,
-                max_tokens: 1500,
-              }),
-            });
-            if (orRes.ok) {
-              const orData = await orRes.json();
-              const text = orData.choices?.[0]?.message?.content;
-              if (text && text.trim()) {
-                completion = orData;
+        const exhaustedOrKeys = new Set<string>();
+        outerOrSummarize: for (const orModel of orModels) {
+          for (const activeOrKey of openRouterKeys) {
+            if (exhaustedOrKeys.has(activeOrKey)) continue;
+            try {
+              const orRes = await fetch(`${openRouterBaseUrl}/chat/completions`, {
+                method: "POST",
+                headers: {
+                  "Authorization": `Bearer ${activeOrKey}`,
+                  "HTTP-Referer": "https://voiceflow-azure.vercel.app",
+                  "X-Title": "Voiceflow Summarizer",
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                  model: orModel,
+                  messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: boundedText }
+                  ],
+                  temperature: 0.2,
+                  max_tokens: 1500,
+                }),
+              });
+              if (orRes.ok) {
+                clearOpenRouterKeyCooldown(activeOrKey);
+                const orData = await orRes.json();
+                const text = orData.choices?.[0]?.message?.content;
+                if (text && text.trim()) {
+                  completion = orData;
+                  break outerOrSummarize;
+                }
                 break;
+              } else {
+                const errData: any = await orRes.json().catch(() => ({}));
+                const errMsg = errData?.error?.message || `HTTP ${orRes.status}`;
+                const shouldRotate = recordOpenRouterKeyFailure(
+                  activeOrKey,
+                  orRes.status,
+                  errMsg,
+                  orRes.headers.get("retry-after")
+                );
+                after(() => logAIError('openrouter-summarize', orModel, errMsg, orRes.status));
+                if (shouldRotate) {
+                  exhaustedOrKeys.add(activeOrKey);
+                } else {
+                  break;
+                }
               }
+            } catch (orErr: any) {
+              console.warn(`OpenRouter fallback ${orModel} failed in summarize:`, orErr);
+              after(() => logAIError('openrouter-summarize', orModel, orErr?.message || 'Failed', 500));
+              break;
             }
-          } catch (orErr: any) {
-            console.warn(`OpenRouter fallback ${orModel} failed in summarize:`, orErr);
-            after(() => logAIError('openrouter-summarize', orModel, orErr?.message || 'Failed', 500));
           }
         }
       }

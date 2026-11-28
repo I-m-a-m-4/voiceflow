@@ -4,6 +4,11 @@ import {
   sanitizeConversationHistory,
   tokenizeContent,
 } from "@/lib/transcript-context";
+import {
+  clearOpenRouterKeyCooldown,
+  getOrderedOpenRouterKeys,
+  recordOpenRouterKeyFailure,
+} from "@/lib/openrouter-keys";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -41,6 +46,7 @@ export async function POST(req: NextRequest) {
       lastTranscriptTail,
       lastAnsweredQuestion,
       forceFreshAngle,
+      selectedTranscriptText,
     } = body;
 
     if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
@@ -65,6 +71,10 @@ export async function POST(req: NextRequest) {
       typeof lastAnsweredQuestion === "string" && lastAnsweredQuestion.trim()
         ? lastAnsweredQuestion.trim()
         : undefined;
+    const cleanSelectedTranscriptText =
+      typeof selectedTranscriptText === "string" && selectedTranscriptText.trim()
+        ? selectedTranscriptText.trim().slice(0, 1200)
+        : undefined;
 
     const promptCtx = buildEnhancedInterviewPrompt(prompt, rawTranscript, {
       history: cleanHistory,
@@ -72,6 +82,7 @@ export async function POST(req: NextRequest) {
       previousTranscriptLength: prevTranscriptLen,
       previousTranscriptTail: prevTranscriptTail,
       previousAnsweredQuestion: prevAnsweredQuestion,
+      selectedTranscriptText: cleanSelectedTranscriptText,
       customContext: cleanCustomContext,
       forceFreshAngle: Boolean(forceFreshAngle),
     });
@@ -85,7 +96,7 @@ export async function POST(req: NextRequest) {
       extractedQuestion: promptCtx.extractedQuestion || undefined,
     };
 
-    const openRouterKey = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
+    const openRouterKeys = getOrderedOpenRouterKeys();
     const openRouterBaseUrl = (process.env.OPENAI_BASE_URL || "https://openrouter.ai/api/v1").replace(/\/+$/, "");
     const openRouterModel = process.env.OPENAI_MODEL;
     const groqKey = process.env.GROQ_API_KEY;
@@ -94,7 +105,7 @@ export async function POST(req: NextRequest) {
     // PATH 1: VISION (when screenshot is attached)
     // ------------------------------------------------------------------
     if (hasImage) {
-      if (!openRouterKey) {
+      if (openRouterKeys.length === 0) {
         return NextResponse.json(
           { error: "Vision provider API key is not configured on the server.", code: "VISION_CONFIG_MISSING", retryable: false },
           { status: 503, headers: CORS_HEADERS }
@@ -126,72 +137,93 @@ export async function POST(req: NextRequest) {
       ];
 
       let lastVisionError = "Vision models timed out or were busy.";
+      const exhaustedVisionKeys = new Set<string>();
 
       for (const model of visionModels) {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 14000);
-        try {
-          const orRes = await fetch(`${openRouterBaseUrl}/chat/completions`, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${openRouterKey}`,
-              "HTTP-Referer": "https://voiceflow-azure.vercel.app",
-              "X-Title": "Voiceflow Co-Pilot",
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              model,
-              messages: visionMessages,
-              temperature: promptCtx.recommendedTemperature,
-              max_tokens: 1800,
-              stream: Boolean(wantStream),
-            }),
-            signal: controller.signal,
-          });
-          clearTimeout(timeoutId);
-
-          if (orRes.ok) {
-            if (wantStream && orRes.body) {
-              after(() => recordUsage("openrouter", model));
-              return createSSEResponseFromUpstream(
-                orRes,
-                "openrouter",
+        for (const activeOrKey of openRouterKeys) {
+          if (exhaustedVisionKeys.has(activeOrKey)) continue;
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 14000);
+          try {
+            const orRes = await fetch(`${openRouterBaseUrl}/chat/completions`, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${activeOrKey}`,
+                "HTTP-Referer": "https://voiceflow-azure.vercel.app",
+                "X-Title": "Voiceflow Co-Pilot",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
                 model,
-                responseMeta,
-                prevAssistantReply,
-                requestStartedAt,
-                promptCtx.isTranscriptRelevant
-              );
-            }
-            const orData = await orRes.json();
-            const rawMsg = orData.choices?.[0]?.message;
-            // Never dump internal `reasoning` chain-of-thought as the user's answer
-            const text = stripThinkTags(rawMsg?.content || "").trim();
-            if (text && !text.includes("User Safety: safe")) {
-              const drift = evaluateContextDrift(text, prevAssistantReply, Date.now() - requestStartedAt, promptCtx.isRepeatAsk);
-              after(() => {
-                void recordUsage("openrouter", model);
-                void recordContextTelemetry({
-                  ...responseMeta,
-                  isTranscriptRelevant: promptCtx.isTranscriptRelevant,
-                  provider: "openrouter",
+                messages: visionMessages,
+                temperature: promptCtx.recommendedTemperature,
+                max_tokens: 1800,
+                stream: Boolean(wantStream),
+              }),
+              signal: controller.signal,
+            });
+            clearTimeout(timeoutId);
+
+            if (orRes.ok) {
+              clearOpenRouterKeyCooldown(activeOrKey);
+              if (wantStream && orRes.body) {
+                after(() => recordUsage("openrouter", model));
+                return createSSEResponseFromUpstream(
+                  orRes,
+                  "openrouter",
                   model,
-                  latencyMs: Date.now() - requestStartedAt,
-                  responseChars: text.length,
-                  ...drift,
+                  responseMeta,
+                  prevAssistantReply,
+                  requestStartedAt,
+                  promptCtx.isTranscriptRelevant
+                );
+              }
+              const orData = await orRes.json();
+              const rawMsg = orData.choices?.[0]?.message;
+              // Never dump internal `reasoning` chain-of-thought as the user's answer
+              const text = stripThinkTags(rawMsg?.content || "").trim();
+              if (text && !text.includes("User Safety: safe")) {
+                const drift = evaluateContextDrift(text, prevAssistantReply, Date.now() - requestStartedAt, promptCtx.isRepeatAsk);
+                after(() => {
+                  void recordUsage("openrouter", model);
+                  void recordContextTelemetry({
+                    ...responseMeta,
+                    isTranscriptRelevant: promptCtx.isTranscriptRelevant,
+                    provider: "openrouter",
+                    model,
+                    latencyMs: Date.now() - requestStartedAt,
+                    responseChars: text.length,
+                    ...drift,
+                  });
                 });
-              });
-              return NextResponse.json({ text, provider: "openrouter", model, ...responseMeta, ...drift }, { headers: CORS_HEADERS });
+                return NextResponse.json({ text, provider: "openrouter", model, ...responseMeta, ...drift }, { headers: CORS_HEADERS });
+              }
+              // Model returned empty/refusal on a healthy key -> try next model
+              break;
+            } else {
+              const errData: any = await orRes.json().catch(() => ({}));
+              lastVisionError = errData?.error?.message || errData?.message || `HTTP ${orRes.status}`;
+              const shouldRotateKey = recordOpenRouterKeyFailure(
+                activeOrKey,
+                orRes.status,
+                lastVisionError,
+                orRes.headers.get("retry-after")
+              );
+              after(() => logAIError("openrouter-vision", model, lastVisionError, orRes.status));
+              // If this was a key quota/auth error (429/402/401), immediately rotate to the next OpenRouter key on the SAME model!
+              // Otherwise (e.g., 404/503 model issue), move on to the next model.
+              if (shouldRotateKey) {
+                exhaustedVisionKeys.add(activeOrKey);
+              } else {
+                break;
+              }
             }
-          } else {
-            const errData: any = await orRes.json().catch(() => ({}));
-            lastVisionError = errData?.error?.message || errData?.message || `HTTP ${orRes.status}`;
-            after(() => logAIError("openrouter-vision", model, lastVisionError, orRes.status));
+          } catch (mErr: any) {
+            clearTimeout(timeoutId);
+            lastVisionError = mErr?.name === "AbortError" ? "Vision model timed out" : (mErr?.message || "Vision error");
+            after(() => logAIError("openrouter-vision", model, lastVisionError, 504));
+            break;
           }
-        } catch (mErr: any) {
-          clearTimeout(timeoutId);
-          lastVisionError = mErr?.name === "AbortError" ? "Vision model timed out" : (mErr?.message || "Vision error");
-          after(() => logAIError("openrouter-vision", model, lastVisionError, 504));
         }
       }
 
@@ -218,17 +250,19 @@ export async function POST(req: NextRequest) {
           previousTranscriptLength: prevTranscriptLen,
           previousTranscriptTail: prevTranscriptTail,
           previousAnsweredQuestion: prevAnsweredQuestion,
+          selectedTranscriptText: cleanSelectedTranscriptText,
           customContext: cleanCustomContext,
           forceFreshAngle: Boolean(forceFreshAngle),
         })
       : promptCtx;
 
-    // Keep live spoken teleprompter answers fast & punchy (~55–95 words) while leaving full budget for code/analysis
+    // Keep live spoken teleprompter answers fast & punchy (~55–95 words via prompt) while giving
+    // thinking models (e.g. qwen3.8-27b) enough token headroom for internal <think> so visible answers NEVER truncate mid-sentence!
     const textMaxTokens =
       !textCtx.isCodeRelated &&
       (textCtx.responseMode === "spoken_teleprompter" || textCtx.responseMode === "fresh_alternative")
-        ? 500
-        : 1800;
+        ? 1200
+        : 2048;
 
     const textMeta = {
       intent: textCtx.intent,
@@ -322,77 +356,95 @@ export async function POST(req: NextRequest) {
     }
 
     // ------------------------------------------------------------------
-    // PATH 3: OPENROUTER TEXT FALLBACK
+    // PATH 3: OPENROUTER TEXT FALLBACK (with multi-key rotation)
     // ------------------------------------------------------------------
-    if (openRouterKey) {
+    if (openRouterKeys.length > 0) {
       const textModels = ["openrouter/free", "liquid/lfm-2.5-2.6b:free"];
       if (openRouterModel && !textModels.includes(openRouterModel) && openRouterModel !== "openrouter/free") {
         textModels.unshift(openRouterModel);
       }
 
+      const exhaustedTextKeys = new Set<string>();
       for (const model of textModels) {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 9000);
-        try {
-          const orRes = await fetch(`${openRouterBaseUrl}/chat/completions`, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${openRouterKey}`,
-              "HTTP-Referer": "https://voiceflow-azure.vercel.app",
-              "X-Title": "Voiceflow Co-Pilot",
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              model,
-              messages: textMessages,
-              temperature: textCtx.recommendedTemperature,
-              max_tokens: textMaxTokens,
-              stream: Boolean(wantStream),
-            }),
-            signal: controller.signal,
-          });
-          clearTimeout(timeoutId);
-
-          if (orRes.ok) {
-            if (wantStream && orRes.body) {
-              after(() => recordUsage("openrouter", model));
-              return createSSEResponseFromUpstream(
-                orRes,
-                "openrouter",
+        for (const activeOrKey of openRouterKeys) {
+          if (exhaustedTextKeys.has(activeOrKey)) continue;
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 9000);
+          try {
+            const orRes = await fetch(`${openRouterBaseUrl}/chat/completions`, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${activeOrKey}`,
+                "HTTP-Referer": "https://voiceflow-azure.vercel.app",
+                "X-Title": "Voiceflow Co-Pilot",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
                 model,
-                textMeta,
-                prevAssistantReply,
-                requestStartedAt,
-                textCtx.isTranscriptRelevant
-              );
-            }
-            const orData = await orRes.json();
-            const answer = stripThinkTags(orData.choices?.[0]?.message?.content || "").trim();
-            if (answer && !answer.includes("User Safety: safe")) {
-              const drift = evaluateContextDrift(answer, prevAssistantReply, Date.now() - requestStartedAt, textCtx.isRepeatAsk);
-              after(() => {
-                void recordUsage("openrouter", model);
-                void recordContextTelemetry({
-                  ...textMeta,
-                  isTranscriptRelevant: textCtx.isTranscriptRelevant,
-                  provider: "openrouter",
+                messages: textMessages,
+                temperature: textCtx.recommendedTemperature,
+                max_tokens: textMaxTokens,
+                stream: Boolean(wantStream),
+              }),
+              signal: controller.signal,
+            });
+            clearTimeout(timeoutId);
+
+            if (orRes.ok) {
+              clearOpenRouterKeyCooldown(activeOrKey);
+              if (wantStream && orRes.body) {
+                after(() => recordUsage("openrouter", model));
+                return createSSEResponseFromUpstream(
+                  orRes,
+                  "openrouter",
                   model,
-                  latencyMs: Date.now() - requestStartedAt,
-                  responseChars: answer.length,
-                  ...drift,
+                  textMeta,
+                  prevAssistantReply,
+                  requestStartedAt,
+                  textCtx.isTranscriptRelevant
+                );
+              }
+              const orData = await orRes.json();
+              const answer = stripThinkTags(orData.choices?.[0]?.message?.content || "").trim();
+              if (answer && !answer.includes("User Safety: safe")) {
+                const drift = evaluateContextDrift(answer, prevAssistantReply, Date.now() - requestStartedAt, textCtx.isRepeatAsk);
+                after(() => {
+                  void recordUsage("openrouter", model);
+                  void recordContextTelemetry({
+                    ...textMeta,
+                    isTranscriptRelevant: textCtx.isTranscriptRelevant,
+                    provider: "openrouter",
+                    model,
+                    latencyMs: Date.now() - requestStartedAt,
+                    responseChars: answer.length,
+                    ...drift,
+                  });
                 });
-              });
-              return NextResponse.json({ text: answer, provider: "openrouter", model, ...textMeta, ...drift }, { headers: CORS_HEADERS });
+                return NextResponse.json({ text: answer, provider: "openrouter", model, ...textMeta, ...drift }, { headers: CORS_HEADERS });
+              }
+              break;
+            } else {
+              const errData: any = await orRes.json().catch(() => ({}));
+              lastTextError = errData?.error?.message || errData?.message || `HTTP ${orRes.status}`;
+              const shouldRotateKey = recordOpenRouterKeyFailure(
+                activeOrKey,
+                orRes.status,
+                lastTextError,
+                orRes.headers.get("retry-after")
+              );
+              after(() => logAIError("openrouter-text", model, lastTextError, orRes.status));
+              if (shouldRotateKey) {
+                exhaustedTextKeys.add(activeOrKey);
+              } else {
+                break;
+              }
             }
-          } else {
-            const errData: any = await orRes.json().catch(() => ({}));
-            lastTextError = errData?.error?.message || errData?.message || `HTTP ${orRes.status}`;
-            after(() => logAIError("openrouter-text", model, lastTextError, orRes.status));
+          } catch (orTextErr: any) {
+            clearTimeout(timeoutId);
+            lastTextError = orTextErr?.name === "AbortError" ? "Timed out" : (orTextErr?.message || "Failed");
+            after(() => logAIError("openrouter-text", model, lastTextError, 504));
+            break;
           }
-        } catch (orTextErr: any) {
-          clearTimeout(timeoutId);
-          lastTextError = orTextErr?.name === "AbortError" ? "Timed out" : (orTextErr?.message || "Failed");
-          after(() => logAIError("openrouter-text", model, lastTextError, 504));
         }
       }
     }
